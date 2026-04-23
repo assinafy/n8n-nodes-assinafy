@@ -1,6 +1,6 @@
 {
-	"name": "n8n-nodes-assinafy",
-	"version": "0.1.0",
+	"name": "@assinafy/n8n-nodes-assinafy",
+	"version": "1.0.0",
 	"description": "n8n community nodes for the Assinafy electronic-signature API (documents, signers, assignments, webhooks).",
 	"license": "MIT",
 	"homepage": "https://github.com/assinafy/n8n-nodes-assinafy",
@@ -19,6 +19,10 @@
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/assinafy/n8n-nodes-assinafy.git"
+	},
+	"publishConfig": {
+		"registry": "https://npm.pkg.github.com",
+		"access": "public"
 	},
 	"scripts": {
 		"build": "n8n-node build",

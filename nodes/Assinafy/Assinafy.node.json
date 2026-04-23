@@ -1,7 +1,7 @@
 {
-	"node": "n8n-nodes-assinafy.assinafy",
-	"nodeVersion": "1.0",
-	"codexVersion": "1.0",
+	"node": "@assinafy/n8n-nodes-assinafy.assinafy",
+	"nodeVersion": "1.0.0",
+	"codexVersion": "1.0.0",
 	"categories": ["Productivity", "Miscellaneous"],
 	"resources": {
 		"credentialDocumentation": [

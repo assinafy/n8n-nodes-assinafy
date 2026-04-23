@@ -1,12 +1,14 @@
 # Changelog
 
-All notable changes to `n8n-nodes-assinafy` will be documented here.
+All notable changes to `@assinafy/n8n-nodes-assinafy` will be documented here.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.0] — Unreleased
+## [1.0.0] — Unreleased
 
 Initial release. Mirrors the surface of the official Assinafy Node and PHP SDKs
-and the public REST API at https://api.assinafy.com.br/v1/docs.
+and the public REST API at https://api.assinafy.com.br/v1/docs. Published to the
+GitHub Packages npm registry (`https://npm.pkg.github.com`) under the
+`@assinafy` scope.
 
 ### Changed
 

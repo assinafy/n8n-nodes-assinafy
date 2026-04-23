@@ -1,4 +1,4 @@
-# n8n-nodes-assinafy
+# @assinafy/n8n-nodes-assinafy
 
 Community n8n nodes for [Assinafy](https://assinafy.com.br), the Brazilian electronic-signature platform. This package exposes the public [Assinafy REST API](https://api.assinafy.com.br/v1/docs) (v1) as first-class n8n nodes, mirroring the surface of the official Node and PHP SDKs.
 
@@ -10,13 +10,37 @@ This package ships:
 
 ## Installation
 
-In your n8n instance, open **Settings → Community Nodes** and install `n8n-nodes-assinafy`.
+This package is published to the **GitHub Packages npm registry** (not npmjs.com). Because GitHub Packages scopes every package to the repository owner, the npm name is `@assinafy/n8n-nodes-assinafy`.
 
-Or, for self-hosted n8n:
+### Self-hosted n8n
 
-```bash
-npm install n8n-nodes-assinafy
-```
+1. Create a GitHub Personal Access Token (classic) with the `read:packages` scope at https://github.com/settings/tokens. (A fine-grained PAT with “Packages: read” on the `assinafy` org also works.)
+
+2. Configure npm to resolve the `@assinafy` scope from GitHub Packages and to authenticate with your token. Add to your user `~/.npmrc` (or to an `.npmrc` at your n8n project root):
+
+    ```ini
+    @assinafy:registry=https://npm.pkg.github.com
+    //npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}
+    ```
+
+    Export the token in your shell (or a managed secret) before running npm:
+
+    ```bash
+    export GITHUB_TOKEN=ghp_xxxxxxxxxxxx
+    ```
+
+3. Install the package:
+
+    ```bash
+    npm install @assinafy/n8n-nodes-assinafy
+    ```
+
+    If you're using the n8n UI's **Settings → Community Nodes** installer, enter `@assinafy/n8n-nodes-assinafy` as the package name. The installer reads the `.npmrc` configured for the container running n8n — you must provide the token to that container (see the [n8n community-nodes install docs](https://docs.n8n.io/integrations/community-nodes/installation/) and the [GitHub Packages npm guide](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-npm-registry)).
+
+### n8n Cloud
+
+> [!NOTE]
+> n8n Cloud's community-nodes catalog is fed from **npmjs.com**, so packages published only to GitHub Packages are not auto-discoverable there. If you need n8n Cloud support, ask the Assinafy team to mirror releases to npmjs.com, or fork and publish under your own npmjs.com namespace.
 
 Requires n8n ≥ 1.0. Compatible with the `@n8n/node-cli` build toolchain.
 
