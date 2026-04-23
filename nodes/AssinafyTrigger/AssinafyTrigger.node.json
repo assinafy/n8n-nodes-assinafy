@@ -1,0 +1,18 @@
+{
+	"node": "n8n-nodes-assinafy.assinafyTrigger",
+	"nodeVersion": "1.0",
+	"codexVersion": "1.0",
+	"categories": ["Productivity", "Miscellaneous"],
+	"resources": {
+		"credentialDocumentation": [
+			{
+				"url": "https://api.assinafy.com.br/v1/docs"
+			}
+		],
+		"primaryDocumentation": [
+			{
+				"url": "https://api.assinafy.com.br/v1/docs"
+			}
+		]
+	}
+}
