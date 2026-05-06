@@ -37,6 +37,11 @@ export const documentDescription: INodeProperties[] = [
 		displayOptions: { show: { resource: ['document'] } },
 		default: 'upload',
 		options: [
+			{
+				name: 'Create From Template',
+				value: 'createFromTemplate',
+				action: 'Create a document from a template',
+			},
 			{ name: 'Delete', value: 'delete', action: 'Delete a document' },
 			{
 				name: 'Download Artifact',
@@ -53,6 +58,11 @@ export const documentDescription: INodeProperties[] = [
 				value: 'downloadThumbnail',
 				action: 'Download the document thumbnail',
 			},
+			{
+				name: 'Estimate Cost From Template',
+				value: 'estimateCostFromTemplate',
+				action: 'Estimate credit cost of creating a document from a template',
+			},
 			{ name: 'Get', value: 'get', action: 'Get a document' },
 			{
 				name: 'Get Activities',
@@ -66,6 +76,7 @@ export const documentDescription: INodeProperties[] = [
 			},
 			{ name: 'List', value: 'list', action: 'List workspace documents' },
 			{ name: 'Upload', value: 'upload', action: 'Upload a new document' },
+			{ name: 'Verify', value: 'verify', action: 'Verify a document by its signature hash' },
 			{
 				name: 'Wait Until Ready',
 				value: 'waitUntilReady',
@@ -149,6 +160,18 @@ export const documentDescription: INodeProperties[] = [
 					{ name: 'Uploading', value: 'uploading' },
 				],
 			},
+			{
+				displayName: 'Signature Method',
+				name: 'method',
+				type: 'options',
+				default: '',
+				description: 'Filter by assignment method',
+				options: [
+					{ name: 'Any', value: '' },
+					{ name: 'Virtual', value: 'virtual' },
+					{ name: 'Collect', value: 'collect' },
+				],
+			},
 			{ ...sortField },
 		],
 	},
@@ -168,6 +191,125 @@ export const documentDescription: INodeProperties[] = [
 				'waitUntilReady',
 			]),
 		},
+	},
+
+	// --- createFromTemplate / estimateCostFromTemplate ---
+	{
+		displayName: 'Template ID',
+		name: 'templateId',
+		type: 'string',
+		default: '',
+		required: true,
+		description: 'ID of the template to use (from Template > List)',
+		displayOptions: { show: showOnly(['createFromTemplate', 'estimateCostFromTemplate']) },
+	},
+	{
+		displayName: 'Signers',
+		name: 'templateSigners',
+		placeholder: 'Add Signer',
+		type: 'fixedCollection',
+		typeOptions: { multipleValues: true },
+		default: {},
+		required: true,
+		description:
+			'One entry per template role. Use Template &gt; Get to retrieve role IDs and signer IDs.',
+		displayOptions: { show: showOnly(['createFromTemplate', 'estimateCostFromTemplate']) },
+		options: [
+			{
+				displayName: 'Signer',
+				name: 'signer',
+				values: [
+					{
+						displayName: 'Role ID',
+						name: 'role_id',
+						type: 'string',
+						default: '',
+						required: true,
+						description: 'Template role ID this signer is assigned to',
+					},
+					{
+						displayName: 'Signer ID',
+						name: 'id',
+						type: 'string',
+						default: '',
+						description:
+							'Existing signer ID. Can be omitted for Estimate Cost.',
+					},
+					{
+						displayName: 'Verification Method',
+						name: 'verification_method',
+						type: 'options',
+						default: 'Email',
+						options: [
+							{ name: 'Email', value: 'Email' },
+							{ name: 'WhatsApp', value: 'Whatsapp' },
+						],
+					},
+					{
+						displayName: 'Notification Methods',
+						name: 'notification_methods',
+						type: 'multiOptions',
+						default: ['Email'],
+						options: [
+							{ name: 'Email', value: 'Email' },
+							{ name: 'WhatsApp', value: 'Whatsapp' },
+						],
+					},
+				],
+			},
+		],
+	},
+	{
+		displayName: 'Additional Fields',
+		name: 'additionalFields',
+		type: 'collection',
+		placeholder: 'Add Field',
+		default: {},
+		displayOptions: { show: showOnly(['createFromTemplate']) },
+		options: [
+			{
+				displayName: 'Document Name',
+				name: 'name',
+				type: 'string',
+				default: '',
+				description: 'Override the default document name set on the template',
+			},
+			{
+				displayName: 'Message',
+				name: 'message',
+				type: 'string',
+				typeOptions: { rows: 3 },
+				default: '',
+				description: 'Message to include in the signing invitation',
+			},
+			{
+				displayName: 'Expires At',
+				name: 'expires_at',
+				type: 'dateTime',
+				default: '',
+				description: 'ISO 8601 expiration date for the assignment',
+			},
+			{
+				displayName: 'Editor Fields (JSON)',
+				name: 'editor_fields',
+				type: 'json',
+				default: '[]',
+				description:
+					'Array of editor field values: [{ "field_id": "...", "value": "..." }]',
+			},
+		],
+	},
+
+	// --- verify ---
+	{
+		displayName: 'Signature Hash',
+		name: 'signatureHash',
+		type: 'string',
+		default: '',
+		required: true,
+		description:
+			'The signature hash from the signed document (used to verify its authenticity)',
+		displayOptions: { show: showOnly(['verify']) },
 	},
 
 	// --- download ---
@@ -253,6 +395,12 @@ export async function executeDocument(
 			return wrap(await getSigningProgress.call(this, itemIndex));
 		case 'waitUntilReady':
 			return wrap(await waitUntilReady.call(this, itemIndex));
+		case 'createFromTemplate':
+			return wrap(await createFromTemplate.call(this, itemIndex));
+		case 'estimateCostFromTemplate':
+			return wrap(await estimateCostFromTemplate.call(this, itemIndex));
+		case 'verify':
+			return wrap(await verifyDocument.call(this, itemIndex));
 		default:
 			throw new NodeOperationError(
 				this.getNode(),
@@ -321,7 +469,6 @@ async function uploadDocument(
 		method: 'POST',
 		path: `/accounts/${accountId}/documents`,
 		body: form,
-		headers: { 'Content-Type': 'multipart/form-data' },
 	});
 
 	return { json: response };
@@ -519,6 +666,109 @@ function extractDocumentId(this: IExecuteFunctions, itemIndex: number): string {
 		throw new NodeOperationError(this.getNode(), 'Document ID is required', { itemIndex });
 	}
 	return id;
+}
+
+async function createFromTemplate(
+	this: IExecuteFunctions,
+	itemIndex: number,
+): Promise<IDataObject> {
+	const accountId = await getAccountId(this);
+	const templateId = this.getNodeParameter('templateId', itemIndex) as string;
+	if (!templateId) {
+		throw new NodeOperationError(this.getNode(), 'Template ID is required', { itemIndex });
+	}
+	const additional = this.getNodeParameter('additionalFields', itemIndex, {}) as IDataObject;
+	const signersRaw = (
+		this.getNodeParameter('templateSigners', itemIndex, {}) as { signer?: IDataObject[] }
+	).signer ?? [];
+
+	if (signersRaw.length === 0) {
+		throw new NodeOperationError(
+			this.getNode(),
+			'At least one signer is required to create a document from a template',
+			{ itemIndex },
+		);
+	}
+
+	const body: IDataObject = {
+		signers: signersRaw.map((s) => {
+			const entry: IDataObject = { role_id: s.role_id };
+			if (s.id) entry.id = s.id;
+			if (s.verification_method) entry.verification_method = s.verification_method;
+			if (Array.isArray(s.notification_methods) && (s.notification_methods as unknown[]).length > 0) {
+				entry.notification_methods = s.notification_methods;
+			}
+			return entry;
+		}),
+	};
+
+	if (additional.name) body.name = additional.name;
+	if (additional.message) body.message = additional.message;
+	if (additional.expires_at) body.expires_at = additional.expires_at;
+	if (additional.editor_fields && (additional.editor_fields as string) !== '[]') {
+		const raw = additional.editor_fields as string;
+		try {
+			body.editor_fields = typeof raw === 'string' ? JSON.parse(raw) : raw;
+		} catch {
+			throw new NodeOperationError(
+				this.getNode(),
+				'Editor Fields must be a valid JSON array',
+				{ itemIndex },
+			);
+		}
+	}
+
+	return assinafyApiRequest<IDataObject>(this, {
+		method: 'POST',
+		path: `/accounts/${accountId}/templates/${templateId}/documents`,
+		body,
+	});
+}
+
+async function estimateCostFromTemplate(
+	this: IExecuteFunctions,
+	itemIndex: number,
+): Promise<IDataObject> {
+	const accountId = await getAccountId(this);
+	const templateId = this.getNodeParameter('templateId', itemIndex) as string;
+	if (!templateId) {
+		throw new NodeOperationError(this.getNode(), 'Template ID is required', { itemIndex });
+	}
+	const signersRaw = (
+		this.getNodeParameter('templateSigners', itemIndex, {}) as { signer?: IDataObject[] }
+	).signer ?? [];
+
+	const body: IDataObject = {
+		signers: signersRaw.map((s) => {
+			const entry: IDataObject = { role_id: s.role_id };
+			if (s.id) entry.id = s.id;
+			if (s.verification_method) entry.verification_method = s.verification_method;
+			if (Array.isArray(s.notification_methods) && (s.notification_methods as unknown[]).length > 0) {
+				entry.notification_methods = s.notification_methods;
+			}
+			return entry;
+		}),
+	};
+
+	return assinafyApiRequest<IDataObject>(this, {
+		method: 'POST',
+		path: `/accounts/${accountId}/templates/${templateId}/documents/estimate-cost`,
+		body,
+	});
+}
+
+async function verifyDocument(
+	this: IExecuteFunctions,
+	itemIndex: number,
+): Promise<IDataObject> {
+	const hash = (this.getNodeParameter('signatureHash', itemIndex) as string).trim();
+	if (!hash) {
+		throw new NodeOperationError(this.getNode(), 'Signature Hash is required', { itemIndex });
+	}
+	return assinafyApiRequest<IDataObject>(this, {
+		method: 'GET',
+		path: `/documents/${hash}/verify`,
+	});
 }
 
 function cleanQs(filters: IDataObject): IDataObject {

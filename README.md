@@ -1,10 +1,10 @@
 # @assinafy/n8n-nodes-assinafy
 
-Community n8n nodes for [Assinafy](https://assinafy.com.br), the Brazilian electronic-signature platform. This package exposes the public [Assinafy REST API](https://api.assinafy.com.br/v1/docs) (v1) as first-class n8n nodes, mirroring the surface of the official Node and PHP SDKs.
+Community n8n nodes for [Assinafy](https://assinafy.com.br), the Brazilian electronic-signature platform. This package exposes the public [Assinafy REST API](https://api.assinafy.com.br/v1/docs) (v1) as first-class n8n nodes, mirroring the surface of the official PHP SDK.
 
 This package ships:
 
-- **Assinafy** — an action node with operations across `document`, `signer`, `assignment`, `workspace`, and `webhook` resources.
+- **Assinafy** — an action node with operations across `document`, `signer`, `assignment`, `template`, `workspace`, and `webhook` resources.
 - **Assinafy Trigger** — a webhook trigger that subscribes your workflow to Assinafy events and verifies the HMAC-SHA256 signature on each delivery.
 - **Assinafy API** — a shared credential (X-Api-Key + account ID, with production/sandbox/custom base URLs).
 
@@ -74,8 +74,11 @@ The credential test calls `GET /accounts/{accountId}` to confirm the key and acc
 | Get Activities | `GET /documents/{id}/activities` |
 | Get Signing Progress | derived from `GET /documents/{id}` |
 | Wait Until Ready | polls `GET /documents/{id}` until status is `metadata_ready`, `pending_signature`, or `certificated` |
+| Create From Template | `POST /accounts/{accountId}/templates/{templateId}/documents` |
+| Estimate Cost From Template | `POST /accounts/{accountId}/templates/{templateId}/documents/estimate-cost` |
+| Verify | `GET /documents/{hash}/verify` — public; verifies a certificated document by its signature hash |
 
-Uploads accept a binary property from the previous node (must be a non-empty PDF up to 25MB). Downloaded artifacts are attached back to the output item as binary data.
+Uploads accept a binary property from the previous node (must be a non-empty PDF up to 25 MB). Downloaded artifacts are attached back to the output item as binary data. The List operation supports filtering by `status`, `method` (`virtual` / `collect`), and a `search` term.
 
 ### Resource: Signer
 
@@ -100,6 +103,15 @@ Uploads accept a binary property from the previous node (must be a non-empty PDF
 | Cancel Signature Request | `POST /accounts/{accountId}/signature-requests/{documentId}/cancel` |
 
 The `method` can be `virtual` (remote signature via email or WhatsApp) or `collect` (field-placed signatures on the document). Each signer entry accepts an optional `verification_method` (`Email` / `Whatsapp`) and `notification_methods`. For `collect`, the node now exposes the SDK-compatible `entries` JSON payload. `copy_receivers` are signer IDs, not email addresses.
+
+### Resource: Template
+
+| Operation | Endpoint |
+| --- | --- |
+| List | `GET /accounts/{accountId}/templates` — filters: `search`, `status`, `sort` |
+| Get | `GET /accounts/{accountId}/templates/{templateId}` |
+
+Templates are read-only resources created through the Assinafy web app. Use **List** and **Get** to retrieve roles and field placements needed for Create From Template documents.
 
 ### Resource: Workspace
 
@@ -154,7 +166,7 @@ npm run lint      # n8n-node lint
 npm run build     # compiles TypeScript into dist/
 ```
 
-The codebase is intentionally small: one credential, one action node with five resources (each in its own file under `nodes/Assinafy/resources/`), and one trigger. The `nodes/Assinafy/shared/transport.ts` helper wraps `httpRequestWithAuthentication` and unwraps the `{ status, message, data }` envelope returned by the API.
+The codebase is intentionally small: one credential, one action node with six resources (each in its own file under `nodes/Assinafy/resources/`), and one trigger. The `nodes/Assinafy/shared/transport.ts` helper wraps `httpRequestWithAuthentication` and unwraps the `{ status, message, data }` envelope returned by the API. List-search methods under `nodes/Assinafy/listSearch/` back the resource-locator pickers for documents, signers, and templates.
 
 ## Releasing
 

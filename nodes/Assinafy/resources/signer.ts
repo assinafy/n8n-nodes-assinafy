@@ -63,9 +63,19 @@ export const signerDescription: INodeProperties[] = [
 		type: 'string',
 		placeholder: 'name@example.com',
 		default: '',
+		description:
+			'Signer email address. Optional when using WhatsApp-only verification/notification. At least one of Email or WhatsApp Phone Number must be provided.',
+		displayOptions: { show: showOnly(['create']) },
+	},
+	{
+		displayName: 'Email',
+		name: 'email',
+		type: 'string',
+		placeholder: 'name@example.com',
+		default: '',
 		required: true,
-		description: 'Signer email address',
-		displayOptions: { show: showOnly(['create', 'findByEmail']) },
+		description: 'Email address to search for',
+		displayOptions: { show: showOnly(['findByEmail']) },
 	},
 	{
 		displayName: 'Additional Fields',
@@ -76,12 +86,27 @@ export const signerDescription: INodeProperties[] = [
 		displayOptions: { show: showOnly(['create']) },
 		options: [
 			{
+				displayName: 'CPF',
+				name: 'cpf',
+				type: 'string',
+				default: '',
+				placeholder: '123.456.789-00',
+				description:
+					'Brazilian tax ID (CPF). Non-digit characters are stripped before sending.',
+			},
+			{
+				displayName: 'Metadata (JSON)',
+				name: 'metadata',
+				type: 'json',
+				default: '{}',
+			},
+			{
 				displayName: 'Reuse If Exists',
 				name: 'reuseIfExists',
 				type: 'boolean',
 				default: true,
 				description:
-					'Whether to look up an existing signer with this email first and return it instead of creating a duplicate (mirrors the official SDK behavior)',
+					'Whether to look up an existing signer with this email first and return it instead of creating a duplicate. Only applies when an email is provided.',
 			},
 			{
 				displayName: 'WhatsApp Phone Number',
@@ -89,13 +114,8 @@ export const signerDescription: INodeProperties[] = [
 				type: 'string',
 				default: '',
 				placeholder: '+5511999999999',
-				description: 'WhatsApp number (for WhatsApp verification/notification)',
-			},
-			{
-				displayName: 'Metadata (JSON)',
-				name: 'metadata',
-				type: 'json',
-				default: '{}',
+				description:
+					'WhatsApp phone number in E.164 format (e.g. +5548999990000). Required when using WhatsApp verification or notification.',
 			},
 		],
 	},
@@ -115,7 +135,14 @@ export const signerDescription: INodeProperties[] = [
 		default: {},
 		displayOptions: { show: showOnly(['update']) },
 		options: [
-			{ displayName: 'Full Name', name: 'full_name', type: 'string', default: '' },
+			{
+				displayName: 'CPF',
+				name: 'cpf',
+				type: 'string',
+				default: '',
+				placeholder: '123.456.789-00',
+				description: 'Brazilian tax ID (CPF). Non-digit characters are stripped before sending.',
+			},
 			{
 				displayName: 'Email',
 				name: 'email',
@@ -123,6 +150,7 @@ export const signerDescription: INodeProperties[] = [
 				placeholder: 'name@email.com',
 				default: '',
 			},
+			{ displayName: 'Full Name', name: 'full_name', type: 'string', default: '' },
 			{
 				displayName: 'WhatsApp Phone Number',
 				name: 'whatsapp_phone_number',
@@ -188,22 +216,31 @@ async function createSigner(
 	accountId: string,
 ): Promise<IDataObject> {
 	const fullName = this.getNodeParameter('fullName', itemIndex) as string;
-	const email = this.getNodeParameter('email', itemIndex) as string;
+	const email = (this.getNodeParameter('email', itemIndex, '') as string).trim();
 	const additional = this.getNodeParameter('additionalFields', itemIndex, {}) as IDataObject;
 	const reuseIfExists = additional.reuseIfExists !== false;
 
-	assertEmail.call(this, email, itemIndex);
+	if (email) {
+		assertEmail.call(this, email, itemIndex);
+	}
 
-	if (reuseIfExists) {
+	if (!email && !additional.whatsapp_phone_number) {
+		throw new NodeOperationError(
+			this.getNode(),
+			'At least one of Email or WhatsApp Phone Number is required to create a signer',
+			{ itemIndex },
+		);
+	}
+
+	if (email && reuseIfExists) {
 		const existing = await lookupSignerByEmail.call(this, accountId, email);
 		if (existing) return existing;
 	}
 
-	const body: IDataObject = {
-		full_name: fullName,
-		email,
-	};
+	const body: IDataObject = { full_name: fullName };
+	if (email) body.email = email;
 	if (additional.whatsapp_phone_number) body.whatsapp_phone_number = additional.whatsapp_phone_number;
+	if (additional.cpf) body.cpf = sanitizeCpf(additional.cpf as string);
 	if (additional.metadata !== undefined && additional.metadata !== '') {
 		const metadata =
 			typeof additional.metadata === 'string'
@@ -220,7 +257,7 @@ async function createSigner(
 		});
 	} catch (error) {
 		const code = (error as { httpCode?: string | number }).httpCode;
-		if (reuseIfExists && (code === 409 || code === '409')) {
+		if (email && reuseIfExists && (code === 409 || code === '409')) {
 			const existing = await lookupSignerByEmail.call(this, accountId, email);
 			if (existing) return existing;
 		}
@@ -285,10 +322,12 @@ async function updateSigner(
 			{ itemIndex },
 		);
 	}
+	const body: IDataObject = { ...updates };
+	if (body.cpf) body.cpf = sanitizeCpf(body.cpf as string);
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'PUT',
 		path: `/accounts/${accountId}/signers/${signerId}`,
-		body: updates,
+		body,
 	});
 }
 
@@ -362,6 +401,10 @@ function cleanQs(filters: IDataObject): IDataObject {
 		}
 	}
 	return out;
+}
+
+function sanitizeCpf(value: string): string {
+	return value.replace(/\D/g, '');
 }
 
 function safeJsonParse(value: string | IDataObject): IDataObject {

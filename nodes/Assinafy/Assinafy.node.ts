@@ -11,8 +11,10 @@ import { signerDescription, executeSigner } from './resources/signer';
 import { assignmentDescription, executeAssignment } from './resources/assignment';
 import { workspaceDescription, executeWorkspace } from './resources/workspace';
 import { webhookDescription, executeWebhook } from './resources/webhook';
+import { templateDescription, executeTemplate } from './resources/template';
 import { getDocuments } from './listSearch/getDocuments';
 import { getSigners } from './listSearch/getSigners';
+import { getTemplates } from './listSearch/getTemplates';
 
 export class Assinafy implements INodeType {
 	description: INodeTypeDescription = {
@@ -23,7 +25,7 @@ export class Assinafy implements INodeType {
 		version: 1,
 		subtitle: '={{$parameter["operation"] + ": " + $parameter["resource"]}}',
 		description:
-			'Manage Assinafy documents, signers, assignments, workspaces and webhooks via the official REST API',
+			'Manage Assinafy documents, signers, assignments, templates, workspaces and webhooks via the official REST API',
 		defaults: {
 			name: 'Assinafy',
 		},
@@ -43,17 +45,19 @@ export class Assinafy implements INodeType {
 				type: 'options',
 				noDataExpression: true,
 				default: 'document',
-				options: [
-					{ name: 'Assignment', value: 'assignment' },
-					{ name: 'Document', value: 'document' },
-					{ name: 'Signer', value: 'signer' },
-					{ name: 'Webhook', value: 'webhook' },
-					{ name: 'Workspace', value: 'workspace' },
-				],
+			options: [
+				{ name: 'Assignment', value: 'assignment' },
+				{ name: 'Document', value: 'document' },
+				{ name: 'Signer', value: 'signer' },
+				{ name: 'Template', value: 'template' },
+				{ name: 'Webhook', value: 'webhook' },
+				{ name: 'Workspace', value: 'workspace' },
+			],
 			},
 			...documentDescription,
 			...signerDescription,
 			...assignmentDescription,
+			...templateDescription,
 			...workspaceDescription,
 			...webhookDescription,
 		],
@@ -63,6 +67,7 @@ export class Assinafy implements INodeType {
 		listSearch: {
 			getDocuments,
 			getSigners,
+			getTemplates,
 		},
 	};
 
@@ -89,10 +94,13 @@ export class Assinafy implements INodeType {
 					case 'workspace':
 						result = await executeWorkspace.call(this, i, operation);
 						break;
-					case 'webhook':
-						result = await executeWebhook.call(this, i, operation);
-						break;
-					default:
+				case 'template':
+					result = await executeTemplate.call(this, i, operation);
+					break;
+				case 'webhook':
+					result = await executeWebhook.call(this, i, operation);
+					break;
+				default:
 						throw new NodeOperationError(this.getNode(), `Unknown resource: ${resource}`, {
 							itemIndex: i,
 						});

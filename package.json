@@ -1,7 +1,7 @@
 {
 	"name": "@assinafy/n8n-nodes-assinafy",
-	"version": "1.0.0",
-	"description": "n8n community nodes for the Assinafy electronic-signature API (documents, signers, assignments, webhooks).",
+	"version": "1.1.1",
+	"description": "n8n community nodes for the Assinafy electronic-signature API (documents, signers, assignments, templates, webhooks).",
 	"license": "MIT",
 	"homepage": "https://github.com/assinafy/n8n-nodes-assinafy",
 	"keywords": [

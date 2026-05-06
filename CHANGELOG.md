@@ -3,18 +3,40 @@
 All notable changes to `@assinafy/n8n-nodes-assinafy` will be documented here.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.0] — Unreleased
+## [1.1.1] — 2026-05-06
 
-Initial release. Mirrors the surface of the official Assinafy Node and PHP SDKs
-and the public REST API at https://api.assinafy.com.br/v1/docs. Published to the
-GitHub Packages npm registry (`https://npm.pkg.github.com`) under the
-`@assinafy` scope.
+### Added
+
+- **Signer: Create / Update — CPF field** — Added an optional `CPF` additional field to the Signer Create and Update operations. The value accepts any common CPF format (`123.456.789-00`, `12345678900`, etc.); non-digit characters are stripped before sending, matching the PHP SDK's `sanitizeDocument()` behaviour. CPF is a Brazilian tax ID used by the Assinafy platform for signer identity matching.
+
+## [1.1.0] — 2026-05-06
+
+Full audit against the Assinafy REST API v1 docs (`https://api.assinafy.com.br/v1/docs`).
+All endpoints re-verified. Three new Document operations and a complete Template resource added.
+
+### Added
+
+- **Document: Create From Template** — `POST /accounts/{accountId}/templates/{templateId}/documents`. Accepts `signers[]` (with `role_id`, `id`, `verification_method`, `notification_methods`), optional `name`, `message`, `expires_at`, and `editor_fields` JSON array.
+- **Document: Estimate Cost From Template** — `POST /accounts/{accountId}/templates/{templateId}/documents/estimate-cost`. Same signer shape as Create From Template.
+- **Document: Verify** — `GET /documents/{hash}/verify`. Public endpoint that verifies a certificated document by its SHA-1 signature hash.
+- **Template** resource (entirely new):
+  - **List** — `GET /accounts/{accountId}/templates` with `search`, `status` (`uploading` / `uploaded` / `processing` / `ready` / `failed`), and `sort` filters; supports `Return All`.
+  - **Get** — `GET /accounts/{accountId}/templates/{templateId}`.
+- **`getTemplates` list-search method** — backs future resource-locator pickers for Template ID fields.
+
+### Fixed
+
+- **Document Upload — multipart boundary** — removed the explicit `Content-Type: multipart/form-data` header from `uploadDocument`. When `FormData` is passed as the request body the HTTP client generates the `Content-Type` header including the required boundary string; setting it explicitly dropped the boundary and caused server-side parse errors.
+- **Signer Create — email now optional** — the API allows signers to be created with a WhatsApp phone number and no email address (WhatsApp-only verification flow). The `email` field is no longer required; the node now throws a validation error only when *neither* email nor `whatsapp_phone_number` is supplied.
 
 ### Changed
 
-- Audited the n8n assignment node against the local SDKs so `collect` assignments now accept the SDK-compatible `entries` payload and document `copy_receivers` correctly as signer IDs.
-- Aligned webhook registration defaults and trigger signature verification with the local SDK behavior (`document_prepared` stays in the default event set and only `X-Assinafy-Signature` is trusted for HMAC verification).
-- Added the same guardrails used by the Node SDK for document uploads (reject empty PDFs and files larger than 25MB) and signer lookup/create email validation.
+- **Document List — Signature Method filter** — added `method` (`virtual` / `collect`) filter option to the Document List operation, matching the `?method=` query parameter documented by the API.
+- Updated node description to reference the new Template resource.
+
+## [1.0.0] — 2025-01-01
+
+Initial release. Mirrors the surface of the official Assinafy PHP SDK and the public REST API at `https://api.assinafy.com.br/v1/docs`. Published to the GitHub Packages npm registry (`https://npm.pkg.github.com`) under the `@assinafy` scope.
 
 ### Added
 
@@ -28,3 +50,9 @@ GitHub Packages npm registry (`https://npm.pkg.github.com`) under the
 - Resource-locator pickers for documents and signers backed by `getDocuments` and `getSigners` list-search methods.
 - **Assinafy Trigger** webhook node — registers and tears down the workspace webhook subscription on workflow activation, verifies the HMAC-SHA256 signature on each delivery, and emits `{ event, headers, body }` as a workflow item.
 - Shared transport helper that authenticates through n8n's `httpRequestWithAuthentication`, unwraps the `{ status, message, data }` response envelope, and follows pagination via the `X-Pagination-*` response headers.
+
+### Changed
+
+- Audited the assignment node against the API so `collect` assignments accept the SDK-compatible `entries` payload and `copy_receivers` are correctly documented as signer IDs.
+- Aligned webhook registration defaults and trigger signature verification with the API behavior (`document_prepared` stays in the default event set; only `X-Assinafy-Signature` is trusted for HMAC verification).
+- Added guardrails for document uploads (reject empty PDFs and files larger than 25 MB) and signer email validation.
