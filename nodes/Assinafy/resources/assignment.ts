@@ -7,6 +7,7 @@ import type {
 import { NodeOperationError } from 'n8n-workflow';
 import { assinafyApiRequest, getAccountId } from '../shared/transport';
 import { assignmentIdField, documentResourceLocator } from '../shared/descriptions';
+import { wrap } from '../shared/utils';
 
 const showOnly = (operation: string[]) => ({
 	resource: ['assignment'],
@@ -246,10 +247,6 @@ export async function executeAssignment(
 				{ itemIndex },
 			);
 	}
-}
-
-function wrap(data: unknown): INodeExecutionData {
-	return { json: (data ?? {}) as IDataObject };
 }
 
 interface SignerEntry {

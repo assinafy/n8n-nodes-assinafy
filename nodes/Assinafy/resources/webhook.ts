@@ -12,6 +12,7 @@ import {
 } from '../shared/transport';
 import { limitField, returnAllField } from '../shared/descriptions';
 import { DEFAULT_WEBHOOK_EVENTS, WEBHOOK_EVENT_OPTIONS } from './webhookEvents';
+import { wrap } from '../shared/utils';
 
 const showOnly = (operation: string[]) => ({
 	resource: ['webhook'],
@@ -192,10 +193,6 @@ export async function executeWebhook(
 				{ itemIndex },
 			);
 	}
-}
-
-function wrap(data: unknown): INodeExecutionData {
-	return { json: (data ?? {}) as IDataObject };
 }
 
 async function registerWebhook(

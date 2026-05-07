@@ -7,6 +7,7 @@ import type {
 import { NodeOperationError } from 'n8n-workflow';
 import { assinafyApiRequest, assinafyApiRequestAllItems } from '../shared/transport';
 import { limitField, returnAllField } from '../shared/descriptions';
+import { wrap } from '../shared/utils';
 
 const showOnly = (operation: string[]) => ({
 	resource: ['workspace'],
@@ -118,10 +119,6 @@ export async function executeWorkspace(
 				{ itemIndex },
 			);
 	}
-}
-
-function wrap(data: unknown): INodeExecutionData {
-	return { json: (data ?? {}) as IDataObject };
 }
 
 async function createWorkspace(

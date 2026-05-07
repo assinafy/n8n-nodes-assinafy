@@ -18,6 +18,7 @@ import {
 	searchField,
 	sortField,
 } from '../shared/descriptions';
+import { cleanQs, wrap } from '../shared/utils';
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 const READY_STATUSES = new Set(['metadata_ready', 'pending_signature', 'certificated']);
@@ -410,10 +411,6 @@ export async function executeDocument(
 	}
 }
 
-function wrap(data: unknown): INodeExecutionData {
-	return { json: (data ?? {}) as IDataObject };
-}
-
 async function uploadDocument(
 	this: IExecuteFunctions,
 	itemIndex: number,
@@ -769,14 +766,4 @@ async function verifyDocument(
 		method: 'GET',
 		path: `/documents/${hash}/verify`,
 	});
-}
-
-function cleanQs(filters: IDataObject): IDataObject {
-	const out: IDataObject = {};
-	for (const [key, value] of Object.entries(filters)) {
-		if (value !== undefined && value !== null && value !== '') {
-			out[key] = value as IDataObject[keyof IDataObject];
-		}
-	}
-	return out;
 }

@@ -11,6 +11,7 @@ import {
 	getAccountId,
 } from '../shared/transport';
 import { limitField, returnAllField, searchField, sortField } from '../shared/descriptions';
+import { cleanQs, wrap } from '../shared/utils';
 
 const showOnly = (operation: string[]) => ({
 	resource: ['template'],
@@ -96,10 +97,6 @@ export async function executeTemplate(
 	}
 }
 
-function wrap(data: unknown): INodeExecutionData {
-	return { json: (data ?? {}) as IDataObject };
-}
-
 async function listTemplates(
 	this: IExecuteFunctions,
 	itemIndex: number,
@@ -144,14 +141,4 @@ async function getTemplate(
 		method: 'GET',
 		path: `/accounts/${accountId}/templates/${templateId}`,
 	});
-}
-
-function cleanQs(filters: IDataObject): IDataObject {
-	const out: IDataObject = {};
-	for (const [key, value] of Object.entries(filters)) {
-		if (value !== undefined && value !== null && value !== '') {
-			out[key] = value as IDataObject[keyof IDataObject];
-		}
-	}
-	return out;
 }

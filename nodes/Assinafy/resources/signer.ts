@@ -17,6 +17,7 @@ import {
 	signerResourceLocator,
 	sortField,
 } from '../shared/descriptions';
+import { cleanQs, wrap } from '../shared/utils';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -206,10 +207,6 @@ export async function executeSigner(
 	}
 }
 
-function wrap(data: unknown): INodeExecutionData {
-	return { json: (data ?? {}) as IDataObject };
-}
-
 async function createSigner(
 	this: IExecuteFunctions,
 	itemIndex: number,
@@ -391,16 +388,6 @@ function assertEmail(this: IExecuteFunctions, email: string, itemIndex: number):
 	if (!EMAIL_RE.test(email)) {
 		throw new NodeOperationError(this.getNode(), 'Invalid email address', { itemIndex });
 	}
-}
-
-function cleanQs(filters: IDataObject): IDataObject {
-	const out: IDataObject = {};
-	for (const [key, value] of Object.entries(filters)) {
-		if (value !== undefined && value !== null && value !== '') {
-			out[key] = value as IDataObject[keyof IDataObject];
-		}
-	}
-	return out;
 }
 
 function sanitizeCpf(value: string): string {
