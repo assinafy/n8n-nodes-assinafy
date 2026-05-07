@@ -31,7 +31,10 @@
 		"lint": "n8n-node lint",
 		"lint:fix": "n8n-node lint --fix",
 		"release": "n8n-node release",
-		"prepublishOnly": "n8n-node prerelease"
+		"prepublishOnly": "n8n-node prerelease",
+		"test": "jest",
+		"test:watch": "jest --watch",
+		"test:coverage": "jest --coverage"
 	},
 	"files": [
 		"dist"
@@ -49,9 +52,13 @@
 	},
 	"devDependencies": {
 		"@n8n/node-cli": "*",
+		"@types/jest": "^30.0.0",
 		"eslint": "9.39.4",
+		"jest": "^30.3.0",
+		"n8n-workflow": "^2.16.0",
 		"prettier": "3.8.1",
 		"release-it": "19.2.4",
+		"ts-jest": "^29.4.9",
 		"typescript": "5.9.3"
 	},
 	"peerDependencies": {
