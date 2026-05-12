@@ -17,6 +17,7 @@ import {
 	DEFAULT_WEBHOOK_EVENTS,
 	WEBHOOK_EVENT_OPTIONS,
 } from '../Assinafy/resources/webhookEvents';
+import { isEmptySubscription } from '../Assinafy/resources/webhook';
 
 const SIGNATURE_HEADER = 'x-assinafy-signature';
 
@@ -76,7 +77,7 @@ export class AssinafyTrigger implements INodeType {
 			},
 			{
 				displayName:
-					'⚠ Assinafy supports only one webhook subscription per workspace. Activating this trigger replaces any existing subscription and deactivating it deletes the subscription entirely.',
+					'⚠ Assinafy supports only one webhook subscription per workspace. Activating this trigger replaces any existing subscription; deactivating it inactivates the subscription (PUT /webhooks/inactivate).',
 				name: 'singleSubscriptionNotice',
 				type: 'notice',
 				default: '',
@@ -89,16 +90,20 @@ export class AssinafyTrigger implements INodeType {
 		default: {
 			async checkExists(this: IHookFunctions): Promise<boolean> {
 				const webhookUrl = this.getNodeWebhookUrl('default');
+				const email = this.getNodeParameter('email', '') as string;
+				const events = this.getNodeParameter('events', []) as string[];
+				const desiredEvents = events.length > 0 ? events : DEFAULT_WEBHOOK_EVENTS;
 				try {
 					const accountId = await getAccountId(this);
 					const existing = await assinafyApiRequest<IDataObject | null>(this, {
 						method: 'GET',
 						path: `/accounts/${accountId}/webhooks/subscriptions`,
 					});
-					if (!existing) return false;
-					return (
-						typeof existing.url === 'string' && existing.url === webhookUrl && existing.is_active !== false
-					);
+					if (isEmptySubscription(existing)) return false;
+					if (existing!.is_active === false) return false;
+					if (existing!.url !== webhookUrl) return false;
+					if (email && existing!.email !== email) return false;
+					return sameEventSet(existing!.events, desiredEvents);
 				} catch (error) {
 					const code = (error as { httpCode?: string | number }).httpCode;
 					if (code === 404 || code === '404') return false;
@@ -129,8 +134,8 @@ export class AssinafyTrigger implements INodeType {
 				try {
 					const accountId = await getAccountId(this);
 					await assinafyApiRequest(this, {
-						method: 'DELETE',
-						path: `/accounts/${accountId}/webhooks/subscriptions`,
+						method: 'PUT',
+						path: `/accounts/${accountId}/webhooks/inactivate`,
 					});
 				} catch (error) {
 					const code = (error as { httpCode?: string | number }).httpCode;
@@ -202,6 +207,13 @@ function readSignatureHeader(
 		return typeof value === 'string' ? value.trim() : undefined;
 	}
 	return undefined;
+}
+
+function sameEventSet(actual: unknown, desired: string[]): boolean {
+	if (!Array.isArray(actual)) return false;
+	if (actual.length !== desired.length) return false;
+	const set = new Set(actual.map(String));
+	return desired.every((e) => set.has(e));
 }
 
 function verifyHmac(secret: string, payload: Buffer, signature: string): boolean {

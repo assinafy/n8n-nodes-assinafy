@@ -12,12 +12,9 @@ import {
 } from '../shared/transport';
 import { limitField, returnAllField } from '../shared/descriptions';
 import { DEFAULT_WEBHOOK_EVENTS, WEBHOOK_EVENT_OPTIONS } from './webhookEvents';
-import { wrap } from '../shared/utils';
+import { cleanQs, showOnly as showOnlyFor, wrap } from '../shared/utils';
 
-const showOnly = (operation: string[]) => ({
-	resource: ['webhook'],
-	operation,
-});
+const showOnly = showOnlyFor('webhook');
 
 export const webhookDescription: INodeProperties[] = [
 	{
@@ -219,16 +216,32 @@ async function registerWebhook(
 async function getWebhook(this: IExecuteFunctions): Promise<IDataObject | null> {
 	const accountId = await getAccountId(this);
 	try {
-		return await assinafyApiRequest<IDataObject>(this, {
+		const subscription = await assinafyApiRequest<IDataObject>(this, {
 			method: 'GET',
 			path: `/accounts/${accountId}/webhooks/subscriptions`,
 		});
+		return isEmptySubscription(subscription) ? null : subscription;
 	} catch (error) {
 		const code = (error as { httpCode?: string | number }).httpCode;
 		if (code === 404 || code === '404') return null;
 		throw error;
 	}
 }
+
+/**
+ * The API returns a sentinel `{ events: [], url: null, email: null, is_active: true }`
+ * when no subscription has ever been registered. Treat that as "no subscription".
+ */
+function isEmptySubscription(subscription: IDataObject | null): boolean {
+	if (!subscription) return true;
+	const url = subscription.url;
+	const events = subscription.events;
+	const hasUrl = typeof url === 'string' && url.length > 0;
+	const hasEvents = Array.isArray(events) && events.length > 0;
+	return !hasUrl && !hasEvents;
+}
+
+export { isEmptySubscription };
 
 async function deleteWebhook(this: IExecuteFunctions): Promise<IDataObject> {
 	const accountId = await getAccountId(this);
@@ -263,12 +276,7 @@ async function listDispatches(
 	const returnAll = this.getNodeParameter('returnAll', itemIndex, false) as boolean;
 	const filters = this.getNodeParameter('filters', itemIndex, {}) as IDataObject;
 	const path = `/accounts/${accountId}/webhooks`;
-	const qs: IDataObject = {};
-	for (const [key, value] of Object.entries(filters)) {
-		if (value === '' || value === undefined || value === null) continue;
-		if ((key === 'from' || key === 'to') && value === 0) continue;
-		qs[key] = value as IDataObject[keyof IDataObject];
-	}
+	const qs = cleanQs(filters, ['from', 'to']);
 
 	if (returnAll) {
 		const items = await assinafyApiRequestAllItems<IDataObject>(this, {

@@ -3,6 +3,61 @@
 All notable changes to `@assinafy/n8n-nodes-assinafy` will be documented here.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] — 2026-05-11
+
+Full API-coverage release. The action node now exposes every documented endpoint
+in `https://api.assinafy.com.br/v1/docs`, including the signer-side flows that
+authenticate via `signer-access-code` and the public/unauthenticated endpoints.
+
+### Added
+
+- **Document — `Get Public Info`** (`GET /public/documents/{id}`, unauthenticated).
+- **Document — `Send Public Token`** (`PUT /public/documents/{id}/send-token`).
+- **Document — `List Statuses`** (`GET /documents/statuses`).
+- **Assignment — `List WhatsApp Notifications`**
+  (`GET /documents/{documentId}/assignments/{assignmentId}/whatsapp-notifications`).
+- **Assignment — `Get Sign Page` / `Sign` / `Decline`** (signer-side flow over
+  `signer-access-code`).
+- **Signer — `Get Self`, `Accept Terms`, `Verify Code`, `Confirm Data`,
+  `Upload Signature`, `Download Signature`** (signer-side flows).
+- **Field Definition** resource (entirely new): `Create`, `List`, `Get`,
+  `Update`, `Delete`, `Validate`, `Validate Multiple`, `List Types` — covers
+  `POST/GET/PUT/DELETE /accounts/{accountId}/fields(/{fieldId})`, the
+  `validate(-multiple)` endpoints, and `GET /field-types`.
+- **Signer Document** resource (entirely new, signer-side): `Get Current`,
+  `List`, `Sign Multiple`, `Decline Multiple`, `Download` for
+  `/signers/{signerId}/document(s)` and the bulk sign/decline endpoints.
+- **Authentication** resource (entirely new): `Login`, `Social Login`,
+  `Create / Get / Delete API Key`, `Change Password`, `Request Password Reset`,
+  `Reset Password`.
+
+### Changed
+
+- **Trigger tear-down switched to the documented inactivate endpoint.**
+  Deactivating an `Assinafy Trigger` workflow now calls
+  `PUT /accounts/{accountId}/webhooks/inactivate` instead of the previously
+  undocumented `DELETE /accounts/{accountId}/webhooks/subscriptions`. The
+  trigger's `checkExists` hook now compares URL, contact email, active flag,
+  and the full event set, so changing any of those re-registers the
+  subscription on workflow re-activation.
+- **Webhook — empty subscription detected.** The API returns
+  `{ events: [], url: null, is_active: true }` when no subscription has ever
+  been registered. The webhook resource now treats that sentinel as "no
+  subscription" rather than returning it to callers.
+- **Transport — unauthenticated requests.** `assinafyApiRequest` now supports
+  a `skipAuth: true` option so the new public and signer-access-code endpoints
+  can be called without the `X-Api-Key` header.
+
+### Refactored (no behaviour change)
+
+- `extractRequiredId`, `assertEmail`, `safeJsonParse`, `sanitizeCpf`, and a
+  resource-scoped `showOnly` helper were consolidated in
+  `nodes/Assinafy/shared/utils.ts`. Duplicates that lived inside `signer.ts`,
+  `document.ts`, and `assignment.ts` were removed in favour of the shared
+  versions.
+- `cleanQs` now accepts an optional list of keys whose `0` values should also
+  be dropped, eliminating the bespoke filter-cleanup loop in `webhook.ts`.
+
 ## [1.1.1] — 2026-05-06
 
 ### Added

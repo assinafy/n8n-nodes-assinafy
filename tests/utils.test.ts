@@ -1,4 +1,13 @@
-import { cleanQs, wrap, safeJsonParse, sanitizeCpf, assertEmail } from '../nodes/Assinafy/shared/utils';
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import {
+	assertEmail,
+	cleanQs,
+	extractRequiredId,
+	safeJsonParse,
+	sanitizeCpf,
+	showOnly,
+	wrap,
+} from '../nodes/Assinafy/shared/utils';
 
 describe('shared/utils', () => {
 	describe('cleanQs', () => {
@@ -31,6 +40,51 @@ describe('shared/utils', () => {
 			const input = { name: 'John', meta: { a: 1, b: undefined } };
 			const result = cleanQs(input);
 			expect(result).toEqual({ name: 'John', meta: { a: 1, b: undefined } });
+		});
+
+		it('should drop zero values for keys listed in dropZero', () => {
+			const input = { from: 0, to: 1700000000, event: 'document_ready' };
+			const result = cleanQs(input, ['from', 'to']);
+			expect(result).toEqual({ to: 1700000000, event: 'document_ready' });
+		});
+
+		it('should keep zero values for keys not in dropZero', () => {
+			const input = { count: 0, name: 'John' };
+			const result = cleanQs(input, ['from']);
+			expect(result).toEqual({ count: 0, name: 'John' });
+		});
+	});
+
+	describe('showOnly', () => {
+		it('should build a displayOptions show clause scoped to a resource', () => {
+			const show = showOnly('signer');
+			expect(show(['create'])).toEqual({ resource: ['signer'], operation: ['create'] });
+			expect(show(['get', 'update'])).toEqual({
+				resource: ['signer'],
+				operation: ['get', 'update'],
+			});
+		});
+	});
+
+	describe('extractRequiredId', () => {
+		const createCtx = (value: string) => ({
+			getNodeParameter: jest.fn().mockReturnValue(value),
+			getNode: jest.fn().mockReturnValue({ name: 'TestNode' }),
+		});
+
+		it('returns the value when present', () => {
+			const ctx = createCtx('abc123');
+			expect(extractRequiredId(ctx as any, 'documentId', 'Document ID', 0)).toBe('abc123');
+			expect(ctx.getNodeParameter).toHaveBeenCalledWith('documentId', 0, '', {
+				extractValue: true,
+			});
+		});
+
+		it('throws NodeOperationError when missing', () => {
+			const ctx = createCtx('');
+			expect(() => extractRequiredId(ctx as any, 'signerId', 'Signer ID', 2)).toThrow(
+				'Signer ID is required',
+			);
 		});
 	});
 

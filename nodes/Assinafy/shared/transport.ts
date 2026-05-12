@@ -32,6 +32,11 @@ export interface AssinafyRequestOptions {
 	rawResponse?: boolean;
 	/** Override the credential's base URL (used for ad-hoc calls). */
 	baseUrlOverride?: string;
+	/**
+	 * Skip the X-Api-Key authentication header — for `/public/*` endpoints and
+	 * signer-access-code flows where the API key is irrelevant.
+	 */
+	skipAuth?: boolean;
 }
 
 export interface AssinafyBinaryResponse {
@@ -106,11 +111,13 @@ export async function assinafyApiRequest<T = IDataObject>(
 	}
 
 	try {
-		const response = (await ctx.helpers.httpRequestWithAuthentication.call(
-			ctx,
-			CREDENTIALS_TYPE,
-			requestOptions,
-		)) as unknown;
+		const response = options.skipAuth
+			? ((await ctx.helpers.httpRequest.call(ctx, requestOptions)) as unknown)
+			: ((await ctx.helpers.httpRequestWithAuthentication.call(
+					ctx,
+					CREDENTIALS_TYPE,
+					requestOptions,
+				)) as unknown);
 
 		if (options.returnBinary || options.rawResponse) {
 			return response as T;

@@ -18,16 +18,13 @@ import {
 	searchField,
 	sortField,
 } from '../shared/descriptions';
-import { cleanQs, wrap } from '../shared/utils';
+import { cleanQs, extractRequiredId, showOnly as showOnlyFor, wrap } from '../shared/utils';
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 const READY_STATUSES = new Set(['metadata_ready', 'pending_signature', 'certificated']);
 const FAILED_STATUSES = new Set(['failed', 'rejected_by_signer', 'rejected_by_user', 'expired']);
 
-const showOnly = (operation: string[]) => ({
-	resource: ['document'],
-	operation,
-});
+const showOnly = showOnlyFor('document');
 
 export const documentDescription: INodeProperties[] = [
 	{
@@ -71,11 +68,26 @@ export const documentDescription: INodeProperties[] = [
 				action: 'List the activity log for a document',
 			},
 			{
+				name: 'Get Public Info',
+				value: 'getPublicInfo',
+				action: 'Get unauthenticated public document basics',
+			},
+			{
 				name: 'Get Signing Progress',
 				value: 'getSigningProgress',
 				action: 'Return a signed total percentage summary',
 			},
 			{ name: 'List', value: 'list', action: 'List workspace documents' },
+			{
+				name: 'List Statuses',
+				value: 'listStatuses',
+				action: 'List supported document statuses and deletability',
+			},
+			{
+				name: 'Send Public Token',
+				value: 'sendPublicToken',
+				action: 'Send a 6 digit access token to a signer via email or whatsapp',
+			},
 			{ name: 'Upload', value: 'upload', action: 'Upload a new document' },
 			{ name: 'Verify', value: 'verify', action: 'Verify a document by its signature hash' },
 			{
@@ -313,6 +325,38 @@ export const documentDescription: INodeProperties[] = [
 		displayOptions: { show: showOnly(['verify']) },
 	},
 
+	// --- getPublicInfo / sendPublicToken ---
+	{
+		displayName: 'Document ID',
+		name: 'publicDocumentId',
+		type: 'string',
+		default: '',
+		required: true,
+		description: 'Public document ID (no authentication required for these endpoints)',
+		displayOptions: { show: showOnly(['getPublicInfo', 'sendPublicToken']) },
+	},
+	{
+		displayName: 'Recipient',
+		name: 'recipient',
+		type: 'string',
+		default: '',
+		required: true,
+		placeholder: 'name@example.com or +5511999990001',
+		description: 'Email or WhatsApp phone number to send the token to',
+		displayOptions: { show: showOnly(['sendPublicToken']) },
+	},
+	{
+		displayName: 'Channel',
+		name: 'channel',
+		type: 'options',
+		default: 'email',
+		options: [
+			{ name: 'Email', value: 'email' },
+			{ name: 'WhatsApp', value: 'whatsapp' },
+		],
+		displayOptions: { show: showOnly(['sendPublicToken']) },
+	},
+
 	// --- download ---
 	{
 		displayName: 'Artifact',
@@ -402,6 +446,12 @@ export async function executeDocument(
 			return wrap(await estimateCostFromTemplate.call(this, itemIndex));
 		case 'verify':
 			return wrap(await verifyDocument.call(this, itemIndex));
+		case 'getPublicInfo':
+			return wrap(await getPublicInfo.call(this, itemIndex));
+		case 'sendPublicToken':
+			return wrap(await sendPublicToken.call(this, itemIndex));
+		case 'listStatuses':
+			return wrap({ statuses: await listStatuses.call(this) });
 		default:
 			throw new NodeOperationError(
 				this.getNode(),
@@ -658,11 +708,7 @@ async function waitUntilReady(
 }
 
 function extractDocumentId(this: IExecuteFunctions, itemIndex: number): string {
-	const id = this.getNodeParameter('documentId', itemIndex, '', { extractValue: true }) as string;
-	if (!id) {
-		throw new NodeOperationError(this.getNode(), 'Document ID is required', { itemIndex });
-	}
-	return id;
+	return extractRequiredId(this, 'documentId', 'Document ID', itemIndex);
 }
 
 async function createFromTemplate(
@@ -766,4 +812,48 @@ async function verifyDocument(
 		method: 'GET',
 		path: `/documents/${hash}/verify`,
 	});
+}
+
+async function getPublicInfo(
+	this: IExecuteFunctions,
+	itemIndex: number,
+): Promise<IDataObject> {
+	const id = (this.getNodeParameter('publicDocumentId', itemIndex) as string).trim();
+	if (!id) {
+		throw new NodeOperationError(this.getNode(), 'Document ID is required', { itemIndex });
+	}
+	return assinafyApiRequest<IDataObject>(this, {
+		method: 'GET',
+		path: `/public/documents/${id}`,
+		skipAuth: true,
+	});
+}
+
+async function sendPublicToken(
+	this: IExecuteFunctions,
+	itemIndex: number,
+): Promise<IDataObject> {
+	const id = (this.getNodeParameter('publicDocumentId', itemIndex) as string).trim();
+	const recipient = (this.getNodeParameter('recipient', itemIndex) as string).trim();
+	const channel = this.getNodeParameter('channel', itemIndex, 'email') as string;
+	if (!id) {
+		throw new NodeOperationError(this.getNode(), 'Document ID is required', { itemIndex });
+	}
+	if (!recipient) {
+		throw new NodeOperationError(this.getNode(), 'Recipient is required', { itemIndex });
+	}
+	return assinafyApiRequest<IDataObject>(this, {
+		method: 'PUT',
+		path: `/public/documents/${id}/send-token`,
+		body: { recipient, channel },
+		skipAuth: true,
+	});
+}
+
+async function listStatuses(this: IExecuteFunctions): Promise<IDataObject[]> {
+	const response = await assinafyApiRequest<IDataObject[]>(this, {
+		method: 'GET',
+		path: '/documents/statuses',
+	});
+	return Array.isArray(response) ? response : [];
 }

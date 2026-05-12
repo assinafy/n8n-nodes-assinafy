@@ -11,12 +11,9 @@ import {
 	getAccountId,
 } from '../shared/transport';
 import { limitField, returnAllField, searchField, sortField } from '../shared/descriptions';
-import { cleanQs, wrap } from '../shared/utils';
+import { cleanQs, showOnly as showOnlyFor, wrap } from '../shared/utils';
 
-const showOnly = (operation: string[]) => ({
-	resource: ['template'],
-	operation,
-});
+const showOnly = showOnlyFor('template');
 
 export const templateDescription: INodeProperties[] = [
 	{

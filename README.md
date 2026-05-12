@@ -4,7 +4,7 @@ Community n8n nodes for [Assinafy](https://assinafy.com.br), the Brazilian elect
 
 This package ships:
 
-- **Assinafy** — an action node with operations across `document`, `signer`, `assignment`, `template`, `workspace`, and `webhook` resources.
+- **Assinafy** — an action node exposing every documented endpoint in the v1 API. Resources: `assignment`, `auth`, `document`, `field` (field definition), `signer`, `signerDocument` (signer-side flows), `template`, `webhook`, `workspace`.
 - **Assinafy Trigger** — a webhook trigger that subscribes your workflow to Assinafy events and verifies the HMAC-SHA256 signature on each delivery.
 - **Assinafy API** — a shared credential (X-Api-Key + account ID, with production/sandbox/custom base URLs).
 
@@ -77,6 +77,9 @@ The credential test calls `GET /accounts/{accountId}` to confirm the key and acc
 | Create From Template | `POST /accounts/{accountId}/templates/{templateId}/documents` |
 | Estimate Cost From Template | `POST /accounts/{accountId}/templates/{templateId}/documents/estimate-cost` |
 | Verify | `GET /documents/{hash}/verify` — public; verifies a certificated document by its signature hash |
+| Get Public Info | `GET /public/documents/{id}` — unauthenticated, returns name, page count, creator |
+| Send Public Token | `PUT /public/documents/{id}/send-token` — emails/whatsapps the 6-digit access token |
+| List Statuses | `GET /documents/statuses` — enumerates document status codes and deletability |
 
 Uploads accept a binary property from the previous node (must be a non-empty PDF up to 25 MB). Downloaded artifacts are attached back to the output item as binary data. The List operation supports filtering by `status`, `method` (`virtual` / `collect`), and a `search` term.
 
@@ -90,6 +93,12 @@ Uploads accept a binary property from the previous node (must be a non-empty PDF
 | Update | `PUT /accounts/{accountId}/signers/{signerId}` |
 | Delete | `DELETE /accounts/{accountId}/signers/{signerId}` |
 | Find by Email | `GET /accounts/{accountId}/signers?search={email}` |
+| Get Self (Signer Side) | `GET /signers/self?signer-access-code=…` |
+| Accept Terms (Signer Side) | `PUT /signers/accept-terms` |
+| Verify Code (Signer Side) | `POST /verify` |
+| Confirm Data (Signer Side) | `PUT /documents/{documentId}/signers/confirm-data?signer-access-code=…` |
+| Upload Signature (Signer Side) | `POST /signature?signer-access-code=…&type=signature\|initial` |
+| Download Signature (Signer Side) | `GET /signature/{type}?signer-access-code=…` |
 
 ### Resource: Assignment
 
@@ -101,6 +110,10 @@ Uploads accept a binary property from the previous node (must be a non-empty PDF
 | Resend Notification | `PUT /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/resend` |
 | Estimate Resend Cost | `POST /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/estimate-resend-cost` |
 | Cancel Signature Request | `POST /accounts/{accountId}/signature-requests/{documentId}/cancel` |
+| List WhatsApp Notifications | `GET /documents/{documentId}/assignments/{assignmentId}/whatsapp-notifications` |
+| Get Sign Page (Signer Side) | `GET /sign?signer-access-code=…` |
+| Sign (Signer Side) | `POST /documents/{documentId}/assignments/{assignmentId}?signer-access-code=…` |
+| Decline (Signer Side) | `PUT /documents/{documentId}/assignments/{assignmentId}/reject?signer-access-code=…` |
 
 The `method` can be `virtual` (remote signature via email or WhatsApp) or `collect` (field-placed signatures on the document). Each signer entry accepts an optional `verification_method` (`Email` / `Whatsapp`) and `notification_methods`. For `collect`, the node now exposes the SDK-compatible `entries` JSON payload. `copy_receivers` are signer IDs, not email addresses.
 
@@ -112,6 +125,46 @@ The `method` can be `virtual` (remote signature via email or WhatsApp) or `colle
 | Get | `GET /accounts/{accountId}/templates/{templateId}` |
 
 Templates are read-only resources created through the Assinafy web app. Use **List** and **Get** to retrieve roles and field placements needed for Create From Template documents.
+
+### Resource: Field Definition
+
+| Operation | Endpoint |
+| --- | --- |
+| Create | `POST /accounts/{accountId}/fields` |
+| List | `GET /accounts/{accountId}/fields` — filters: `include_inactive`, `include_standard` |
+| Get | `GET /accounts/{accountId}/fields/{fieldId}` |
+| Update | `PUT /accounts/{accountId}/fields/{fieldId}` |
+| Delete | `DELETE /accounts/{accountId}/fields/{fieldId}` |
+| Validate | `POST /accounts/{accountId}/fields/{fieldId}/validate` — supports signer-access-code |
+| Validate Multiple | `POST /accounts/{accountId}/fields/validate-multiple` — supports signer-access-code |
+| List Types | `GET /field-types` |
+
+### Resource: Signer Document (Signer Side)
+
+These endpoints authorize via the per-signer `signer-access-code` query parameter rather than the workspace API key. Useful for surfacing what an end signer can see/do from inside a workflow.
+
+| Operation | Endpoint |
+| --- | --- |
+| Get Current | `GET /signers/{signerId}/document?signer-access-code=…` |
+| List | `GET /signers/{signerId}/documents?signer-access-code=…` |
+| Sign Multiple | `PUT /signers/documents/sign-multiple?signer-access-code=…` |
+| Decline Multiple | `PUT /signers/documents/decline-multiple?signer-access-code=…` |
+| Download | `GET /signers/{signerId}/documents/{documentId}/download/{artifact}?signer-access-code=…` |
+
+### Resource: Authentication
+
+User-account flows. Most return an access token used as `Authorization: Bearer …`; subsequent calls in the same workflow can use the **Custom** environment + that token if needed.
+
+| Operation | Endpoint |
+| --- | --- |
+| Login | `POST /login` |
+| Social Login | `POST /authentication/social-login` |
+| Create API Key | `POST /users/api-keys` |
+| Get API Key (Masked) | `GET /users/api-keys` |
+| Delete API Key | `DELETE /users/api-keys` |
+| Change Password | `PUT /authentication/change-password` |
+| Request Password Reset | `PUT /authentication/request-password-reset` |
+| Reset Password | `PUT /authentication/reset-password` |
 
 ### Resource: Workspace
 
@@ -137,14 +190,14 @@ Templates are read-only resources created through the Assinafy web app. Use **Li
 
 ## Assinafy Trigger
 
-The trigger node registers (or replaces) the workspace-wide webhook subscription when the workflow is activated, and deletes it on deactivation. On each incoming delivery it:
+The trigger node registers (or replaces) the workspace-wide webhook subscription when the workflow is activated, and **inactivates** it on deactivation via the documented `PUT /accounts/{accountId}/webhooks/inactivate` endpoint. On each incoming delivery it:
 
 1. Reads the `X-Assinafy-Signature` header.
 2. Verifies the HMAC-SHA256 digest over the raw request body against the credential webhook secret (toggle off with `Verify Signature`).
 3. Emits `{ event, headers, body }` as a single n8n item.
 
 > [!IMPORTANT]
-> The Assinafy API supports a **single** webhook subscription per workspace. Activating this trigger replaces any existing subscription, and deactivating it deletes the subscription entirely. If you need to fan out events to multiple destinations, point the trigger at an n8n workflow that rebroadcasts to downstream systems.
+> The Assinafy API supports a **single** webhook subscription per workspace. Activating this trigger replaces any existing subscription; deactivating it inactivates the subscription (so delivery history is retained but no further events are sent). If you need to fan out events to multiple destinations, point the trigger at an n8n workflow that rebroadcasts to downstream systems.
 
 Supported events include `document_uploaded`, `document_metadata_ready`, `document_prepared`, `document_ready`, `assignment_created`, `signature_requested`, `signer_created`, `signer_email_verified`, `signer_whatsapp_verified`, `signer_data_confirmed`, `signer_viewed_document`, `signer_signed_document`, `signer_rejected_document`, `user_rejected_document`, `document_processing_failed`, and the template lifecycle events.
 
@@ -166,7 +219,7 @@ npm run lint      # n8n-node lint
 npm run build     # compiles TypeScript into dist/
 ```
 
-The codebase is intentionally small: one credential, one action node with six resources (each in its own file under `nodes/Assinafy/resources/`), and one trigger. The `nodes/Assinafy/shared/transport.ts` helper wraps `httpRequestWithAuthentication` and unwraps the `{ status, message, data }` envelope returned by the API. List-search methods under `nodes/Assinafy/listSearch/` back the resource-locator pickers for documents, signers, and templates.
+The codebase is intentionally small: one credential, one action node with nine resources (each in its own file under `nodes/Assinafy/resources/`), and one trigger. The `nodes/Assinafy/shared/transport.ts` helper wraps `httpRequestWithAuthentication` (or `httpRequest` when `skipAuth: true` is passed for public/signer-access-code endpoints) and unwraps the `{ status, message, data }` envelope returned by the API. List-search methods under `nodes/Assinafy/listSearch/` back the resource-locator pickers for documents, signers, and templates.
 
 ## Releasing
 

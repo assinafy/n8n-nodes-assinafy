@@ -1,4 +1,5 @@
 import type {
+	IBinaryData,
 	IDataObject,
 	IExecuteFunctions,
 	INodeExecutionData,
@@ -17,14 +18,26 @@ import {
 	signerResourceLocator,
 	sortField,
 } from '../shared/descriptions';
-import { cleanQs, wrap } from '../shared/utils';
+import {
+	assertEmail,
+	cleanQs,
+	extractRequiredId,
+	safeJsonParse,
+	sanitizeCpf,
+	showOnly as showOnlyFor,
+	wrap,
+} from '../shared/utils';
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const showOnly = showOnlyFor('signer');
 
-const showOnly = (operation: string[]) => ({
-	resource: ['signer'],
-	operation,
-});
+const SELF_OPS = new Set([
+	'getSelf',
+	'acceptTerms',
+	'verifyCode',
+	'confirmData',
+	'uploadSignature',
+	'downloadSignature',
+]);
 
 export const signerDescription: INodeProperties[] = [
 	{
@@ -35,16 +48,46 @@ export const signerDescription: INodeProperties[] = [
 		displayOptions: { show: { resource: ['signer'] } },
 		default: 'create',
 		options: [
+			{
+				name: 'Accept Terms (Signer Side)',
+				value: 'acceptTerms',
+				action: 'Signer accepts the terms of use',
+			},
+			{
+				name: 'Confirm Data (Signer Side)',
+				value: 'confirmData',
+				action: 'Signer confirms email or whatsapp before signing',
+			},
 			{ name: 'Create', value: 'create', action: 'Create a signer' },
 			{ name: 'Delete', value: 'delete', action: 'Delete a signer' },
+			{
+				name: 'Download Signature (Signer Side)',
+				value: 'downloadSignature',
+				action: 'Download a signer signature or initial image',
+			},
 			{
 				name: 'Find by Email',
 				value: 'findByEmail',
 				action: 'Look up a signer by email address',
 			},
 			{ name: 'Get', value: 'get', action: 'Get a signer' },
+			{
+				name: 'Get Self (Signer Side)',
+				value: 'getSelf',
+				action: 'Signer retrieves their own info via access code',
+			},
 			{ name: 'List', value: 'list', action: 'List signers' },
 			{ name: 'Update', value: 'update', action: 'Update a signer' },
+			{
+				name: 'Upload Signature (Signer Side)',
+				value: 'uploadSignature',
+				action: 'Upload a signer signature or initial image',
+			},
+			{
+				name: 'Verify Code (Signer Side)',
+				value: 'verifyCode',
+				action: 'Submit a six digit verification code',
+			},
 		],
 	},
 
@@ -176,6 +219,109 @@ export const signerDescription: INodeProperties[] = [
 		displayOptions: { show: showOnly(['list']) },
 		options: [{ ...searchField }, { ...sortField }],
 	},
+
+	// --- signer-side operations: shared access code ---
+	{
+		displayName: 'Signer Access Code',
+		name: 'signerAccessCode',
+		type: 'string',
+		typeOptions: { password: true },
+		default: '',
+		required: true,
+		description: 'Per-signer access code (from the email/WhatsApp link)',
+		displayOptions: {
+			show: showOnly([
+				'getSelf',
+				'acceptTerms',
+				'verifyCode',
+				'confirmData',
+				'uploadSignature',
+				'downloadSignature',
+			]),
+		},
+	},
+
+	// --- verifyCode ---
+	{
+		displayName: 'Verification Code',
+		name: 'verificationCode',
+		type: 'string',
+		default: '',
+		required: true,
+		placeholder: '123456',
+		description: '6-digit code delivered to the signer via email or WhatsApp',
+		displayOptions: { show: showOnly(['verifyCode']) },
+	},
+
+	// --- confirmData ---
+	{
+		displayName: 'Document ID',
+		name: 'confirmDocumentId',
+		type: 'string',
+		default: '',
+		required: true,
+		displayOptions: { show: showOnly(['confirmData']) },
+	},
+	{
+		displayName: 'Confirm Fields',
+		name: 'confirmFields',
+		type: 'collection',
+		placeholder: 'Add Field',
+		default: {},
+		displayOptions: { show: showOnly(['confirmData']) },
+		options: [
+			{
+				displayName: 'Email',
+				name: 'email',
+				type: 'string',
+				placeholder: 'name@email.com',
+				default: '',
+			},
+			{
+				displayName: 'WhatsApp Phone Number',
+				name: 'whatsapp_phone_number',
+				type: 'string',
+				default: '',
+				placeholder: '+5548999990000',
+			},
+			{
+				displayName: 'Accept Terms',
+				name: 'has_accepted_terms',
+				type: 'boolean',
+				default: false,
+				description: 'Whether to also accept the terms of use in this request',
+			},
+		],
+	},
+
+	// --- uploadSignature / downloadSignature ---
+	{
+		displayName: 'Signature Type',
+		name: 'signatureType',
+		type: 'options',
+		default: 'signature',
+		options: [
+			{ name: 'Signature', value: 'signature' },
+			{ name: 'Initial', value: 'initial' },
+		],
+		displayOptions: { show: showOnly(['uploadSignature', 'downloadSignature']) },
+	},
+	{
+		displayName: 'Binary Property',
+		name: 'binaryPropertyName',
+		type: 'string',
+		default: 'data',
+		required: true,
+		description: 'PNG/JPEG image binary on the incoming item (uploadSignature)',
+		displayOptions: { show: showOnly(['uploadSignature']) },
+	},
+	{
+		displayName: 'Put Output In Field',
+		name: 'binaryOutputProperty',
+		type: 'string',
+		default: 'data',
+		displayOptions: { show: showOnly(['downloadSignature']) },
+	},
 ];
 
 export async function executeSigner(
@@ -183,7 +329,8 @@ export async function executeSigner(
 	itemIndex: number,
 	operation: string,
 ): Promise<INodeExecutionData | INodeExecutionData[]> {
-	const accountId = await getAccountId(this);
+	const needsAccount = !SELF_OPS.has(operation);
+	const accountId = needsAccount ? await getAccountId(this) : '';
 
 	switch (operation) {
 		case 'create':
@@ -198,6 +345,18 @@ export async function executeSigner(
 			return wrap(await deleteSigner.call(this, itemIndex, accountId));
 		case 'findByEmail':
 			return wrap(await findByEmail.call(this, itemIndex, accountId));
+		case 'getSelf':
+			return wrap(await getSelf.call(this, itemIndex));
+		case 'acceptTerms':
+			return wrap(await acceptTerms.call(this, itemIndex));
+		case 'verifyCode':
+			return wrap(await verifyCode.call(this, itemIndex));
+		case 'confirmData':
+			return wrap(await confirmData.call(this, itemIndex));
+		case 'uploadSignature':
+			return wrap(await uploadSignature.call(this, itemIndex));
+		case 'downloadSignature':
+			return downloadSignature.call(this, itemIndex);
 		default:
 			throw new NodeOperationError(
 				this.getNode(),
@@ -217,8 +376,8 @@ async function createSigner(
 	const additional = this.getNodeParameter('additionalFields', itemIndex, {}) as IDataObject;
 	const reuseIfExists = additional.reuseIfExists !== false;
 
-	if (email) {
-		assertEmail.call(this, email, itemIndex);
+	if (email && !assertEmail(email)) {
+		throw new NodeOperationError(this.getNode(), 'Invalid email address', { itemIndex });
 	}
 
 	if (!email && !additional.whatsapp_phone_number) {
@@ -347,7 +506,9 @@ async function findByEmail(
 	accountId: string,
 ): Promise<IDataObject> {
 	const email = this.getNodeParameter('email', itemIndex) as string;
-	assertEmail.call(this, email, itemIndex);
+	if (!assertEmail(email)) {
+		throw new NodeOperationError(this.getNode(), 'Invalid email address', { itemIndex });
+	}
 	const match = await lookupSignerByEmail.call(this, accountId, email);
 	return match ?? { found: false, email };
 }
@@ -377,29 +538,127 @@ async function lookupSignerByEmail(
 }
 
 function extractSignerId(this: IExecuteFunctions, itemIndex: number): string {
-	const id = this.getNodeParameter('signerId', itemIndex, '', { extractValue: true }) as string;
-	if (!id) {
-		throw new NodeOperationError(this.getNode(), 'Signer ID is required', { itemIndex });
-	}
-	return id;
+	return extractRequiredId(this, 'signerId', 'Signer ID', itemIndex);
 }
 
-function assertEmail(this: IExecuteFunctions, email: string, itemIndex: number): void {
-	if (!EMAIL_RE.test(email)) {
-		throw new NodeOperationError(this.getNode(), 'Invalid email address', { itemIndex });
+function requireAccessCode(this: IExecuteFunctions, itemIndex: number): string {
+	const code = (this.getNodeParameter('signerAccessCode', itemIndex) as string).trim();
+	if (!code) {
+		throw new NodeOperationError(this.getNode(), 'Signer Access Code is required', { itemIndex });
 	}
+	return code;
 }
 
-function sanitizeCpf(value: string): string {
-	return value.replace(/\D/g, '');
+async function getSelf(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
+	const code = requireAccessCode.call(this, itemIndex);
+	return assinafyApiRequest<IDataObject>(this, {
+		method: 'GET',
+		path: '/signers/self',
+		qs: { 'signer-access-code': code },
+		skipAuth: true,
+	});
 }
 
-function safeJsonParse(value: string | IDataObject): IDataObject {
-	if (typeof value === 'object' && value !== null) return value;
-	try {
-		const parsed = JSON.parse(value);
-		return typeof parsed === 'object' && parsed !== null ? (parsed as IDataObject) : {};
-	} catch {
-		return {};
+async function acceptTerms(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
+	const code = requireAccessCode.call(this, itemIndex);
+	return assinafyApiRequest<IDataObject>(this, {
+		method: 'PUT',
+		path: '/signers/accept-terms',
+		body: { 'signer-access-code': code },
+		skipAuth: true,
+	});
+}
+
+async function verifyCode(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
+	const code = requireAccessCode.call(this, itemIndex);
+	const verification = (this.getNodeParameter('verificationCode', itemIndex) as string).trim();
+	if (!verification) {
+		throw new NodeOperationError(this.getNode(), 'Verification Code is required', { itemIndex });
 	}
+	return assinafyApiRequest<IDataObject>(this, {
+		method: 'POST',
+		path: '/verify',
+		body: { 'signer-access-code': code, 'verification-code': verification },
+		skipAuth: true,
+	});
+}
+
+async function confirmData(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
+	const code = requireAccessCode.call(this, itemIndex);
+	const documentId = (this.getNodeParameter('confirmDocumentId', itemIndex) as string).trim();
+	if (!documentId) {
+		throw new NodeOperationError(this.getNode(), 'Document ID is required', { itemIndex });
+	}
+	const fields = this.getNodeParameter('confirmFields', itemIndex, {}) as IDataObject;
+	const body: IDataObject = {};
+	if (fields.email) body.email = fields.email;
+	if (fields.whatsapp_phone_number) body.whatsapp_phone_number = fields.whatsapp_phone_number;
+	if (fields.has_accepted_terms) body.has_accepted_terms = true;
+	return assinafyApiRequest<IDataObject>(this, {
+		method: 'PUT',
+		path: `/documents/${documentId}/signers/confirm-data`,
+		qs: { 'signer-access-code': code },
+		body,
+		skipAuth: true,
+	});
+}
+
+async function uploadSignature(
+	this: IExecuteFunctions,
+	itemIndex: number,
+): Promise<IDataObject> {
+	const code = requireAccessCode.call(this, itemIndex);
+	const type = this.getNodeParameter('signatureType', itemIndex, 'signature') as string;
+	const binaryProperty = this.getNodeParameter('binaryPropertyName', itemIndex, 'data') as string;
+	const binary = this.helpers.assertBinaryData(itemIndex, binaryProperty) as IBinaryData;
+	const buffer = await this.helpers.getBinaryDataBuffer(itemIndex, binaryProperty);
+	const mime = (binary.mimeType || 'image/png').toLowerCase();
+	if (!/^image\/(png|jpeg)$/.test(mime)) {
+		throw new NodeOperationError(
+			this.getNode(),
+			'Signature uploads must be image/png or image/jpeg',
+			{ itemIndex },
+		);
+	}
+	return assinafyApiRequest<IDataObject>(this, {
+		method: 'POST',
+		path: '/signature',
+		qs: { 'signer-access-code': code, type },
+		body: buffer,
+		headers: { 'Content-Type': mime },
+		skipAuth: true,
+	});
+}
+
+async function downloadSignature(
+	this: IExecuteFunctions,
+	itemIndex: number,
+): Promise<INodeExecutionData> {
+	const code = requireAccessCode.call(this, itemIndex);
+	const type = this.getNodeParameter('signatureType', itemIndex, 'signature') as string;
+	const outputProperty = this.getNodeParameter(
+		'binaryOutputProperty',
+		itemIndex,
+		'data',
+	) as string;
+	const response = (await assinafyApiRequest<unknown>(this, {
+		method: 'GET',
+		path: `/signature/${type}`,
+		qs: { 'signer-access-code': code },
+		returnBinary: true,
+		skipAuth: true,
+	})) as { body?: Buffer | ArrayBuffer; headers?: IDataObject };
+	const raw = response.body;
+	const buffer = Buffer.isBuffer(raw) ? raw : Buffer.from(raw ?? new ArrayBuffer(0));
+	const headerType = (response.headers?.['content-type'] ?? response.headers?.['Content-Type']) as
+		| string
+		| undefined;
+	const mime = headerType ? headerType.split(';')[0].trim() : 'image/png';
+	const ext = mime.includes('jpeg') ? 'jpg' : 'png';
+	const fileName = `${type}.${ext}`;
+	const data = await this.helpers.prepareBinaryData(buffer, fileName, mime);
+	return {
+		json: { type, fileName, mimeType: mime, size: buffer.byteLength },
+		binary: { [outputProperty]: data },
+	};
 }

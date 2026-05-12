@@ -7,12 +7,9 @@ import type {
 import { NodeOperationError } from 'n8n-workflow';
 import { assinafyApiRequest, getAccountId } from '../shared/transport';
 import { assignmentIdField, documentResourceLocator } from '../shared/descriptions';
-import { wrap } from '../shared/utils';
+import { extractRequiredId, showOnly as showOnlyFor, wrap } from '../shared/utils';
 
-const showOnly = (operation: string[]) => ({
-	resource: ['assignment'],
-	operation,
-});
+const showOnly = showOnlyFor('assignment');
 
 export const assignmentDescription: INodeProperties[] = [
 	{
@@ -30,6 +27,11 @@ export const assignmentDescription: INodeProperties[] = [
 			},
 			{ name: 'Create', value: 'create', action: 'Create an assignment' },
 			{
+				name: 'Decline (Signer Side)',
+				value: 'decline',
+				action: 'Signer declines to sign the document',
+			},
+			{
 				name: 'Estimate Cost',
 				value: 'estimateCost',
 				action: 'Estimate the credit cost of an assignment',
@@ -40,6 +42,16 @@ export const assignmentDescription: INodeProperties[] = [
 				action: 'Estimate the cost of resending a signer notification',
 			},
 			{
+				name: 'Get Sign Page',
+				value: 'getSignPage',
+				action: 'Signer reads document data for the signing flow',
+			},
+			{
+				name: 'List WhatsApp Notifications',
+				value: 'listWhatsapp',
+				action: 'List notifications sent for this assignment via whatsapp',
+			},
+			{
 				name: 'Resend Notification',
 				value: 'resendNotification',
 				action: 'Resend the signing notification to a signer',
@@ -48,6 +60,11 @@ export const assignmentDescription: INodeProperties[] = [
 				name: 'Reset Expiration',
 				value: 'resetExpiration',
 				action: 'Update the expiration date of an assignment',
+			},
+			{
+				name: 'Sign (Signer Side)',
+				value: 'sign',
+				action: 'Signer submits values for collect method input fields',
 			},
 		],
 	},
@@ -63,6 +80,9 @@ export const assignmentDescription: INodeProperties[] = [
 				'resendNotification',
 				'estimateResendCost',
 				'cancel',
+				'listWhatsapp',
+				'sign',
+				'decline',
 			]),
 		},
 	},
@@ -220,6 +240,41 @@ export const assignmentDescription: INodeProperties[] = [
 		description: 'Reason for cancelling the signature request (shown in activity log)',
 		displayOptions: { show: showOnly(['cancel']) },
 	},
+
+	// --- listWhatsapp ---
+	{ ...assignmentIdField, displayOptions: { show: showOnly(['listWhatsapp']) } },
+
+	// --- sign / decline / getSignPage ---
+	{
+		displayName: 'Signer Access Code',
+		name: 'signerAccessCode',
+		type: 'string',
+		typeOptions: { password: true },
+		default: '',
+		required: true,
+		description: 'Per-signer access code (from the email/WhatsApp link)',
+		displayOptions: { show: showOnly(['sign', 'decline', 'getSignPage']) },
+	},
+	{ ...assignmentIdField, displayOptions: { show: showOnly(['sign', 'decline']) } },
+	{
+		displayName: 'Items (JSON)',
+		name: 'signItems',
+		type: 'json',
+		default: '[]',
+		required: true,
+		description:
+			'Array of items to sign: [{ "itemId": "...", "fieldId": "...", "pageId": "...", "value": "..." }]',
+		displayOptions: { show: showOnly(['sign']) },
+	},
+	{
+		displayName: 'Decline Reason',
+		name: 'declineReason',
+		type: 'string',
+		typeOptions: { rows: 3 },
+		default: '',
+		required: true,
+		displayOptions: { show: showOnly(['decline']) },
+	},
 ];
 
 export async function executeAssignment(
@@ -240,6 +295,14 @@ export async function executeAssignment(
 			return wrap(await estimateResendCost.call(this, itemIndex));
 		case 'cancel':
 			return wrap(await cancelSignatureRequest.call(this, itemIndex));
+		case 'listWhatsapp':
+			return wrap({ notifications: await listWhatsappNotifications.call(this, itemIndex) });
+		case 'getSignPage':
+			return wrap(await getSignPage.call(this, itemIndex));
+		case 'sign':
+			return wrap(await signAssignment.call(this, itemIndex));
+		case 'decline':
+			return wrap(await declineAssignment.call(this, itemIndex));
 		default:
 			throw new NodeOperationError(
 				this.getNode(),
@@ -397,11 +460,76 @@ async function cancelSignatureRequest(
 }
 
 function extractDocumentId(this: IExecuteFunctions, itemIndex: number): string {
-	const id = this.getNodeParameter('documentId', itemIndex, '', { extractValue: true }) as string;
-	if (!id) {
-		throw new NodeOperationError(this.getNode(), 'Document ID is required', { itemIndex });
+	return extractRequiredId(this, 'documentId', 'Document ID', itemIndex);
+}
+
+async function listWhatsappNotifications(
+	this: IExecuteFunctions,
+	itemIndex: number,
+): Promise<IDataObject[]> {
+	const documentId = extractDocumentId.call(this, itemIndex);
+	const assignmentId = this.getNodeParameter('assignmentId', itemIndex) as string;
+	const response = await assinafyApiRequest<IDataObject[]>(this, {
+		method: 'GET',
+		path: `/documents/${documentId}/assignments/${assignmentId}/whatsapp-notifications`,
+	});
+	return Array.isArray(response) ? response : [];
+}
+
+async function getSignPage(
+	this: IExecuteFunctions,
+	itemIndex: number,
+): Promise<IDataObject> {
+	const code = (this.getNodeParameter('signerAccessCode', itemIndex) as string).trim();
+	if (!code) {
+		throw new NodeOperationError(this.getNode(), 'Signer Access Code is required', { itemIndex });
 	}
-	return id;
+	return assinafyApiRequest<IDataObject>(this, {
+		method: 'GET',
+		path: '/sign',
+		qs: { 'signer-access-code': code },
+		skipAuth: true,
+	});
+}
+
+async function signAssignment(
+	this: IExecuteFunctions,
+	itemIndex: number,
+): Promise<IDataObject> {
+	const documentId = extractDocumentId.call(this, itemIndex);
+	const assignmentId = this.getNodeParameter('assignmentId', itemIndex) as string;
+	const code = (this.getNodeParameter('signerAccessCode', itemIndex) as string).trim();
+	const raw = this.getNodeParameter('signItems', itemIndex, '[]') as unknown;
+	const items = parseJsonValue.call(this, raw, 'Items', itemIndex);
+	if (!Array.isArray(items) || items.length === 0) {
+		throw new NodeOperationError(this.getNode(), 'Items must be a non-empty JSON array', {
+			itemIndex,
+		});
+	}
+	return assinafyApiRequest<IDataObject>(this, {
+		method: 'POST',
+		path: `/documents/${documentId}/assignments/${assignmentId}`,
+		qs: { 'signer-access-code': code },
+		body: items as unknown as IDataObject,
+		skipAuth: true,
+	});
+}
+
+async function declineAssignment(
+	this: IExecuteFunctions,
+	itemIndex: number,
+): Promise<IDataObject> {
+	const documentId = extractDocumentId.call(this, itemIndex);
+	const assignmentId = this.getNodeParameter('assignmentId', itemIndex) as string;
+	const code = (this.getNodeParameter('signerAccessCode', itemIndex) as string).trim();
+	const reason = this.getNodeParameter('declineReason', itemIndex) as string;
+	return assinafyApiRequest<IDataObject>(this, {
+		method: 'PUT',
+		path: `/documents/${documentId}/assignments/${assignmentId}/reject`,
+		qs: { 'signer-access-code': code },
+		body: { decline_reason: reason },
+		skipAuth: true,
+	});
 }
 
 function parseJsonValue(

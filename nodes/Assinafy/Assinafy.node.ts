@@ -12,6 +12,9 @@ import { assignmentDescription, executeAssignment } from './resources/assignment
 import { workspaceDescription, executeWorkspace } from './resources/workspace';
 import { webhookDescription, executeWebhook } from './resources/webhook';
 import { templateDescription, executeTemplate } from './resources/template';
+import { fieldDescription, executeField } from './resources/field';
+import { signerDocumentDescription, executeSignerDocument } from './resources/signerDocument';
+import { authDescription, executeAuth } from './resources/auth';
 import { getDocuments } from './listSearch/getDocuments';
 import { getSigners } from './listSearch/getSigners';
 import { getTemplates } from './listSearch/getTemplates';
@@ -47,8 +50,11 @@ export class Assinafy implements INodeType {
 				default: 'document',
 			options: [
 				{ name: 'Assignment', value: 'assignment' },
+				{ name: 'Authentication', value: 'auth' },
 				{ name: 'Document', value: 'document' },
+				{ name: 'Field Definition', value: 'field' },
 				{ name: 'Signer', value: 'signer' },
+				{ name: 'Signer Document', value: 'signerDocument' },
 				{ name: 'Template', value: 'template' },
 				{ name: 'Webhook', value: 'webhook' },
 				{ name: 'Workspace', value: 'workspace' },
@@ -60,6 +66,9 @@ export class Assinafy implements INodeType {
 			...templateDescription,
 			...workspaceDescription,
 			...webhookDescription,
+			...fieldDescription,
+			...signerDocumentDescription,
+			...authDescription,
 		],
 	};
 
@@ -99,6 +108,15 @@ export class Assinafy implements INodeType {
 					break;
 				case 'webhook':
 					result = await executeWebhook.call(this, i, operation);
+					break;
+				case 'field':
+					result = await executeField.call(this, i, operation);
+					break;
+				case 'signerDocument':
+					result = await executeSignerDocument.call(this, i, operation);
+					break;
+				case 'auth':
+					result = await executeAuth.call(this, i, operation);
 					break;
 				default:
 						throw new NodeOperationError(this.getNode(), `Unknown resource: ${resource}`, {
