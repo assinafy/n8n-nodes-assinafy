@@ -8,6 +8,7 @@ import { templateDescription } from '../nodes/Assinafy/resources/template';
 import { fieldDescription } from '../nodes/Assinafy/resources/field';
 import { signerDocumentDescription } from '../nodes/Assinafy/resources/signerDocument';
 import { authDescription } from '../nodes/Assinafy/resources/auth';
+import { tagDescription } from '../nodes/Assinafy/resources/tag';
 import type { INodeProperties } from 'n8n-workflow';
 
 const getOperations = (description: INodeProperties[]): string[] => {
@@ -36,6 +37,10 @@ describe('Resource Descriptions', () => {
 			expect(operations).toContain('get');
 			expect(operations).toContain('delete');
 			expect(operations).toContain('download');
+			expect(operations).toContain('listTags');
+			expect(operations).toContain('replaceTags');
+			expect(operations).toContain('appendTags');
+			expect(operations).toContain('detachTag');
 		});
 	});
 
@@ -138,6 +143,15 @@ describe('Resource Descriptions', () => {
 			const operations = getOperations(templateDescription);
 			expect(operations).toContain('list');
 			expect(operations).toContain('get');
+		});
+	});
+
+	describe('tagDescription', () => {
+		it('should cover workspace tag operations', () => {
+			const operations = getOperations(tagDescription);
+			for (const op of ['create', 'list', 'update', 'delete']) {
+				expect(operations).toContain(op);
+			}
 		});
 	});
 

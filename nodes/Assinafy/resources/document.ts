@@ -6,19 +6,23 @@ import type {
 	INodeProperties,
 } from 'n8n-workflow';
 import { NodeOperationError, sleep } from 'n8n-workflow';
-import {
-	assinafyApiRequest,
-	assinafyApiRequestAllItems,
-	getAccountId,
-} from '../shared/transport';
+import { assinafyApiRequest, assinafyApiRequestAllItems, getAccountId } from '../shared/transport';
 import {
 	documentResourceLocator,
 	limitField,
 	returnAllField,
 	searchField,
 	sortField,
+	tagResourceLocator,
 } from '../shared/descriptions';
-import { cleanQs, extractRequiredId, showOnly as showOnlyFor, wrap } from '../shared/utils';
+import {
+	cleanQs,
+	extractRequiredId,
+	parseStringList,
+	showOnly as showOnlyFor,
+	validateSigningSteps,
+	wrap,
+} from '../shared/utils';
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 const READY_STATUSES = new Set(['metadata_ready', 'pending_signature', 'certificated']);
@@ -36,11 +40,21 @@ export const documentDescription: INodeProperties[] = [
 		default: 'upload',
 		options: [
 			{
+				name: 'Append Tags',
+				value: 'appendTags',
+				action: 'Append tags to a document',
+			},
+			{
 				name: 'Create From Template',
 				value: 'createFromTemplate',
 				action: 'Create a document from a template',
 			},
 			{ name: 'Delete', value: 'delete', action: 'Delete a document' },
+			{
+				name: 'Detach Tag',
+				value: 'detachTag',
+				action: 'Detach one tag from a document',
+			},
 			{
 				name: 'Download Artifact',
 				value: 'download',
@@ -82,6 +96,16 @@ export const documentDescription: INodeProperties[] = [
 				name: 'List Statuses',
 				value: 'listStatuses',
 				action: 'List supported document statuses and deletability',
+			},
+			{
+				name: 'List Tags',
+				value: 'listTags',
+				action: 'List tags attached to a document',
+			},
+			{
+				name: 'Replace Tags',
+				value: 'replaceTags',
+				action: 'Replace all tags on a document',
 			},
 			{
 				name: 'Send Public Token',
@@ -186,6 +210,14 @@ export const documentDescription: INodeProperties[] = [
 				],
 			},
 			{ ...sortField },
+			{
+				displayName: 'Tag IDs',
+				name: 'tags',
+				type: 'string',
+				typeOptions: { multipleValues: true },
+				default: [],
+				description: 'Tag IDs to filter by. Assinafy returns documents that have all listed tags.',
+			},
 		],
 	},
 
@@ -201,6 +233,10 @@ export const documentDescription: INodeProperties[] = [
 				'downloadPage',
 				'getActivities',
 				'getSigningProgress',
+				'listTags',
+				'replaceTags',
+				'appendTags',
+				'detachTag',
 				'waitUntilReady',
 			]),
 		},
@@ -233,6 +269,16 @@ export const documentDescription: INodeProperties[] = [
 				name: 'signer',
 				values: [
 					{
+						displayName: 'Notification Methods',
+						name: 'notification_methods',
+						type: 'multiOptions',
+						default: ['Email'],
+						options: [
+							{ name: 'Email', value: 'Email' },
+							{ name: 'WhatsApp', value: 'Whatsapp' },
+						],
+					},
+					{
 						displayName: 'Role ID',
 						name: 'role_id',
 						type: 'string',
@@ -245,24 +291,22 @@ export const documentDescription: INodeProperties[] = [
 						name: 'id',
 						type: 'string',
 						default: '',
+						description: 'Existing signer ID. Can be omitted for Estimate Cost.',
+					},
+					{
+						displayName: 'Step',
+						name: 'step',
+						type: 'number',
+						default: 0,
+						typeOptions: { minValue: 0 },
 						description:
-							'Existing signer ID. Can be omitted for Estimate Cost.',
+							'Optional signing order. Set every signer to a contiguous sequence starting at 1, or leave every signer at 0 to notify all at once.',
 					},
 					{
 						displayName: 'Verification Method',
 						name: 'verification_method',
 						type: 'options',
 						default: 'Email',
-						options: [
-							{ name: 'Email', value: 'Email' },
-							{ name: 'WhatsApp', value: 'Whatsapp' },
-						],
-					},
-					{
-						displayName: 'Notification Methods',
-						name: 'notification_methods',
-						type: 'multiOptions',
-						default: ['Email'],
 						options: [
 							{ name: 'Email', value: 'Email' },
 							{ name: 'WhatsApp', value: 'Whatsapp' },
@@ -288,12 +332,11 @@ export const documentDescription: INodeProperties[] = [
 				description: 'Override the default document name set on the template',
 			},
 			{
-				displayName: 'Message',
-				name: 'message',
-				type: 'string',
-				typeOptions: { rows: 3 },
-				default: '',
-				description: 'Message to include in the signing invitation',
+				displayName: 'Editor Fields (JSON)',
+				name: 'editor_fields',
+				type: 'json',
+				default: '[]',
+				description: 'Array of editor field values: [{ "field_id": "...", "value": "..." }]',
 			},
 			{
 				displayName: 'Expires At',
@@ -303,14 +346,39 @@ export const documentDescription: INodeProperties[] = [
 				description: 'ISO 8601 expiration date for the assignment',
 			},
 			{
-				displayName: 'Editor Fields (JSON)',
-				name: 'editor_fields',
-				type: 'json',
-				default: '[]',
+				displayName: 'Message',
+				name: 'message',
+				type: 'string',
+				typeOptions: { rows: 3 },
+				default: '',
+				description: 'Message to include in the signing invitation',
+			},
+			{
+				displayName: 'Tag Names',
+				name: 'tags',
+				type: 'string',
+				typeOptions: { multipleValues: true },
+				default: [],
 				description:
-					'Array of editor field values: [{ "field_id": "...", "value": "..." }]',
+					'Tag names to attach to the new document. Missing tags are created by Assinafy.',
 			},
 		],
+	},
+
+	// --- document tags ---
+	{
+		displayName: 'Tag Names',
+		name: 'tagNames',
+		type: 'string',
+		typeOptions: { multipleValues: true },
+		default: [],
+		description:
+			'Tag names to attach. For Replace Tags, leaving this empty removes all document tags.',
+		displayOptions: { show: showOnly(['replaceTags', 'appendTags']) },
+	},
+	{
+		...tagResourceLocator,
+		displayOptions: { show: showOnly(['detachTag']) },
 	},
 
 	// --- verify ---
@@ -320,8 +388,7 @@ export const documentDescription: INodeProperties[] = [
 		type: 'string',
 		default: '',
 		required: true,
-		description:
-			'The signature hash from the signed document (used to verify its authenticity)',
+		description: 'The signature hash from the signed document (used to verify its authenticity)',
 		displayOptions: { show: showOnly(['verify']) },
 	},
 
@@ -452,12 +519,18 @@ export async function executeDocument(
 			return wrap(await sendPublicToken.call(this, itemIndex));
 		case 'listStatuses':
 			return wrap({ statuses: await listStatuses.call(this) });
+		case 'listTags':
+			return listDocumentTags.call(this, itemIndex);
+		case 'replaceTags':
+			return wrap(await replaceDocumentTags.call(this, itemIndex));
+		case 'appendTags':
+			return wrap(await appendDocumentTags.call(this, itemIndex));
+		case 'detachTag':
+			return wrap(await detachDocumentTag.call(this, itemIndex));
 		default:
-			throw new NodeOperationError(
-				this.getNode(),
-				`Unknown document operation: ${operation}`,
-				{ itemIndex },
-			);
+			throw new NodeOperationError(this.getNode(), `Unknown document operation: ${operation}`, {
+				itemIndex,
+			});
 	}
 }
 
@@ -492,11 +565,9 @@ async function uploadDocument(
 	}
 
 	if (buffer.byteLength > MAX_UPLOAD_BYTES) {
-		throw new NodeOperationError(
-			this.getNode(),
-			"File size exceeds Assinafy's 25MB upload limit",
-			{ itemIndex },
-		);
+		throw new NodeOperationError(this.getNode(), "File size exceeds Assinafy's 25MB upload limit", {
+			itemIndex,
+		});
 	}
 
 	const form = new FormData();
@@ -529,7 +600,7 @@ async function listDocuments(
 	const filters = this.getNodeParameter('filters', itemIndex, {}) as IDataObject;
 	const accountId = await getAccountId(this);
 	const path = `/accounts/${accountId}/documents`;
-	const qs = cleanQs(filters);
+	const qs = normalizeTagFilter(cleanQs(filters));
 
 	if (returnAll) {
 		const items = await assinafyApiRequestAllItems<IDataObject>(this, {
@@ -552,10 +623,7 @@ async function listDocuments(
 	return items.map((item) => ({ json: item }));
 }
 
-async function getDocument(
-	this: IExecuteFunctions,
-	itemIndex: number,
-): Promise<IDataObject> {
+async function getDocument(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const documentId = extractDocumentId.call(this, itemIndex);
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'GET',
@@ -563,10 +631,7 @@ async function getDocument(
 	});
 }
 
-async function deleteDocument(
-	this: IExecuteFunctions,
-	itemIndex: number,
-): Promise<IDataObject> {
+async function deleteDocument(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const documentId = extractDocumentId.call(this, itemIndex);
 	await assinafyApiRequest(this, { method: 'DELETE', path: `/documents/${documentId}` });
 	return { deleted: true, documentId };
@@ -578,11 +643,7 @@ async function downloadArtifact(
 	kind: 'artifact' | 'thumbnail' | 'page',
 ): Promise<INodeExecutionData> {
 	const documentId = extractDocumentId.call(this, itemIndex);
-	const outputProperty = this.getNodeParameter(
-		'binaryOutputProperty',
-		itemIndex,
-		'data',
-	) as string;
+	const outputProperty = this.getNodeParameter('binaryOutputProperty', itemIndex, 'data') as string;
 
 	let path: string;
 	let suggestedFileName: string;
@@ -627,10 +688,7 @@ async function downloadArtifact(
 	};
 }
 
-async function getActivities(
-	this: IExecuteFunctions,
-	itemIndex: number,
-): Promise<IDataObject> {
+async function getActivities(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const documentId = extractDocumentId.call(this, itemIndex);
 	const activities = await assinafyApiRequest<IDataObject[] | null>(this, {
 		method: 'GET',
@@ -653,7 +711,8 @@ async function getSigningProgress(
 	const summary = (assignment.summary ?? {}) as IDataObject;
 	const total =
 		(summary.signer_count as number | undefined) ??
-		((assignment.signers as unknown[] | undefined)?.length ?? 0);
+		(assignment.signers as unknown[] | undefined)?.length ??
+		0;
 	const signed = (summary.completed_count as number | undefined) ?? 0;
 	const pending = Math.max(total - signed, 0);
 	const percentage = total > 0 ? Math.round((signed / total) * 10000) / 100 : 0;
@@ -671,10 +730,7 @@ async function getSigningProgress(
 	};
 }
 
-async function waitUntilReady(
-	this: IExecuteFunctions,
-	itemIndex: number,
-): Promise<IDataObject> {
+async function waitUntilReady(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const documentId = extractDocumentId.call(this, itemIndex);
 	const maxWaitMs = this.getNodeParameter('maxWaitMs', itemIndex, 30000) as number;
 	const pollIntervalMs = this.getNodeParameter('pollIntervalMs', itemIndex, 2000) as number;
@@ -721,9 +777,14 @@ async function createFromTemplate(
 		throw new NodeOperationError(this.getNode(), 'Template ID is required', { itemIndex });
 	}
 	const additional = this.getNodeParameter('additionalFields', itemIndex, {}) as IDataObject;
-	const signersRaw = (
-		this.getNodeParameter('templateSigners', itemIndex, {}) as { signer?: IDataObject[] }
-	).signer ?? [];
+	const signersRaw =
+		(this.getNodeParameter('templateSigners', itemIndex, {}) as { signer?: IDataObject[] })
+			.signer ?? [];
+	validateSigningSteps(
+		this,
+		signersRaw.map((signer) => signer.step as number | string | undefined),
+		itemIndex,
+	);
 
 	if (signersRaw.length === 0) {
 		throw new NodeOperationError(
@@ -738,9 +799,14 @@ async function createFromTemplate(
 			const entry: IDataObject = { role_id: s.role_id };
 			if (s.id) entry.id = s.id;
 			if (s.verification_method) entry.verification_method = s.verification_method;
-			if (Array.isArray(s.notification_methods) && (s.notification_methods as unknown[]).length > 0) {
+			if (
+				Array.isArray(s.notification_methods) &&
+				(s.notification_methods as unknown[]).length > 0
+			) {
 				entry.notification_methods = s.notification_methods;
 			}
+			const step = Number(s.step ?? 0);
+			if (step > 0) entry.step = step;
 			return entry;
 		}),
 	};
@@ -753,13 +819,13 @@ async function createFromTemplate(
 		try {
 			body.editor_fields = typeof raw === 'string' ? JSON.parse(raw) : raw;
 		} catch {
-			throw new NodeOperationError(
-				this.getNode(),
-				'Editor Fields must be a valid JSON array',
-				{ itemIndex },
-			);
+			throw new NodeOperationError(this.getNode(), 'Editor Fields must be a valid JSON array', {
+				itemIndex,
+			});
 		}
 	}
+	const tags = parseStringList(additional.tags);
+	if (tags.length > 0) body.tags = tags;
 
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'POST',
@@ -777,18 +843,28 @@ async function estimateCostFromTemplate(
 	if (!templateId) {
 		throw new NodeOperationError(this.getNode(), 'Template ID is required', { itemIndex });
 	}
-	const signersRaw = (
-		this.getNodeParameter('templateSigners', itemIndex, {}) as { signer?: IDataObject[] }
-	).signer ?? [];
+	const signersRaw =
+		(this.getNodeParameter('templateSigners', itemIndex, {}) as { signer?: IDataObject[] })
+			.signer ?? [];
+	validateSigningSteps(
+		this,
+		signersRaw.map((signer) => signer.step as number | string | undefined),
+		itemIndex,
+	);
 
 	const body: IDataObject = {
 		signers: signersRaw.map((s) => {
 			const entry: IDataObject = { role_id: s.role_id };
 			if (s.id) entry.id = s.id;
 			if (s.verification_method) entry.verification_method = s.verification_method;
-			if (Array.isArray(s.notification_methods) && (s.notification_methods as unknown[]).length > 0) {
+			if (
+				Array.isArray(s.notification_methods) &&
+				(s.notification_methods as unknown[]).length > 0
+			) {
 				entry.notification_methods = s.notification_methods;
 			}
+			const step = Number(s.step ?? 0);
+			if (step > 0) entry.step = step;
 			return entry;
 		}),
 	};
@@ -800,10 +876,7 @@ async function estimateCostFromTemplate(
 	});
 }
 
-async function verifyDocument(
-	this: IExecuteFunctions,
-	itemIndex: number,
-): Promise<IDataObject> {
+async function verifyDocument(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const hash = (this.getNodeParameter('signatureHash', itemIndex) as string).trim();
 	if (!hash) {
 		throw new NodeOperationError(this.getNode(), 'Signature Hash is required', { itemIndex });
@@ -814,10 +887,7 @@ async function verifyDocument(
 	});
 }
 
-async function getPublicInfo(
-	this: IExecuteFunctions,
-	itemIndex: number,
-): Promise<IDataObject> {
+async function getPublicInfo(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const id = (this.getNodeParameter('publicDocumentId', itemIndex) as string).trim();
 	if (!id) {
 		throw new NodeOperationError(this.getNode(), 'Document ID is required', { itemIndex });
@@ -829,10 +899,7 @@ async function getPublicInfo(
 	});
 }
 
-async function sendPublicToken(
-	this: IExecuteFunctions,
-	itemIndex: number,
-): Promise<IDataObject> {
+async function sendPublicToken(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const id = (this.getNodeParameter('publicDocumentId', itemIndex) as string).trim();
 	const recipient = (this.getNodeParameter('recipient', itemIndex) as string).trim();
 	const channel = this.getNodeParameter('channel', itemIndex, 'email') as string;
@@ -856,4 +923,72 @@ async function listStatuses(this: IExecuteFunctions): Promise<IDataObject[]> {
 		path: '/documents/statuses',
 	});
 	return Array.isArray(response) ? response : [];
+}
+
+async function listDocumentTags(
+	this: IExecuteFunctions,
+	itemIndex: number,
+): Promise<INodeExecutionData[]> {
+	const accountId = await getAccountId(this);
+	const documentId = extractDocumentId.call(this, itemIndex);
+	const response = await assinafyApiRequest<IDataObject[]>(this, {
+		method: 'GET',
+		path: `/accounts/${accountId}/documents/${documentId}/tags`,
+	});
+	const tags = Array.isArray(response) ? response : [];
+	return tags.map((tag) => ({ json: tag }));
+}
+
+async function replaceDocumentTags(
+	this: IExecuteFunctions,
+	itemIndex: number,
+): Promise<IDataObject> {
+	const accountId = await getAccountId(this);
+	const documentId = extractDocumentId.call(this, itemIndex);
+	return assinafyApiRequest<IDataObject>(this, {
+		method: 'PUT',
+		path: `/accounts/${accountId}/documents/${documentId}/tags`,
+		body: { tags: parseStringList(this.getNodeParameter('tagNames', itemIndex, [])) },
+	});
+}
+
+async function appendDocumentTags(
+	this: IExecuteFunctions,
+	itemIndex: number,
+): Promise<IDataObject> {
+	const tags = parseStringList(this.getNodeParameter('tagNames', itemIndex, []));
+	if (tags.length === 0) {
+		throw new NodeOperationError(this.getNode(), 'At least one tag name is required', {
+			itemIndex,
+		});
+	}
+
+	const accountId = await getAccountId(this);
+	const documentId = extractDocumentId.call(this, itemIndex);
+	return assinafyApiRequest<IDataObject>(this, {
+		method: 'POST',
+		path: `/accounts/${accountId}/documents/${documentId}/tags`,
+		body: { tags },
+	});
+}
+
+async function detachDocumentTag(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
+	const accountId = await getAccountId(this);
+	const documentId = extractDocumentId.call(this, itemIndex);
+	const tagId = extractRequiredId(this, 'tagId', 'Tag ID', itemIndex);
+	await assinafyApiRequest(this, {
+		method: 'DELETE',
+		path: `/accounts/${accountId}/documents/${documentId}/tags/${tagId}`,
+	});
+	return { detached: true, documentId, tagId };
+}
+
+function normalizeTagFilter(qs: IDataObject): IDataObject {
+	const tags = parseStringList(qs.tags);
+	if (tags.length > 0) {
+		qs.tags = tags.join(',');
+	} else {
+		delete qs.tags;
+	}
+	return qs;
 }

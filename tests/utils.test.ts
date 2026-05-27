@@ -3,9 +3,12 @@ import {
 	assertEmail,
 	cleanQs,
 	extractRequiredId,
+	normalizeHexColor,
+	parseStringList,
 	safeJsonParse,
 	sanitizeCpf,
 	showOnly,
+	validateSigningSteps,
 	wrap,
 } from '../nodes/Assinafy/shared/utils';
 
@@ -154,6 +157,58 @@ describe('shared/utils', () => {
 
 		it('should preserve digits only', () => {
 			expect(sanitizeCpf('abc123def456')).toBe('123456');
+		});
+	});
+
+	describe('parseStringList', () => {
+		it('should parse comma-separated strings and arrays', () => {
+			expect(parseStringList('one, two,three')).toEqual(['one', 'two', 'three']);
+			expect(parseStringList(['one, two', 'three'])).toEqual(['one', 'two', 'three']);
+		});
+
+		it('should drop empty values', () => {
+			expect(parseStringList(['', 'one, , two', undefined])).toEqual(['one', 'two']);
+		});
+	});
+
+	describe('normalizeHexColor', () => {
+		const ctx = {
+			getNode: jest.fn().mockReturnValue({ name: 'TestNode' }),
+		};
+
+		it('should normalize valid hex colors', () => {
+			expect(normalizeHexColor(ctx as any, '#FF8800', 0)).toBe('ff8800');
+			expect(normalizeHexColor(ctx as any, '112233', 0)).toBe('112233');
+			expect(normalizeHexColor(ctx as any, '', 0)).toBeUndefined();
+		});
+
+		it('should reject invalid hex colors', () => {
+			expect(() => normalizeHexColor(ctx as any, 'red', 0)).toThrow(
+				'Tag color must be a 6-character hex value',
+			);
+		});
+	});
+
+	describe('validateSigningSteps', () => {
+		const ctx = {
+			getNode: jest.fn().mockReturnValue({ name: 'TestNode' }),
+		};
+
+		it('should allow omitted or contiguous signing steps', () => {
+			expect(() => validateSigningSteps(ctx as any, [0, 0], 0)).not.toThrow();
+			expect(() => validateSigningSteps(ctx as any, [1, 1, 2], 0)).not.toThrow();
+		});
+
+		it('should require every signer to have a step when any step is set', () => {
+			expect(() => validateSigningSteps(ctx as any, [1, 0], 0)).toThrow(
+				'Signing step must be set for every signer',
+			);
+		});
+
+		it('should require contiguous signing steps', () => {
+			expect(() => validateSigningSteps(ctx as any, [1, 3], 0)).toThrow(
+				'Signing steps must form a contiguous sequence starting at 1',
+			);
 		});
 	});
 

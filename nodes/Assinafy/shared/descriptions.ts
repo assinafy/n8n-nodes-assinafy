@@ -83,6 +83,33 @@ export const signerResourceLocator: INodeProperties = {
 	],
 };
 
+export const tagResourceLocator: INodeProperties = {
+	displayName: 'Tag',
+	name: 'tagId',
+	type: 'resourceLocator',
+	default: { mode: 'list', value: '' },
+	required: true,
+	description: 'The Assinafy tag to operate on',
+	modes: [
+		{
+			displayName: 'From List',
+			name: 'list',
+			type: 'list',
+			placeholder: 'Select a tag...',
+			typeOptions: {
+				searchListMethod: 'getTags',
+				searchable: true,
+			},
+		},
+		{
+			displayName: 'By ID',
+			name: 'id',
+			type: 'string',
+			placeholder: 'e.g. fa8c09f3e709a8a1c82d69b1454',
+		},
+	],
+};
+
 export const assignmentIdField: INodeProperties = {
 	displayName: 'Assignment ID',
 	name: 'assignmentId',

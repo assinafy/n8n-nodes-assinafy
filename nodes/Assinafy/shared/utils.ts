@@ -42,6 +42,59 @@ export function sanitizeCpf(value: string): string {
 	return value.replace(/\D/g, '');
 }
 
+export function parseStringList(value: unknown): string[] {
+	const values = Array.isArray(value) ? value : [value];
+	return values
+		.flatMap((entry) => String(entry ?? '').split(','))
+		.map((entry) => entry.trim())
+		.filter(Boolean);
+}
+
+export function normalizeHexColor(
+	ctx: IExecuteFunctions,
+	value: unknown,
+	itemIndex: number,
+): string | undefined {
+	const color = String(value ?? '')
+		.trim()
+		.replace(/^#/, '');
+	if (!color) return undefined;
+	if (!/^[0-9a-fA-F]{6}$/.test(color)) {
+		throw new NodeOperationError(
+			ctx.getNode(),
+			'Tag color must be a 6-character hex value, with or without #',
+			{ itemIndex },
+		);
+	}
+	return color.toLowerCase();
+}
+
+export function validateSigningSteps(
+	ctx: IExecuteFunctions,
+	steps: Array<number | string | undefined>,
+	itemIndex: number,
+): void {
+	const numericSteps = steps.map((step) => Number(step ?? 0)).filter((step) => step > 0);
+	if (numericSteps.length === 0) return;
+	if (numericSteps.length !== steps.length) {
+		throw new NodeOperationError(
+			ctx.getNode(),
+			'Signing step must be set for every signer or omitted for every signer',
+			{ itemIndex },
+		);
+	}
+	const distinct = [...new Set(numericSteps)].sort((a, b) => a - b);
+	for (let i = 0; i < distinct.length; i++) {
+		if (distinct[i] !== i + 1) {
+			throw new NodeOperationError(
+				ctx.getNode(),
+				'Signing steps must form a contiguous sequence starting at 1',
+				{ itemIndex },
+			);
+		}
+	}
+}
+
 export function assertEmail(email: string): boolean {
 	return EMAIL_RE.test(email);
 }

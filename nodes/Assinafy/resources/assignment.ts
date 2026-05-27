@@ -7,7 +7,12 @@ import type {
 import { NodeOperationError } from 'n8n-workflow';
 import { assinafyApiRequest, getAccountId } from '../shared/transport';
 import { assignmentIdField, documentResourceLocator } from '../shared/descriptions';
-import { extractRequiredId, showOnly as showOnlyFor, wrap } from '../shared/utils';
+import {
+	extractRequiredId,
+	showOnly as showOnlyFor,
+	validateSigningSteps,
+	wrap,
+} from '../shared/utils';
 
 const showOnly = showOnlyFor('assignment');
 
@@ -149,6 +154,15 @@ export const assignmentDescription: INodeProperties[] = [
 							{ name: 'Email', value: 'Email' },
 							{ name: 'WhatsApp', value: 'Whatsapp' },
 						],
+					},
+					{
+						displayName: 'Step',
+						name: 'step',
+						type: 'number',
+						default: 0,
+						typeOptions: { minValue: 0 },
+						description:
+							'Optional signing order. Set every signer to a contiguous sequence starting at 1, or leave every signer at 0 to notify all at once.',
 					},
 				],
 			},
@@ -304,11 +318,9 @@ export async function executeAssignment(
 		case 'decline':
 			return wrap(await declineAssignment.call(this, itemIndex));
 		default:
-			throw new NodeOperationError(
-				this.getNode(),
-				`Unknown assignment operation: ${operation}`,
-				{ itemIndex },
-			);
+			throw new NodeOperationError(this.getNode(), `Unknown assignment operation: ${operation}`, {
+				itemIndex,
+			});
 	}
 }
 
@@ -316,6 +328,7 @@ interface SignerEntry {
 	id?: string;
 	verification_method?: string;
 	notification_methods?: string[];
+	step?: number;
 }
 
 function buildAssignmentBody(
@@ -333,6 +346,11 @@ function buildAssignmentBody(
 			itemIndex,
 		});
 	}
+	validateSigningSteps(
+		this,
+		entries.map((entry) => entry.step),
+		itemIndex,
+	);
 	const signers: IDataObject[] = [];
 	for (const entry of entries) {
 		const ref: IDataObject = {};
@@ -341,6 +359,7 @@ function buildAssignmentBody(
 		if (entry.notification_methods && entry.notification_methods.length > 0) {
 			ref.notification_methods = entry.notification_methods;
 		}
+		if (entry.step && entry.step > 0) ref.step = entry.step;
 		if (!ref.id && !options.allowSignersWithoutId) {
 			throw new NodeOperationError(
 				this.getNode(),
@@ -379,10 +398,7 @@ function buildAssignmentBody(
 	return body;
 }
 
-async function createAssignment(
-	this: IExecuteFunctions,
-	itemIndex: number,
-): Promise<IDataObject> {
+async function createAssignment(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const documentId = extractDocumentId.call(this, itemIndex);
 	const body = buildAssignmentBody.call(this, itemIndex);
 	return assinafyApiRequest<IDataObject>(this, {
@@ -392,10 +408,7 @@ async function createAssignment(
 	});
 }
 
-async function estimateCost(
-	this: IExecuteFunctions,
-	itemIndex: number,
-): Promise<IDataObject> {
+async function estimateCost(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const documentId = extractDocumentId.call(this, itemIndex);
 	const body = buildAssignmentBody.call(this, itemIndex, { allowSignersWithoutId: true });
 	return assinafyApiRequest<IDataObject>(this, {
@@ -405,10 +418,7 @@ async function estimateCost(
 	});
 }
 
-async function resetExpiration(
-	this: IExecuteFunctions,
-	itemIndex: number,
-): Promise<IDataObject> {
+async function resetExpiration(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const documentId = extractDocumentId.call(this, itemIndex);
 	const assignmentId = this.getNodeParameter('assignmentId', itemIndex) as string;
 	const expiresAt = this.getNodeParameter('expiresAt', itemIndex) as string;
@@ -476,10 +486,7 @@ async function listWhatsappNotifications(
 	return Array.isArray(response) ? response : [];
 }
 
-async function getSignPage(
-	this: IExecuteFunctions,
-	itemIndex: number,
-): Promise<IDataObject> {
+async function getSignPage(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const code = (this.getNodeParameter('signerAccessCode', itemIndex) as string).trim();
 	if (!code) {
 		throw new NodeOperationError(this.getNode(), 'Signer Access Code is required', { itemIndex });
@@ -492,10 +499,7 @@ async function getSignPage(
 	});
 }
 
-async function signAssignment(
-	this: IExecuteFunctions,
-	itemIndex: number,
-): Promise<IDataObject> {
+async function signAssignment(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const documentId = extractDocumentId.call(this, itemIndex);
 	const assignmentId = this.getNodeParameter('assignmentId', itemIndex) as string;
 	const code = (this.getNodeParameter('signerAccessCode', itemIndex) as string).trim();
@@ -515,10 +519,7 @@ async function signAssignment(
 	});
 }
 
-async function declineAssignment(
-	this: IExecuteFunctions,
-	itemIndex: number,
-): Promise<IDataObject> {
+async function declineAssignment(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const documentId = extractDocumentId.call(this, itemIndex);
 	const assignmentId = this.getNodeParameter('assignmentId', itemIndex) as string;
 	const code = (this.getNodeParameter('signerAccessCode', itemIndex) as string).trim();

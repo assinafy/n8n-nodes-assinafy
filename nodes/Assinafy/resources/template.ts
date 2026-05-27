@@ -5,13 +5,9 @@ import type {
 	INodeProperties,
 } from 'n8n-workflow';
 import { NodeOperationError } from 'n8n-workflow';
-import {
-	assinafyApiRequest,
-	assinafyApiRequestAllItems,
-	getAccountId,
-} from '../shared/transport';
+import { assinafyApiRequest, assinafyApiRequestAllItems, getAccountId } from '../shared/transport';
 import { limitField, returnAllField, searchField, sortField } from '../shared/descriptions';
-import { cleanQs, showOnly as showOnlyFor, wrap } from '../shared/utils';
+import { cleanQs, parseStringList, showOnly as showOnlyFor, wrap } from '../shared/utils';
 
 const showOnly = showOnlyFor('template');
 
@@ -59,6 +55,14 @@ export const templateDescription: INodeProperties[] = [
 					{ name: 'Uploading', value: 'uploading' },
 				],
 			},
+			{
+				displayName: 'Tag IDs',
+				name: 'tags',
+				type: 'string',
+				typeOptions: { multipleValues: true },
+				default: [],
+				description: 'Tag IDs to filter by. Assinafy returns templates that have all listed tags.',
+			},
 			{ ...sortField },
 		],
 	},
@@ -86,11 +90,9 @@ export async function executeTemplate(
 		case 'get':
 			return wrap(await getTemplate.call(this, itemIndex));
 		default:
-			throw new NodeOperationError(
-				this.getNode(),
-				`Unknown template operation: ${operation}`,
-				{ itemIndex },
-			);
+			throw new NodeOperationError(this.getNode(), `Unknown template operation: ${operation}`, {
+				itemIndex,
+			});
 	}
 }
 
@@ -102,7 +104,7 @@ async function listTemplates(
 	const returnAll = this.getNodeParameter('returnAll', itemIndex, false) as boolean;
 	const filters = this.getNodeParameter('filters', itemIndex, {}) as IDataObject;
 	const path = `/accounts/${accountId}/templates`;
-	const qs = cleanQs(filters);
+	const qs = normalizeTagFilter(cleanQs(filters));
 
 	if (returnAll) {
 		const items = await assinafyApiRequestAllItems<IDataObject>(this, {
@@ -125,10 +127,7 @@ async function listTemplates(
 	return items.map((item) => ({ json: item }));
 }
 
-async function getTemplate(
-	this: IExecuteFunctions,
-	itemIndex: number,
-): Promise<IDataObject> {
+async function getTemplate(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const accountId = await getAccountId(this);
 	const templateId = this.getNodeParameter('templateId', itemIndex) as string;
 	if (!templateId) {
@@ -138,4 +137,14 @@ async function getTemplate(
 		method: 'GET',
 		path: `/accounts/${accountId}/templates/${templateId}`,
 	});
+}
+
+function normalizeTagFilter(qs: IDataObject): IDataObject {
+	const tags = parseStringList(qs.tags);
+	if (tags.length > 0) {
+		qs.tags = tags.join(',');
+	} else {
+		delete qs.tags;
+	}
+	return qs;
 }
