@@ -6,7 +6,7 @@ import type {
 	INodeProperties,
 } from 'n8n-workflow';
 import { NodeOperationError, sleep } from 'n8n-workflow';
-import { assinafyApiRequest, assinafyApiRequestAllItems, getAccountId } from '../shared/transport';
+import { assinafyApiRequest, executeListOperation, getAccountId } from '../shared/transport';
 import {
 	documentResourceLocator,
 	limitField,
@@ -18,6 +18,7 @@ import {
 import {
 	cleanQs,
 	extractRequiredId,
+	normalizeTagFilter,
 	parseStringList,
 	showOnly as showOnlyFor,
 	validateSigningSteps,
@@ -596,31 +597,12 @@ async function listDocuments(
 	this: IExecuteFunctions,
 	itemIndex: number,
 ): Promise<INodeExecutionData[]> {
-	const returnAll = this.getNodeParameter('returnAll', itemIndex, false) as boolean;
 	const filters = this.getNodeParameter('filters', itemIndex, {}) as IDataObject;
 	const accountId = await getAccountId(this);
-	const path = `/accounts/${accountId}/documents`;
-	const qs = normalizeTagFilter(cleanQs(filters));
-
-	if (returnAll) {
-		const items = await assinafyApiRequestAllItems<IDataObject>(this, {
-			method: 'GET',
-			path,
-			qs,
-		});
-		return items.map((item) => ({ json: item }));
-	}
-
-	const limit = this.getNodeParameter('limit', itemIndex, 50) as number;
-	const response = await assinafyApiRequest<IDataObject[] | { data?: IDataObject[] }>(this, {
-		method: 'GET',
-		path,
-		qs: { ...qs, 'per-page': limit },
+	return executeListOperation(this, itemIndex, {
+		path: `/accounts/${accountId}/documents`,
+		qs: normalizeTagFilter(cleanQs(filters)),
 	});
-	const items = Array.isArray(response)
-		? response
-		: ((response as { data?: IDataObject[] }).data ?? []);
-	return items.map((item) => ({ json: item }));
 }
 
 async function getDocument(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
@@ -767,6 +749,34 @@ function extractDocumentId(this: IExecuteFunctions, itemIndex: number): string {
 	return extractRequiredId(this, 'documentId', 'Document ID', itemIndex);
 }
 
+/** Map the fixedCollection template-signer rows into the documented `signers[]` payload. */
+function buildTemplateSigners(signersRaw: IDataObject[]): IDataObject[] {
+	return signersRaw.map((s) => {
+		const entry: IDataObject = { role_id: s.role_id };
+		if (s.id) entry.id = s.id;
+		if (s.verification_method) entry.verification_method = s.verification_method;
+		if (Array.isArray(s.notification_methods) && (s.notification_methods as unknown[]).length > 0) {
+			entry.notification_methods = s.notification_methods;
+		}
+		const step = Number(s.step ?? 0);
+		if (step > 0) entry.step = step;
+		return entry;
+	});
+}
+
+/** Read + validate the shared template-signer rows for create/estimate operations. */
+function readTemplateSigners(this: IExecuteFunctions, itemIndex: number): IDataObject[] {
+	const signersRaw =
+		(this.getNodeParameter('templateSigners', itemIndex, {}) as { signer?: IDataObject[] })
+			.signer ?? [];
+	validateSigningSteps(
+		this,
+		signersRaw.map((signer) => signer.step as number | string | undefined),
+		itemIndex,
+	);
+	return signersRaw;
+}
+
 async function createFromTemplate(
 	this: IExecuteFunctions,
 	itemIndex: number,
@@ -777,14 +787,7 @@ async function createFromTemplate(
 		throw new NodeOperationError(this.getNode(), 'Template ID is required', { itemIndex });
 	}
 	const additional = this.getNodeParameter('additionalFields', itemIndex, {}) as IDataObject;
-	const signersRaw =
-		(this.getNodeParameter('templateSigners', itemIndex, {}) as { signer?: IDataObject[] })
-			.signer ?? [];
-	validateSigningSteps(
-		this,
-		signersRaw.map((signer) => signer.step as number | string | undefined),
-		itemIndex,
-	);
+	const signersRaw = readTemplateSigners.call(this, itemIndex);
 
 	if (signersRaw.length === 0) {
 		throw new NodeOperationError(
@@ -794,22 +797,7 @@ async function createFromTemplate(
 		);
 	}
 
-	const body: IDataObject = {
-		signers: signersRaw.map((s) => {
-			const entry: IDataObject = { role_id: s.role_id };
-			if (s.id) entry.id = s.id;
-			if (s.verification_method) entry.verification_method = s.verification_method;
-			if (
-				Array.isArray(s.notification_methods) &&
-				(s.notification_methods as unknown[]).length > 0
-			) {
-				entry.notification_methods = s.notification_methods;
-			}
-			const step = Number(s.step ?? 0);
-			if (step > 0) entry.step = step;
-			return entry;
-		}),
-	};
+	const body: IDataObject = { signers: buildTemplateSigners(signersRaw) };
 
 	if (additional.name) body.name = additional.name;
 	if (additional.message) body.message = additional.message;
@@ -843,36 +831,12 @@ async function estimateCostFromTemplate(
 	if (!templateId) {
 		throw new NodeOperationError(this.getNode(), 'Template ID is required', { itemIndex });
 	}
-	const signersRaw =
-		(this.getNodeParameter('templateSigners', itemIndex, {}) as { signer?: IDataObject[] })
-			.signer ?? [];
-	validateSigningSteps(
-		this,
-		signersRaw.map((signer) => signer.step as number | string | undefined),
-		itemIndex,
-	);
-
-	const body: IDataObject = {
-		signers: signersRaw.map((s) => {
-			const entry: IDataObject = { role_id: s.role_id };
-			if (s.id) entry.id = s.id;
-			if (s.verification_method) entry.verification_method = s.verification_method;
-			if (
-				Array.isArray(s.notification_methods) &&
-				(s.notification_methods as unknown[]).length > 0
-			) {
-				entry.notification_methods = s.notification_methods;
-			}
-			const step = Number(s.step ?? 0);
-			if (step > 0) entry.step = step;
-			return entry;
-		}),
-	};
+	const signersRaw = readTemplateSigners.call(this, itemIndex);
 
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'POST',
 		path: `/accounts/${accountId}/templates/${templateId}/documents/estimate-cost`,
-		body,
+		body: { signers: buildTemplateSigners(signersRaw) },
 	});
 }
 
@@ -881,9 +845,11 @@ async function verifyDocument(this: IExecuteFunctions, itemIndex: number): Promi
 	if (!hash) {
 		throw new NodeOperationError(this.getNode(), 'Signature Hash is required', { itemIndex });
 	}
+	// Public endpoint — no API key required (consistent with getPublicInfo/sendPublicToken).
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'GET',
 		path: `/documents/${hash}/verify`,
+		skipAuth: true,
 	});
 }
 
@@ -981,14 +947,4 @@ async function detachDocumentTag(this: IExecuteFunctions, itemIndex: number): Pr
 		path: `/accounts/${accountId}/documents/${documentId}/tags/${tagId}`,
 	});
 	return { detached: true, documentId, tagId };
-}
-
-function normalizeTagFilter(qs: IDataObject): IDataObject {
-	const tags = parseStringList(qs.tags);
-	if (tags.length > 0) {
-		qs.tags = tags.join(',');
-	} else {
-		delete qs.tags;
-	}
-	return qs;
 }

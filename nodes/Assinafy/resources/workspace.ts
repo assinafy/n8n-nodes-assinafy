@@ -5,7 +5,7 @@ import type {
 	INodeProperties,
 } from 'n8n-workflow';
 import { NodeOperationError } from 'n8n-workflow';
-import { assinafyApiRequest, assinafyApiRequestAllItems } from '../shared/transport';
+import { assinafyApiRequest, executeListOperation } from '../shared/transport';
 import { limitField, returnAllField } from '../shared/descriptions';
 import { showOnly as showOnlyFor, wrap } from '../shared/utils';
 
@@ -134,26 +134,7 @@ async function listWorkspaces(
 	this: IExecuteFunctions,
 	itemIndex: number,
 ): Promise<INodeExecutionData[]> {
-	const returnAll = this.getNodeParameter('returnAll', itemIndex, false) as boolean;
-
-	if (returnAll) {
-		const items = await assinafyApiRequestAllItems<IDataObject>(this, {
-			method: 'GET',
-			path: '/accounts',
-		});
-		return items.map((item) => ({ json: item }));
-	}
-
-	const limit = this.getNodeParameter('limit', itemIndex, 50) as number;
-	const response = await assinafyApiRequest<IDataObject[] | { data?: IDataObject[] }>(this, {
-		method: 'GET',
-		path: '/accounts',
-		qs: { 'per-page': limit },
-	});
-	const items = Array.isArray(response)
-		? response
-		: ((response as { data?: IDataObject[] }).data ?? []);
-	return items.map((item) => ({ json: item }));
+	return executeListOperation(this, itemIndex, { path: '/accounts' });
 }
 
 async function getWorkspace(

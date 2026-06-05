@@ -6,7 +6,15 @@ import type {
 } from 'n8n-workflow';
 import { NodeOperationError } from 'n8n-workflow';
 import { assinafyApiRequest } from '../shared/transport';
-import { cleanQs, showOnly as showOnlyFor, wrap } from '../shared/utils';
+import {
+	asArray,
+	cleanQs,
+	extractRequiredId,
+	parseStringList,
+	requireAccessCode,
+	showOnly as showOnlyFor,
+	wrap,
+} from '../shared/utils';
 
 const showOnly = showOnlyFor('signerDocument');
 
@@ -154,7 +162,7 @@ export async function executeSignerDocument(
 		case 'getCurrent':
 			return wrap(await getCurrent.call(this, itemIndex));
 		case 'list':
-			return wrap({ documents: await listDocuments.call(this, itemIndex) });
+			return (await listDocuments.call(this, itemIndex)).map((doc) => ({ json: doc }));
 		case 'signMultiple':
 			return wrap(await signMultiple.call(this, itemIndex));
 		case 'declineMultiple':
@@ -170,17 +178,9 @@ export async function executeSignerDocument(
 	}
 }
 
-function requireAccessCode(this: IExecuteFunctions, itemIndex: number): string {
-	const code = (this.getNodeParameter('signerAccessCode', itemIndex) as string).trim();
-	if (!code) {
-		throw new NodeOperationError(this.getNode(), 'Signer Access Code is required', { itemIndex });
-	}
-	return code;
-}
-
 async function getCurrent(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
-	const code = requireAccessCode.call(this, itemIndex);
-	const signerId = this.getNodeParameter('signerId', itemIndex) as string;
+	const code = requireAccessCode(this, itemIndex);
+	const signerId = extractRequiredId(this, 'signerId', 'Signer ID', itemIndex);
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'GET',
 		path: `/signers/${signerId}/document`,
@@ -193,8 +193,8 @@ async function listDocuments(
 	this: IExecuteFunctions,
 	itemIndex: number,
 ): Promise<IDataObject[]> {
-	const code = requireAccessCode.call(this, itemIndex);
-	const signerId = this.getNodeParameter('signerId', itemIndex) as string;
+	const code = requireAccessCode(this, itemIndex);
+	const signerId = extractRequiredId(this, 'signerId', 'Signer ID', itemIndex);
 	const filters = this.getNodeParameter('filters', itemIndex, {}) as IDataObject;
 	const qs = { 'signer-access-code': code, ...cleanQs(filters) };
 	const response = await assinafyApiRequest<IDataObject[] | { data?: IDataObject[] }>(this, {
@@ -203,22 +203,13 @@ async function listDocuments(
 		qs,
 		skipAuth: true,
 	});
-	return Array.isArray(response)
-		? response
-		: ((response as { data?: IDataObject[] }).data ?? []);
-}
-
-function parseDocumentIds(value: string): string[] {
-	return value
-		.split(',')
-		.map((id) => id.trim())
-		.filter(Boolean);
+	return asArray<IDataObject>(response);
 }
 
 async function signMultiple(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
-	const code = requireAccessCode.call(this, itemIndex);
+	const code = requireAccessCode(this, itemIndex);
 	const csv = this.getNodeParameter('documentIds', itemIndex) as string;
-	const ids = parseDocumentIds(csv);
+	const ids = parseStringList(csv);
 	if (ids.length === 0) {
 		throw new NodeOperationError(this.getNode(), 'At least one document ID is required', {
 			itemIndex,
@@ -237,10 +228,10 @@ async function declineMultiple(
 	this: IExecuteFunctions,
 	itemIndex: number,
 ): Promise<IDataObject> {
-	const code = requireAccessCode.call(this, itemIndex);
+	const code = requireAccessCode(this, itemIndex);
 	const csv = this.getNodeParameter('documentIds', itemIndex) as string;
 	const reason = this.getNodeParameter('declineReason', itemIndex) as string;
-	const ids = parseDocumentIds(csv);
+	const ids = parseStringList(csv);
 	if (ids.length === 0) {
 		throw new NodeOperationError(this.getNode(), 'At least one document ID is required', {
 			itemIndex,
@@ -259,9 +250,9 @@ async function download(
 	this: IExecuteFunctions,
 	itemIndex: number,
 ): Promise<INodeExecutionData> {
-	const code = requireAccessCode.call(this, itemIndex);
-	const signerId = this.getNodeParameter('signerId', itemIndex) as string;
-	const documentId = this.getNodeParameter('documentId', itemIndex) as string;
+	const code = requireAccessCode(this, itemIndex);
+	const signerId = extractRequiredId(this, 'signerId', 'Signer ID', itemIndex);
+	const documentId = extractRequiredId(this, 'documentId', 'Document ID', itemIndex);
 	const artifact = this.getNodeParameter('artifact', itemIndex, 'certificated') as string;
 	const outputProperty = this.getNodeParameter(
 		'binaryOutputProperty',

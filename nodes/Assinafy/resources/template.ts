@@ -5,9 +5,9 @@ import type {
 	INodeProperties,
 } from 'n8n-workflow';
 import { NodeOperationError } from 'n8n-workflow';
-import { assinafyApiRequest, assinafyApiRequestAllItems, getAccountId } from '../shared/transport';
+import { assinafyApiRequest, executeListOperation, getAccountId } from '../shared/transport';
 import { limitField, returnAllField, searchField, sortField } from '../shared/descriptions';
-import { cleanQs, parseStringList, showOnly as showOnlyFor, wrap } from '../shared/utils';
+import { cleanQs, normalizeTagFilter, showOnly as showOnlyFor, wrap } from '../shared/utils';
 
 const showOnly = showOnlyFor('template');
 
@@ -101,30 +101,11 @@ async function listTemplates(
 	itemIndex: number,
 ): Promise<INodeExecutionData[]> {
 	const accountId = await getAccountId(this);
-	const returnAll = this.getNodeParameter('returnAll', itemIndex, false) as boolean;
 	const filters = this.getNodeParameter('filters', itemIndex, {}) as IDataObject;
-	const path = `/accounts/${accountId}/templates`;
-	const qs = normalizeTagFilter(cleanQs(filters));
-
-	if (returnAll) {
-		const items = await assinafyApiRequestAllItems<IDataObject>(this, {
-			method: 'GET',
-			path,
-			qs,
-		});
-		return items.map((item) => ({ json: item }));
-	}
-
-	const limit = this.getNodeParameter('limit', itemIndex, 50) as number;
-	const response = await assinafyApiRequest<IDataObject[] | { data?: IDataObject[] }>(this, {
-		method: 'GET',
-		path,
-		qs: { ...qs, 'per-page': limit },
+	return executeListOperation(this, itemIndex, {
+		path: `/accounts/${accountId}/templates`,
+		qs: normalizeTagFilter(cleanQs(filters)),
 	});
-	const items = Array.isArray(response)
-		? response
-		: ((response as { data?: IDataObject[] }).data ?? []);
-	return items.map((item) => ({ json: item }));
 }
 
 async function getTemplate(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
@@ -137,14 +118,4 @@ async function getTemplate(this: IExecuteFunctions, itemIndex: number): Promise<
 		method: 'GET',
 		path: `/accounts/${accountId}/templates/${templateId}`,
 	});
-}
-
-function normalizeTagFilter(qs: IDataObject): IDataObject {
-	const tags = parseStringList(qs.tags);
-	if (tags.length > 0) {
-		qs.tags = tags.join(',');
-	} else {
-		delete qs.tags;
-	}
-	return qs;
 }

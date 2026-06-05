@@ -71,9 +71,9 @@ export class AssinafyTrigger implements INodeType {
 				displayName: 'Verify Signature',
 				name: 'verifySignature',
 				type: 'boolean',
-				default: true,
+				default: false,
 				description:
-					'Whether to reject requests whose HMAC-SHA256 signature does not match the credential webhook secret',
+					'Whether to reject deliveries whose HMAC-SHA256 signature (hex digest of the raw body, header X-Assinafy-Signature) does not match the credential Webhook Secret. Off by default: the Assinafy public API docs do not currently document a delivery signature, so enable this only if your workspace is configured to send one and you have set the matching secret. When enabled, deliveries without a verifiable raw body are rejected.',
 			},
 			{
 				displayName:
@@ -152,7 +152,7 @@ export class AssinafyTrigger implements INodeType {
 		const headers = this.getHeaderData() as Record<string, string | string[] | undefined>;
 		const body = this.getBodyData() as IDataObject;
 
-		const verifySignature = this.getNodeParameter('verifySignature', true) as boolean;
+		const verifySignature = this.getNodeParameter('verifySignature', false) as boolean;
 		if (verifySignature) {
 			const credentials = (await this.getCredentials(CREDENTIALS_TYPE)) as {
 				webhookSecret?: string;
@@ -173,8 +173,16 @@ export class AssinafyTrigger implements INodeType {
 				);
 			}
 
-			const rawBody =
-				(req as unknown as { rawBody?: Buffer | string }).rawBody ?? JSON.stringify(body);
+			// Fail closed: the signature is computed over the exact bytes Assinafy
+			// signed. Re-serializing the parsed body would not byte-match, so when the
+			// raw body is unavailable we reject rather than silently fail the compare.
+			const rawBody = (req as unknown as { rawBody?: Buffer | string }).rawBody;
+			if (rawBody === undefined || rawBody === null || rawBody === '') {
+				throw new NodeOperationError(
+					this.getNode(),
+					'Verify Signature is enabled but the raw request body is not available to verify against',
+				);
+			}
 			const payload = Buffer.isBuffer(rawBody) ? rawBody : Buffer.from(String(rawBody), 'utf8');
 			if (!verifyHmac(secret, payload, signature)) {
 				throw new NodeOperationError(this.getNode(), 'Invalid Assinafy webhook signature');

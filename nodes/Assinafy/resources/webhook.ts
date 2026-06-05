@@ -5,11 +5,7 @@ import type {
 	INodeProperties,
 } from 'n8n-workflow';
 import { NodeOperationError } from 'n8n-workflow';
-import {
-	assinafyApiRequest,
-	assinafyApiRequestAllItems,
-	getAccountId,
-} from '../shared/transport';
+import { assinafyApiRequest, executeListOperation, getAccountId } from '../shared/transport';
 import { limitField, returnAllField } from '../shared/descriptions';
 import { DEFAULT_WEBHOOK_EVENTS, WEBHOOK_EVENT_OPTIONS } from './webhookEvents';
 import { cleanQs, showOnly as showOnlyFor, wrap } from '../shared/utils';
@@ -87,13 +83,9 @@ export const webhookDescription: INodeProperties[] = [
 		displayName: 'Events',
 		name: 'events',
 		type: 'multiOptions',
-		default: [
-			'document_ready',
-			'document_prepared',
-			'signer_signed_document',
-			'signer_rejected_document',
-			'document_processing_failed',
-		],
+		// Empty selection falls back to DEFAULT_WEBHOOK_EVENTS in registerWebhook(),
+		// matching the Trigger node's Events field.
+		default: [],
 		displayOptions: { show: showOnly(['register']) },
 		options: WEBHOOK_EVENT_OPTIONS,
 	},
@@ -273,30 +265,11 @@ async function listDispatches(
 	itemIndex: number,
 ): Promise<INodeExecutionData[]> {
 	const accountId = await getAccountId(this);
-	const returnAll = this.getNodeParameter('returnAll', itemIndex, false) as boolean;
 	const filters = this.getNodeParameter('filters', itemIndex, {}) as IDataObject;
-	const path = `/accounts/${accountId}/webhooks`;
-	const qs = cleanQs(filters, ['from', 'to']);
-
-	if (returnAll) {
-		const items = await assinafyApiRequestAllItems<IDataObject>(this, {
-			method: 'GET',
-			path,
-			qs,
-		});
-		return items.map((item) => ({ json: item }));
-	}
-
-	const limit = this.getNodeParameter('limit', itemIndex, 50) as number;
-	const response = await assinafyApiRequest<IDataObject[] | { data?: IDataObject[] }>(this, {
-		method: 'GET',
-		path,
-		qs: { ...qs, 'per-page': limit },
+	return executeListOperation(this, itemIndex, {
+		path: `/accounts/${accountId}/webhooks`,
+		qs: cleanQs(filters, ['from', 'to']),
 	});
-	const items = Array.isArray(response)
-		? response
-		: ((response as { data?: IDataObject[] }).data ?? []);
-	return items.map((item) => ({ json: item }));
 }
 
 async function retryDispatch(

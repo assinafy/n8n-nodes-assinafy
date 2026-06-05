@@ -5,10 +5,11 @@ import type {
 	INodeProperties,
 } from 'n8n-workflow';
 import { NodeOperationError } from 'n8n-workflow';
-import { assinafyApiRequest, getAccountId } from '../shared/transport';
+import { assinafyApiRequest } from '../shared/transport';
 import { assignmentIdField, documentResourceLocator } from '../shared/descriptions';
 import {
 	extractRequiredId,
+	parseJsonParam,
 	showOnly as showOnlyFor,
 	validateSigningSteps,
 	wrap,
@@ -25,11 +26,6 @@ export const assignmentDescription: INodeProperties[] = [
 		displayOptions: { show: { resource: ['assignment'] } },
 		default: 'create',
 		options: [
-			{
-				name: 'Cancel Signature Request',
-				value: 'cancel',
-				action: 'Cancel an active signature request',
-			},
 			{ name: 'Create', value: 'create', action: 'Create an assignment' },
 			{
 				name: 'Decline (Signer Side)',
@@ -84,7 +80,6 @@ export const assignmentDescription: INodeProperties[] = [
 				'resetExpiration',
 				'resendNotification',
 				'estimateResendCost',
-				'cancel',
 				'listWhatsapp',
 				'sign',
 				'decline',
@@ -243,18 +238,6 @@ export const assignmentDescription: INodeProperties[] = [
 		displayOptions: { show: showOnly(['resendNotification', 'estimateResendCost']) },
 	},
 
-	// --- cancel ---
-	{
-		displayName: 'Reason',
-		name: 'reason',
-		type: 'string',
-		default: '',
-		required: true,
-		typeOptions: { rows: 3 },
-		description: 'Reason for cancelling the signature request (shown in activity log)',
-		displayOptions: { show: showOnly(['cancel']) },
-	},
-
 	// --- listWhatsapp ---
 	{ ...assignmentIdField, displayOptions: { show: showOnly(['listWhatsapp']) } },
 
@@ -307,8 +290,6 @@ export async function executeAssignment(
 			return wrap(await resendNotification.call(this, itemIndex));
 		case 'estimateResendCost':
 			return wrap(await estimateResendCost.call(this, itemIndex));
-		case 'cancel':
-			return wrap(await cancelSignatureRequest.call(this, itemIndex));
 		case 'listWhatsapp':
 			return wrap({ notifications: await listWhatsappNotifications.call(this, itemIndex) });
 		case 'getSignPage':
@@ -340,19 +321,19 @@ function buildAssignmentBody(
 	const signersParam = this.getNodeParameter('signers', itemIndex, {}) as {
 		signer?: SignerEntry[];
 	};
-	const entries = signersParam.signer ?? [];
-	if (entries.length === 0) {
+	const signerEntries = signersParam.signer ?? [];
+	if (signerEntries.length === 0) {
 		throw new NodeOperationError(this.getNode(), 'At least one signer is required', {
 			itemIndex,
 		});
 	}
 	validateSigningSteps(
 		this,
-		entries.map((entry) => entry.step),
+		signerEntries.map((entry) => entry.step),
 		itemIndex,
 	);
 	const signers: IDataObject[] = [];
-	for (const entry of entries) {
+	for (const entry of signerEntries) {
 		const ref: IDataObject = {};
 		if (entry.id) ref.id = entry.id;
 		if (entry.verification_method) ref.verification_method = entry.verification_method;
@@ -384,15 +365,15 @@ function buildAssignmentBody(
 
 	if (method === 'collect') {
 		const entriesParam = this.getNodeParameter('entries', itemIndex, '[]') as unknown;
-		const entries = parseJsonValue.call(this, entriesParam, 'Entries', itemIndex);
-		if (!Array.isArray(entries) || entries.length === 0) {
+		const collectEntries = parseJsonParam(this, entriesParam, 'Entries', itemIndex);
+		if (!Array.isArray(collectEntries) || collectEntries.length === 0) {
 			throw new NodeOperationError(
 				this.getNode(),
 				'Collect assignments require a non-empty Entries JSON array',
 				{ itemIndex },
 			);
 		}
-		body.entries = entries as IDataObject[];
+		body.entries = collectEntries as IDataObject[];
 	}
 
 	return body;
@@ -455,20 +436,6 @@ async function estimateResendCost(
 	});
 }
 
-async function cancelSignatureRequest(
-	this: IExecuteFunctions,
-	itemIndex: number,
-): Promise<IDataObject> {
-	const accountId = await getAccountId(this);
-	const documentId = extractDocumentId.call(this, itemIndex);
-	const reason = this.getNodeParameter('reason', itemIndex) as string;
-	return assinafyApiRequest<IDataObject>(this, {
-		method: 'POST',
-		path: `/accounts/${accountId}/signature-requests/${documentId}/cancel`,
-		body: { document_id: documentId, reason },
-	});
-}
-
 function extractDocumentId(this: IExecuteFunctions, itemIndex: number): string {
 	return extractRequiredId(this, 'documentId', 'Document ID', itemIndex);
 }
@@ -504,7 +471,7 @@ async function signAssignment(this: IExecuteFunctions, itemIndex: number): Promi
 	const assignmentId = this.getNodeParameter('assignmentId', itemIndex) as string;
 	const code = (this.getNodeParameter('signerAccessCode', itemIndex) as string).trim();
 	const raw = this.getNodeParameter('signItems', itemIndex, '[]') as unknown;
-	const items = parseJsonValue.call(this, raw, 'Items', itemIndex);
+	const items = parseJsonParam(this, raw, 'Items', itemIndex);
 	if (!Array.isArray(items) || items.length === 0) {
 		throw new NodeOperationError(this.getNode(), 'Items must be a non-empty JSON array', {
 			itemIndex,
@@ -531,20 +498,4 @@ async function declineAssignment(this: IExecuteFunctions, itemIndex: number): Pr
 		body: { decline_reason: reason },
 		skipAuth: true,
 	});
-}
-
-function parseJsonValue(
-	this: IExecuteFunctions,
-	value: unknown,
-	fieldName: string,
-	itemIndex: number,
-): unknown {
-	if (typeof value !== 'string') return value;
-	try {
-		return JSON.parse(value);
-	} catch {
-		throw new NodeOperationError(this.getNode(), `${fieldName} must be valid JSON`, {
-			itemIndex,
-		});
-	}
 }

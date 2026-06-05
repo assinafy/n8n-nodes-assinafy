@@ -7,9 +7,19 @@ module.exports = {
 	moduleFileExtensions: ['ts', 'js', 'json'],
 	collectCoverageFrom: [
 		'nodes/**/*.ts',
-		'!nodes/**/*.test.ts',
-		'!nodes/**/dist/**',
+		'credentials/**/*.ts',
+		'!**/*.test.ts',
 	],
 	coverageDirectory: 'coverage',
+	// Floors set below current coverage (~80% statements) to catch regressions
+	// without being brittle. Raise over time as coverage grows.
+	coverageThreshold: {
+		global: {
+			statements: 75,
+			branches: 50,
+			functions: 80,
+			lines: 75,
+		},
+	},
 	verbose: true,
 };

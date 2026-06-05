@@ -1,6 +1,6 @@
 {
 	"node": "@assinafy/n8n-nodes-assinafy.assinafy",
-	"nodeVersion": "1.2.0",
+	"nodeVersion": "1.3.0",
 	"codexVersion": "1.0.0",
 	"categories": ["Productivity", "Miscellaneous"],
 	"resources": {

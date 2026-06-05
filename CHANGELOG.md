@@ -3,6 +3,68 @@
 All notable changes to `@assinafy/n8n-nodes-assinafy` will be documented here.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] — 2026-06-05
+
+Production-hardening audit against the live Assinafy v1 API (sandbox-verified, every
+operation exercised). Adds a full per-operation reference, a much larger test suite,
+and CI that actually runs it.
+
+### Removed
+
+- **Assignment — `Cancel Signature Request`.** Live testing confirmed the endpoint
+  does not exist (every candidate path — `POST /accounts/{id}/signature-requests/{docId}/cancel`,
+  `/documents/{id}/cancel`, `.../assignments/{id}/cancel` — returns 404, even against a real
+  document with an active assignment), and the API docs document no cancellation endpoint. The
+  non-functional operation was removed.
+
+### Fixed
+
+- **Signer reuse race now handles the real conflict status.** A duplicate-email create
+  returns **HTTP 400** (`"Um signatário com este e-mail já existe."`), not 409. `Create`
+  (with *Reuse If Exists*) now treats 400 and 409 alike: it re-resolves and returns the
+  existing signer instead of surfacing the error.
+- **`Verify` (document by hash) now calls the public endpoint with `skipAuth`,** matching the
+  other public endpoints, so it works without an API key.
+- **Pagination is header-accurate everywhere.** The resource-locator pickers
+  (`getDocuments`/`getSigners`/`getTags`/`getTemplates`) now derive the next page from the
+  `X-Pagination-Page-Count` header instead of a brittle page-size heuristic.
+- **Transport retries transient `429 Too Many Requests`** with bounded exponential backoff,
+  honoring a `Retry-After` header, including mid-pagination.
+
+### Changed
+
+- **Trigger signature verification is now opt-in (default off).** The Assinafy docs document
+  no delivery signature; enabling `Verify Signature` (with a credential Webhook Secret) keeps the
+  HMAC-SHA256 check, which now **fails closed** when the raw request body is unavailable instead
+  of re-serializing the parsed body.
+- **`assinafyApiRequestAllItems` honors `skipAuth`** and wraps page errors in `NodeApiError`,
+  and `per-page` is clamped to the documented maximum of 100.
+- **Signer Document `List` emits one n8n item per document** (was a single bundled item),
+  matching every other list operation.
+
+### Refactored (no behaviour change)
+
+- Extracted shared helpers to remove ~6× duplicated list-pagination blocks, ~10× envelope
+  unwraps, and duplicated `requireAccessCode` / `normalizeTagFilter` / JSON-parse logic:
+  `executeListOperation`, `searchResource`, `asArray` (transport) and `requireAccessCode`,
+  `parseJsonParam`, `normalizeTagFilter` (utils). `cleanQs` now also drops empty arrays.
+
+### Tooling
+
+- **CI now runs the Jest suite** (and a Node `20 / 22 / 24` matrix); the publish workflow runs
+  lint + tests + build and asserts the git tag matches `package.json` version before publishing.
+- Added `engines.node >= 20.19`, pinned `@n8n/node-cli`, bumped `tsconfig` target/lib to ES2022,
+  fixed `build:watch` to copy assets (`n8n-node dev`), corrected jest coverage globs, and added a
+  coverage floor.
+
+### Documentation & tests
+
+- **New [`docs/OPERATIONS.md`](docs/OPERATIONS.md):** full request/response payload reference for
+  all 80 operations across 10 resources.
+- Test suite grown from 98 to 185 tests: request-shape assertions for every resource/operation,
+  the Trigger's HMAC verification + lifecycle, and the list-search pickers (~80% statement
+  coverage, up from ~27%).
+
 ## [1.2.0] — 2026-05-11
 
 Full API-coverage release. The action node now exposes every documented endpoint

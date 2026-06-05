@@ -6,7 +6,7 @@ import type {
 } from 'n8n-workflow';
 import { NodeOperationError } from 'n8n-workflow';
 import { assinafyApiRequest, getAccountId } from '../shared/transport';
-import { cleanQs, extractRequiredId, showOnly as showOnlyFor, wrap } from '../shared/utils';
+import { asArray, cleanQs, extractRequiredId, parseJsonParam, showOnly as showOnlyFor, wrap } from '../shared/utils';
 
 const showOnly = showOnlyFor('field');
 
@@ -234,9 +234,7 @@ async function listFields(
 		path: `/accounts/${accountId}/fields`,
 		qs,
 	});
-	return Array.isArray(response)
-		? response
-		: ((response as { data?: IDataObject[] }).data ?? []);
+	return asArray<IDataObject>(response);
 }
 
 async function getField(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
@@ -295,16 +293,7 @@ async function validateMultiple(
 	const accountId = await getAccountId(this);
 	const signerCode = (this.getNodeParameter('signerAccessCode', itemIndex, '') as string).trim();
 	const raw = this.getNodeParameter('validateItems', itemIndex, '[]') as unknown;
-	let items: unknown;
-	if (typeof raw === 'string') {
-		try {
-			items = JSON.parse(raw);
-		} catch {
-			throw new NodeOperationError(this.getNode(), 'Items must be valid JSON', { itemIndex });
-		}
-	} else {
-		items = raw;
-	}
+	const items = parseJsonParam(this, raw, 'Items', itemIndex);
 	if (!Array.isArray(items) || items.length === 0) {
 		throw new NodeOperationError(this.getNode(), 'Items must be a non-empty JSON array', {
 			itemIndex,
@@ -317,7 +306,7 @@ async function validateMultiple(
 		body: items as unknown as IDataObject,
 		skipAuth: signerCode.length > 0,
 	});
-	return Array.isArray(response) ? response : [];
+	return asArray<IDataObject>(response);
 }
 
 async function listFieldTypes(this: IExecuteFunctions): Promise<IDataObject[]> {

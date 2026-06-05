@@ -6,11 +6,7 @@ import type {
 	INodeProperties,
 } from 'n8n-workflow';
 import { NodeOperationError } from 'n8n-workflow';
-import {
-	assinafyApiRequest,
-	assinafyApiRequestAllItems,
-	getAccountId,
-} from '../shared/transport';
+import { assinafyApiRequest, executeListOperation, getAccountId } from '../shared/transport';
 import {
 	limitField,
 	returnAllField,
@@ -19,9 +15,11 @@ import {
 	sortField,
 } from '../shared/descriptions';
 import {
+	asArray,
 	assertEmail,
 	cleanQs,
 	extractRequiredId,
+	requireAccessCode,
 	safeJsonParse,
 	sanitizeCpf,
 	showOnly as showOnlyFor,
@@ -412,8 +410,12 @@ async function createSigner(
 			body,
 		});
 	} catch (error) {
-		const code = (error as { httpCode?: string | number }).httpCode;
-		if (email && reuseIfExists && (code === 409 || code === '409')) {
+		// A duplicate email loses the lookup→create race; the API rejects it with
+		// HTTP 400 ("Um signatário com este e-mail já existe."), not 409 (verified
+		// live). On any duplicate-style failure, re-resolve and return the existing
+		// signer rather than surfacing the conflict.
+		const code = String((error as { httpCode?: string | number }).httpCode ?? '');
+		if (email && reuseIfExists && (code === '400' || code === '409')) {
 			const existing = await lookupSignerByEmail.call(this, accountId, email);
 			if (existing) return existing;
 		}
@@ -426,30 +428,11 @@ async function listSigners(
 	itemIndex: number,
 	accountId: string,
 ): Promise<INodeExecutionData[]> {
-	const returnAll = this.getNodeParameter('returnAll', itemIndex, false) as boolean;
 	const filters = this.getNodeParameter('filters', itemIndex, {}) as IDataObject;
-	const path = `/accounts/${accountId}/signers`;
-	const qs = cleanQs(filters);
-
-	if (returnAll) {
-		const items = await assinafyApiRequestAllItems<IDataObject>(this, {
-			method: 'GET',
-			path,
-			qs,
-		});
-		return items.map((item) => ({ json: item }));
-	}
-
-	const limit = this.getNodeParameter('limit', itemIndex, 50) as number;
-	const response = await assinafyApiRequest<IDataObject[] | { data?: IDataObject[] }>(this, {
-		method: 'GET',
-		path,
-		qs: { ...qs, 'per-page': limit },
+	return executeListOperation(this, itemIndex, {
+		path: `/accounts/${accountId}/signers`,
+		qs: cleanQs(filters),
 	});
-	const items = Array.isArray(response)
-		? response
-		: ((response as { data?: IDataObject[] }).data ?? []);
-	return items.map((item) => ({ json: item }));
 }
 
 async function getSigner(
@@ -524,9 +507,7 @@ async function lookupSignerByEmail(
 			path: `/accounts/${accountId}/signers`,
 			qs: { search: email, 'per-page': 100 },
 		});
-		const signers = Array.isArray(response)
-			? response
-			: ((response as { data?: IDataObject[] }).data ?? []);
+		const signers = asArray<IDataObject>(response);
 		return (
 			signers.find((s) => String(s.email ?? '').toLowerCase() === email.toLowerCase()) ?? null
 		);
@@ -541,16 +522,8 @@ function extractSignerId(this: IExecuteFunctions, itemIndex: number): string {
 	return extractRequiredId(this, 'signerId', 'Signer ID', itemIndex);
 }
 
-function requireAccessCode(this: IExecuteFunctions, itemIndex: number): string {
-	const code = (this.getNodeParameter('signerAccessCode', itemIndex) as string).trim();
-	if (!code) {
-		throw new NodeOperationError(this.getNode(), 'Signer Access Code is required', { itemIndex });
-	}
-	return code;
-}
-
 async function getSelf(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
-	const code = requireAccessCode.call(this, itemIndex);
+	const code = requireAccessCode(this, itemIndex);
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'GET',
 		path: '/signers/self',
@@ -560,7 +533,7 @@ async function getSelf(this: IExecuteFunctions, itemIndex: number): Promise<IDat
 }
 
 async function acceptTerms(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
-	const code = requireAccessCode.call(this, itemIndex);
+	const code = requireAccessCode(this, itemIndex);
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'PUT',
 		path: '/signers/accept-terms',
@@ -570,7 +543,7 @@ async function acceptTerms(this: IExecuteFunctions, itemIndex: number): Promise<
 }
 
 async function verifyCode(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
-	const code = requireAccessCode.call(this, itemIndex);
+	const code = requireAccessCode(this, itemIndex);
 	const verification = (this.getNodeParameter('verificationCode', itemIndex) as string).trim();
 	if (!verification) {
 		throw new NodeOperationError(this.getNode(), 'Verification Code is required', { itemIndex });
@@ -584,7 +557,7 @@ async function verifyCode(this: IExecuteFunctions, itemIndex: number): Promise<I
 }
 
 async function confirmData(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
-	const code = requireAccessCode.call(this, itemIndex);
+	const code = requireAccessCode(this, itemIndex);
 	const documentId = (this.getNodeParameter('confirmDocumentId', itemIndex) as string).trim();
 	if (!documentId) {
 		throw new NodeOperationError(this.getNode(), 'Document ID is required', { itemIndex });
@@ -607,7 +580,7 @@ async function uploadSignature(
 	this: IExecuteFunctions,
 	itemIndex: number,
 ): Promise<IDataObject> {
-	const code = requireAccessCode.call(this, itemIndex);
+	const code = requireAccessCode(this, itemIndex);
 	const type = this.getNodeParameter('signatureType', itemIndex, 'signature') as string;
 	const binaryProperty = this.getNodeParameter('binaryPropertyName', itemIndex, 'data') as string;
 	const binary = this.helpers.assertBinaryData(itemIndex, binaryProperty) as IBinaryData;
@@ -634,7 +607,7 @@ async function downloadSignature(
 	this: IExecuteFunctions,
 	itemIndex: number,
 ): Promise<INodeExecutionData> {
-	const code = requireAccessCode.call(this, itemIndex);
+	const code = requireAccessCode(this, itemIndex);
 	const type = this.getNodeParameter('signatureType', itemIndex, 'signature') as string;
 	const outputProperty = this.getNodeParameter(
 		'binaryOutputProperty',

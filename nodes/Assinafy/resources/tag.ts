@@ -5,7 +5,7 @@ import type {
 	INodeProperties,
 } from 'n8n-workflow';
 import { NodeOperationError } from 'n8n-workflow';
-import { assinafyApiRequest, assinafyApiRequestAllItems, getAccountId } from '../shared/transport';
+import { assinafyApiRequest, executeListOperation, getAccountId } from '../shared/transport';
 import {
 	limitField,
 	returnAllField,
@@ -44,7 +44,8 @@ export const tagDescription: INodeProperties[] = [
 		type: 'string',
 		default: '',
 		required: true,
-		description: 'Tag display name. Assinafy trims and normalizes whitespace.',
+		typeOptions: { maxLength: 64 },
+		description: 'Tag display name (max 64 characters). Assinafy trims and normalizes whitespace.',
 		displayOptions: { show: showOnly(['create']) },
 	},
 	{
@@ -159,30 +160,11 @@ async function createTag(this: IExecuteFunctions, itemIndex: number): Promise<ID
 
 async function listTags(this: IExecuteFunctions, itemIndex: number): Promise<INodeExecutionData[]> {
 	const accountId = await getAccountId(this);
-	const returnAll = this.getNodeParameter('returnAll', itemIndex, false) as boolean;
 	const filters = this.getNodeParameter('filters', itemIndex, {}) as IDataObject;
-	const path = `/accounts/${accountId}/tags`;
-	const qs = cleanQs(filters);
-
-	if (returnAll) {
-		const items = await assinafyApiRequestAllItems<IDataObject>(this, {
-			method: 'GET',
-			path,
-			qs,
-		});
-		return items.map((item) => ({ json: item }));
-	}
-
-	const limit = this.getNodeParameter('limit', itemIndex, 50) as number;
-	const response = await assinafyApiRequest<IDataObject[] | { data?: IDataObject[] }>(this, {
-		method: 'GET',
-		path,
-		qs: { ...qs, 'per-page': limit },
+	return executeListOperation(this, itemIndex, {
+		path: `/accounts/${accountId}/tags`,
+		qs: cleanQs(filters),
 	});
-	const items = Array.isArray(response)
-		? response
-		: ((response as { data?: IDataObject[] }).data ?? []);
-	return items.map((item) => ({ json: item }));
 }
 
 async function updateTag(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
@@ -190,11 +172,20 @@ async function updateTag(this: IExecuteFunctions, itemIndex: number): Promise<ID
 	const tagId = extractRequiredId(this, 'tagId', 'Tag ID', itemIndex);
 	const updates = this.getNodeParameter('updateFields', itemIndex, {}) as IDataObject;
 
+	const hasColor = updates.color !== undefined && updates.color !== '';
+	if (updates.clearColor && hasColor) {
+		throw new NodeOperationError(
+			this.getNode(),
+			'Set either Color or Clear Color, not both',
+			{ itemIndex },
+		);
+	}
+
 	const body: IDataObject = {};
 	if (updates.name) body.name = String(updates.name).trim();
 	if (updates.clearColor) {
 		body.color = null;
-	} else if (updates.color !== undefined && updates.color !== '') {
+	} else if (hasColor) {
 		body.color = normalizeHexColor(this, updates.color, itemIndex);
 	}
 

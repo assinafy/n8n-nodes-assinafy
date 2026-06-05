@@ -60,6 +60,11 @@ The credential test calls `GET /accounts/{accountId}` to confirm the key and acc
 
 ## Supported operations
 
+> **Full reference with request/response payloads:** see
+> [`docs/OPERATIONS.md`](docs/OPERATIONS.md) for every operation's node parameters,
+> example request body/query, and example response (`{status,message,data}` envelope,
+> unwrapped by the node). The tables below are a quick endpoint index.
+
 ### Resource: Document
 
 | Operation                   | Endpoint                                                                                             |
@@ -113,7 +118,6 @@ Uploads accept a binary property from the previous node (must be a non-empty PDF
 | Reset Expiration            | `PUT /documents/{documentId}/assignments/{assignmentId}/reset-expiration`                         |
 | Resend Notification         | `PUT /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/resend`                |
 | Estimate Resend Cost        | `POST /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/estimate-resend-cost` |
-| Cancel Signature Request    | `POST /accounts/{accountId}/signature-requests/{documentId}/cancel`                               |
 | List WhatsApp Notifications | `GET /documents/{documentId}/assignments/{assignmentId}/whatsapp-notifications`                   |
 | Get Sign Page (Signer Side) | `GET /sign?signer-access-code=…`                                                                  |
 | Sign (Signer Side)          | `POST /documents/{documentId}/assignments/{assignmentId}?signer-access-code=…`                    |
@@ -205,16 +209,15 @@ User-account flows. Most return an access token used as `Authorization: Bearer �
 
 ## Assinafy Trigger
 
-The trigger node registers (or replaces) the workspace-wide webhook subscription when the workflow is activated, and **inactivates** it on deactivation via the documented `PUT /accounts/{accountId}/webhooks/inactivate` endpoint. On each incoming delivery it:
+The trigger node registers (or replaces) the workspace-wide webhook subscription when the workflow is activated, and **inactivates** it on deactivation via the documented `PUT /accounts/{accountId}/webhooks/inactivate` endpoint. On each incoming delivery it emits `{ event, headers, body }` as a single n8n item.
 
-1. Reads the `X-Assinafy-Signature` header.
-2. Verifies the HMAC-SHA256 digest over the raw request body against the credential webhook secret (toggle off with `Verify Signature`).
-3. Emits `{ event, headers, body }` as a single n8n item.
+**Signature verification is opt-in.** The Assinafy public API docs do not currently document a delivery signature, so `Verify Signature` is **off by default**. If your workspace is configured to sign deliveries, set the credential **Webhook Secret** and enable `Verify Signature`: the node then requires the `X-Assinafy-Signature` header, computes the HMAC-SHA256 digest over the **raw** request body, and rejects the delivery on mismatch (or when the raw body is unavailable — it fails closed).
 
 > [!IMPORTANT]
 > The Assinafy API supports a **single** webhook subscription per workspace. Activating this trigger replaces any existing subscription; deactivating it inactivates the subscription (so delivery history is retained but no further events are sent). If you need to fan out events to multiple destinations, point the trigger at an n8n workflow that rebroadcasts to downstream systems.
 
-Supported events include `document_uploaded`, `document_metadata_ready`, `document_prepared`, `document_ready`, `assignment_created`, `signature_requested`, `signer_created`, `signer_email_verified`, `signer_whatsapp_verified`, `signer_data_confirmed`, `signer_viewed_document`, `signer_signed_document`, `signer_rejected_document`, `user_rejected_document`, `document_processing_failed`, and the template lifecycle events.
+The full event list (source of truth: `nodes/Assinafy/resources/webhookEvents.ts`, shown in the node's **Events** dropdown):
+`assignment_created`, `document_metadata_ready`, `document_prepared`, `document_processing_failed`, `document_ready`, `document_uploaded`, `signature_requested`, `signer_created`, `signer_data_confirmed`, `signer_email_verified`, `signer_rejected_document`, `signer_signed_document`, `signer_viewed_document`, `signer_whatsapp_verified`, `template_created`, `template_processed`, `template_processing_failed`, `user_rejected_document`. When no events are selected, the trigger subscribes to a sensible default set (`document_ready`, `document_prepared`, `signer_signed_document`, `signer_rejected_document`, `document_processing_failed`).
 
 ## Example workflow
 
