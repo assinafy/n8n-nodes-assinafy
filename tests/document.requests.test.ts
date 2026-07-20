@@ -35,6 +35,32 @@ describe('document request construction', () => {
 		expect(req.url).toBe(`${BASE}/documents/doc_123`);
 	});
 
+	it('renames a document via PATCH', async () => {
+		const { ctx, requests } = makeCtx({ documentId: 'doc_123', newName: 'signed.pdf' });
+		await executeDocument.call(ctx as any, 0, 'rename');
+		const req = lastAuth(requests);
+		expect(req.method).toBe('PATCH');
+		expect(req.url).toBe(`${BASE}/documents/doc_123`);
+		expect(req.body).toEqual({ name: 'signed.pdf' });
+	});
+
+	it('rejects a rename with an empty new name', async () => {
+		const { ctx } = makeCtx({ documentId: 'doc_123', newName: '  ' });
+		await expect(executeDocument.call(ctx as any, 0, 'rename')).rejects.toThrow('New Name is required');
+	});
+
+	it('searches documents via the lightweight search endpoint', async () => {
+		const { ctx, requests } = makeCtx(
+			{ returnAll: false, limit: 15, searchFilters: { search: 'contract', status: 'metadata_ready' } },
+			{ response: [{ id: 'doc_1' }] },
+		);
+		await executeDocument.call(ctx as any, 0, 'search');
+		const req = lastAuth(requests);
+		expect(req.method).toBe('GET');
+		expect(req.url).toBe(`${BASE}/accounts/acc_123/documents/search`);
+		expect(req.qs).toEqual({ search: 'contract', status: 'metadata_ready', 'per-page': 15 });
+	});
+
 	it('deletes a document by id', async () => {
 		const { ctx, requests } = makeCtx({ documentId: 'doc_123' });
 		const result = (await executeDocument.call(ctx as any, 0, 'delete')) as any;

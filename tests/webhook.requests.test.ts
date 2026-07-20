@@ -31,14 +31,6 @@ describe('webhook request construction', () => {
 		expect(result.json).toEqual({ subscribed: false });
 	});
 
-	it('deletes the subscription', async () => {
-		const { ctx, requests } = makeCtx({});
-		const result = (await executeWebhook.call(ctx as any, 0, 'delete')) as any;
-		expect(lastAuth(requests).method).toBe('DELETE');
-		expect(lastAuth(requests).url).toBe(`${BASE}/accounts/acc_123/webhooks/subscriptions`);
-		expect(result.json).toEqual({ deleted: true });
-	});
-
 	it('inactivates the subscription', async () => {
 		const { ctx, requests } = makeCtx({});
 		await executeWebhook.call(ctx as any, 0, 'inactivate');

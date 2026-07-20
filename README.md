@@ -71,7 +71,9 @@ The credential test calls `GET /accounts/{accountId}` to confirm the key and acc
 | --------------------------- | ---------------------------------------------------------------------------------------------------- |
 | Upload                      | `POST /accounts/{accountId}/documents` (multipart)                                                   |
 | List                        | `GET /accounts/{accountId}/documents`                                                                |
+| Search                      | `GET /accounts/{accountId}/documents/search` â€” lightweight name/status search                        |
 | Get                         | `GET /documents/{id}`                                                                                |
+| Rename                      | `PATCH /documents/{id}`                                                                              |
 | Delete                      | `DELETE /documents/{id}`                                                                             |
 | Download Artifact           | `GET /documents/{id}/download/{artifact}` â€” `original`, `certificated`, `certificate-page`, `bundle` |
 | Download Thumbnail          | `GET /documents/{id}/thumbnail`                                                                      |
@@ -187,13 +189,18 @@ User-account flows. Most return an access token used as `Authorization: Bearer â
 
 ### Resource: Workspace
 
-| Operation | Endpoint                         |
-| --------- | -------------------------------- |
-| Create    | `POST /accounts`                 |
-| List      | `GET /accounts`                  |
-| Get       | `GET /accounts/{workspaceId}`    |
-| Update    | `PUT /accounts/{workspaceId}`    |
-| Delete    | `DELETE /accounts/{workspaceId}` |
+| Operation        | Endpoint                             |
+| ---------------- | ------------------------------------ |
+| Create           | `POST /accounts`                     |
+| List             | `GET /accounts`                      |
+| Get              | `GET /accounts/{workspaceId}`        |
+| Update           | `PUT /accounts/{workspaceId}`        |
+| Delete           | `DELETE /accounts/{workspaceId}`     |
+| Get Current User | `GET /users/self`                    |
+| Get Theme        | `GET /accounts/{workspaceId}/theme`  |
+| Upload Logo      | `POST /accounts/{workspaceId}/logo` (multipart) |
+| Download Logo    | `GET /accounts/{workspaceId}/logo`   |
+| Delete Logo      | `DELETE /accounts/{workspaceId}/logo` |
 
 ### Resource: Webhook
 
@@ -201,7 +208,6 @@ User-account flows. Most return an access token used as `Authorization: Bearer â
 | ----------------------- | -------------------------------------------------------- |
 | Register Subscription   | `PUT /accounts/{accountId}/webhooks/subscriptions`       |
 | Get Subscription        | `GET /accounts/{accountId}/webhooks/subscriptions`       |
-| Delete Subscription     | `DELETE /accounts/{accountId}/webhooks/subscriptions`    |
 | Inactivate Subscription | `PUT /accounts/{accountId}/webhooks/inactivate`          |
 | List Event Types        | `GET /webhooks/event-types`                              |
 | List Dispatches         | `GET /accounts/{accountId}/webhooks`                     |

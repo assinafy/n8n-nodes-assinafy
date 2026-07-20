@@ -41,6 +41,8 @@ describe('Resource Descriptions', () => {
 			expect(operations).toContain('replaceTags');
 			expect(operations).toContain('appendTags');
 			expect(operations).toContain('detachTag');
+			expect(operations).toContain('rename');
+			expect(operations).toContain('search');
 		});
 	});
 
@@ -100,11 +102,20 @@ describe('Resource Descriptions', () => {
 
 		it('should include all expected workspace operations', () => {
 			const operations = getOperations(workspaceDescription);
-			expect(operations).toContain('create');
-			expect(operations).toContain('list');
-			expect(operations).toContain('get');
-			expect(operations).toContain('update');
-			expect(operations).toContain('delete');
+			for (const op of [
+				'create',
+				'list',
+				'get',
+				'update',
+				'delete',
+				'getCurrentUser',
+				'getTheme',
+				'uploadLogo',
+				'downloadLogo',
+				'deleteLogo',
+			]) {
+				expect(operations).toContain(op);
+			}
 		});
 	});
 

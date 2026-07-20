@@ -11,9 +11,14 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Least-privilege default: CI only needs to read the repository.
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     strategy:
       fail-fast: false

@@ -49,4 +49,51 @@ describe('workspace request construction', () => {
 		expect(lastAuth(requests).method).toBe('DELETE');
 		expect(result.json).toEqual({ deleted: true, workspaceId: 'ws_1' });
 	});
+
+	it('gets the current user from /users/self', async () => {
+		const { ctx, requests } = makeCtx({}, { response: { user: { id: 'u1' }, accounts: [] } });
+		await executeWorkspace.call(ctx as any, 0, 'getCurrentUser');
+		const req = lastAuth(requests);
+		expect(req.method).toBe('GET');
+		expect(req.url).toBe(`${BASE}/users/self`);
+	});
+
+	it('gets the workspace theme', async () => {
+		const { ctx, requests } = makeCtx({ workspaceId: 'ws_1' });
+		await executeWorkspace.call(ctx as any, 0, 'getTheme');
+		expect(lastAuth(requests).url).toBe(`${BASE}/accounts/ws_1/theme`);
+	});
+
+	it('uploads a logo as multipart', async () => {
+		const { ctx, requests } = makeCtx(
+			{ workspaceId: 'ws_1', binaryPropertyName: 'data' },
+			{ binaryBuffer: Buffer.from('PNG'), binaryMeta: { fileName: 'logo.png', mimeType: 'image/png' } },
+		);
+		await executeWorkspace.call(ctx as any, 0, 'uploadLogo');
+		const req = lastAuth(requests);
+		expect(req.method).toBe('POST');
+		expect(req.url).toBe(`${BASE}/accounts/ws_1/logo`);
+		expect(req.body).toBeInstanceOf(FormData);
+	});
+
+	it('downloads the logo as binary', async () => {
+		const { ctx, requests } = makeCtx(
+			{ workspaceId: 'ws_1', binaryOutputProperty: 'data' },
+			{ binaryBuffer: Buffer.from('PNG'), headers: { 'content-type': 'image/png' } },
+		);
+		const result = (await executeWorkspace.call(ctx as any, 0, 'downloadLogo')) as any;
+		const req = lastAuth(requests);
+		expect(req.method).toBe('GET');
+		expect(req.url).toBe(`${BASE}/accounts/ws_1/logo`);
+		expect(req.encoding).toBe('arraybuffer');
+		expect(result.binary.data).toBeDefined();
+	});
+
+	it('deletes the logo', async () => {
+		const { ctx, requests } = makeCtx({ workspaceId: 'ws_1' });
+		const result = (await executeWorkspace.call(ctx as any, 0, 'deleteLogo')) as any;
+		expect(lastAuth(requests).method).toBe('DELETE');
+		expect(lastAuth(requests).url).toBe(`${BASE}/accounts/ws_1/logo`);
+		expect(result.json).toEqual({ deleted: true, workspaceId: 'ws_1' });
+	});
 });

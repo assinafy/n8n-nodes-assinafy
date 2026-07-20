@@ -29,6 +29,7 @@ jobs:
   publish:
     name: Publish to GitHub Packages
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     permissions:
       contents: read

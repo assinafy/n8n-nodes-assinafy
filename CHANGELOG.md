@@ -3,6 +3,37 @@
 All notable changes to `@assinafy/n8n-nodes-assinafy` will be documented here.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] — 2026-07-20
+
+Full re-audit against the live Assinafy v1 API (OpenAPI 3.0 spec, 89 documented
+operations). Every operation — existing and new — was exercised end-to-end against
+the sandbox through the real SDK code paths.
+
+### Added
+
+- **Document — `Rename`** (`PATCH /documents/{id}`). Renames a document once it has
+  finished processing.
+- **Document — `Search`** (`GET /accounts/{accountId}/documents/search`). Lightweight
+  name/status search that omits the heavy `pages`/`assignment` payload.
+- **Workspace — `Get Current User`** (`GET /users/self`). Returns the authenticated
+  user and every workspace they can access.
+- **Workspace — `Get Theme`** (`GET /accounts/{workspaceId}/theme`). Returns branding
+  (name, colors, logo URL).
+- **Workspace — `Upload Logo` / `Download Logo` / `Delete Logo`**
+  (`POST` / `GET` / `DELETE /accounts/{workspaceId}/logo`). Manage the workspace logo.
+
+### Removed
+
+- **Webhook — `Delete Subscription`.** The API exposes no `DELETE` route for the
+  subscription (`DELETE /accounts/{accountId}/webhooks/subscriptions` returns HTTP 404).
+  Live testing confirmed the operation was non-functional; use **Inactivate Subscription**
+  to stop deliveries.
+
+### CI
+
+- CI workflow now declares a least-privilege top-level `permissions: contents: read`
+  and per-job `timeout-minutes`.
+
 ## [1.3.0] — 2026-06-05
 
 Production-hardening audit against the live Assinafy v1 API (sandbox-verified, every

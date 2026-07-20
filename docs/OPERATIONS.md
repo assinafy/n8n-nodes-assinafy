@@ -2,7 +2,7 @@
 
 Full request/response reference for every operation exposed by the **Assinafy** action node (and the signer-side / authentication flows). All API responses use the envelope `{ "status": <int>, "message": "", "data": <payload> }`; the node returns the unwrapped `data`. Account-scoped paths use the **Account ID** from the credential (shown as `{accountId}`). List operations paginate via the `X-Pagination-*` response headers when **Return All** is enabled.
 
-> Source of truth: [Assinafy v1 API docs](https://api.assinafy.com.br/v1/docs). This reference was validated against the live sandbox and the node source; where the API silently ignores a field (e.g. signer `cpf`, upload `metadata`) it is called out inline.
+> Source of truth: [Assinafy v1 API docs](https://api.assinafy.com.br/v1/docs). This reference was validated against the live API and the node source.
 
 ## Resources
 
@@ -176,6 +176,40 @@ Fetches a single document by ID, including expanded `assignment` and `pages`.
 }
 ```
 
+#### Rename a document
+
+Changes a document's display name.
+
+**Endpoint:** `PATCH /documents/{documentId}`
+
+**Node parameters:**
+- Document ID — resourceLocator — required — the document to rename.
+- New Name — string — required — the new display name.
+
+> The document must have finished processing (status `metadata_ready` or later) and not yet be in signing. If you rename immediately after upload, run **Wait Until Ready** first.
+
+**Example request:**
+```json
+{ "name": "signed-contract.pdf" }
+```
+
+**Example response:**
+```json
+{
+  "resource": "document",
+  "id": "1016d5795af62e28c2161efcb7a6",
+  "account_id": "d199996981dbd199996981db",
+  "template_id": null,
+  "name": "signed-contract.pdf",
+  "status": "metadata_ready",
+  "artifacts": { "original": "https://.../download/original", "thumbnail": "https://.../thumbnail" },
+  "is_closed": false,
+  "tags": [],
+  "created_at": "2026-07-20T18:49:23Z",
+  "updated_at": "2026-07-20T19:00:00Z"
+}
+```
+
 #### Delete a document
 
 Deletes a document by ID. The SDK returns a synthesized confirmation rather than the API's empty `data` array.
@@ -185,9 +219,44 @@ Deletes a document by ID. The SDK returns a synthesized confirmation rather than
 **Node parameters:**
 - Document ID — resourceLocator — required — the document to delete.
 
+> A document can only be deleted from a deletable status (see **List Statuses** for the `deletable` flag per status).
+
 **Example response:**
 ```json
 { "deleted": true, "documentId": "1016d5795af62e28c2161efcb7a6" }
+```
+
+#### Search documents (lightweight)
+
+Searches workspace documents via the dedicated lightweight search endpoint. Unlike **List**, each record omits the expanded `pages`/`assignment` objects, so it is faster for name/status lookups. Honors **Return All** / **Limit** and paginates via `X-Pagination-*` headers.
+
+**Endpoint:** `GET /accounts/{accountId}/documents/search`
+
+**Node parameters:**
+- Return All — boolean — return every page (default false).
+- Limit — number — max records when Return All is off (default 50).
+- Search Filters > Search — string — partial match on the document name.
+- Search Filters > Status — string — filter by status code (e.g. `metadata_ready`, `pending_signature`).
+
+**Example response (one item per document):**
+```json
+[
+  {
+    "id": "19f80dc86e3cce2d39d7edc9e28",
+    "account_id": "102d25a489f34a275d31a16045fd",
+    "template_id": null,
+    "name": "contract.pdf",
+    "status": "metadata_ready",
+    "artifacts": { "original": "https://.../download/original", "thumbnail": "https://.../thumbnail" },
+    "is_closed": false,
+    "signing_url": "https://app-sandbox.assinafy.com.br/sign/19f80dc86e3cce2d39d7edc9e28",
+    "decline_reason": null,
+    "declined_by": null,
+    "tags": [],
+    "created_at": "2026-07-20T18:49:23Z",
+    "updated_at": "2026-07-20T18:49:26Z"
+  }
+]
 ```
 
 #### Download a document artifact (PDF or ZIP)
@@ -1959,18 +2028,7 @@ Pauses the webhook subscription without deleting it. While inactive, no events a
 }
 ```
 
-#### Delete Subscription
-
-Deletes the account's webhook subscription entirely.
-
-**Endpoint:** `DELETE /accounts/{accountId}/webhooks/subscriptions`
-
-**Node parameters:** none.
-
-**Example response:** the SDK ignores the API body and returns a synthesized confirmation:
-```json
-{ "deleted": true }
-```
+> To stop receiving events, use **Inactivate Subscription**. There is no separate delete operation for the subscription.
 
 #### List Event Types
 
@@ -2553,19 +2611,19 @@ Creates a new workspace (account).
 ```json
 {
   "name": "audit-temp-workspace",
-  "primary_color": "#1a73e8",
-  "secondary_color": "#ff8800"
+  "primary_color": "1a73e8",
+  "secondary_color": "ff8800"
 }
 ```
 
-**Example response:**
+**Example response (colors persist):**
 ```json
 {
   "id": "1031...",
   "name": "audit-temp-workspace",
-  "primary_color": null,
-  "secondary_color": null,
-  "created_at": "2026-05-12T18:05:11Z"
+  "primary_color": "1a73e8",
+  "secondary_color": "ff8800",
+  "created_at": "2026-07-20T19:00:30Z"
 }
 ```
 
@@ -2657,8 +2715,103 @@ Updates an existing workspace. At least one update field is required — the nod
 {
   "id": "102d25...",
   "name": "MT Renamed",
-  "primary_color": null,
-  "secondary_color": null,
+  "primary_color": "1a73e8",
+  "secondary_color": "ff8800",
   "created_at": "2026-05-12T18:05:11Z"
 }
+```
+
+#### Get Current User
+
+Returns the authenticated user (the owner of the API key) together with every workspace they can access. Not account-scoped.
+
+**Endpoint:** `GET /users/self`
+
+**Node parameters:** none.
+
+**Example response:**
+```json
+{
+  "user": {
+    "id": "md3j6p9w8b7y6qvqaoy5er42",
+    "name": "Multica Test",
+    "email": "bill@febacapital.com",
+    "telephone": null,
+    "government_id": "",
+    "is_email_verified": true,
+    "has_accepted_terms": true,
+    "is_password_set": true,
+    "created_at": "2026-05-12T18:05:11Z",
+    "to_be_deleted_at": null
+  },
+  "accounts": [
+    { "id": "102d25a489f34a275d31a16045fd", "name": "MT", "roles": ["owner"], "is_delete_allowed": true, "created_at": "2026-05-12T18:05:11Z" }
+  ]
+}
+```
+
+#### Get Theme
+
+Returns the workspace branding (display name, hex colors, and logo URL if any).
+
+**Endpoint:** `GET /accounts/{workspaceId}/theme`
+
+**Node parameters:**
+- Workspace ID — string — required — the workspace whose theme to fetch.
+
+**Example response:**
+```json
+{
+  "account_name": "MT",
+  "primary_color": "2072b9",
+  "secondary_color": "ffffff",
+  "logo": null
+}
+```
+
+#### Upload Logo
+
+Uploads (or replaces) the workspace logo from an incoming binary item. Sent as `multipart/form-data` with a single `file` part (PNG or JPEG).
+
+**Endpoint:** `POST /accounts/{workspaceId}/logo`
+
+**Node parameters:**
+- Workspace ID — string — required — the workspace to set the logo on.
+- Binary Property — string — required — name of the binary property holding the logo image (PNG or JPEG; default `data`).
+
+**Example response:**
+```json
+{ "mime_type": "image/png", "version": 1784574086, "updated_at": "2026-07-20T19:01:26Z" }
+```
+
+#### Download Logo
+
+Downloads the current workspace logo as a binary image on the output item. Returns HTTP 404 if no logo is set.
+
+**Endpoint:** `GET /accounts/{workspaceId}/logo`
+
+**Node parameters:**
+- Workspace ID — string — required — the workspace whose logo to download.
+- Put Output In Field — string — the binary property to write the image into (default `data`).
+
+**Example output item:**
+```json
+{
+  "json": { "workspaceId": "102d25...", "fileName": "102d25...-logo.png", "mimeType": "image/png", "size": 69 },
+  "binary": { "data": { "fileName": "102d25...-logo.png", "mimeType": "image/png", "data": "<base64>" } }
+}
+```
+
+#### Delete Logo
+
+Removes the workspace logo.
+
+**Endpoint:** `DELETE /accounts/{workspaceId}/logo`
+
+**Node parameters:**
+- Workspace ID — string — required — the workspace to clear the logo on.
+
+**Example response:** the API returns an empty array (`data: []`); the SDK returns a synthesized confirmation:
+```json
+{ "deleted": true, "workspaceId": "102d25..." }
 ```

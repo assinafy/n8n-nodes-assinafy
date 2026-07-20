@@ -207,6 +207,80 @@ d('LIVE sandbox integration (real SDK code paths)', () => {
 		expect(deleted.json.deleted).toBe(true);
 	});
 
+	it('document: rename → search finds the renamed doc → delete', async () => {
+		const uploaded = (await executeDocument.call(
+			liveCtx({ binaryPropertyName: 'data', fileName: 'audit-rename.pdf', additionalFields: {} }),
+			0,
+			'upload',
+		)) as any;
+		const documentId = uploaded.json.id;
+		expect(documentId).toBeTruthy();
+
+		// A document can only be renamed once metadata processing has finished.
+		await executeDocument.call(
+			liveCtx({ documentId, maxWaitMs: 30000, pollIntervalMs: 2000 }),
+			0,
+			'waitUntilReady',
+		);
+
+		const newName = `it-renamed-${Date.now()}.pdf`;
+		const renamed = (await executeDocument.call(
+			liveCtx({ documentId, newName }),
+			0,
+			'rename',
+		)) as any;
+		expect(renamed.json.name).toBe(newName);
+
+		const found = (await executeDocument.call(
+			liveCtx({ returnAll: false, limit: 20, searchFilters: { search: newName } }),
+			0,
+			'search',
+		)) as any[];
+		expect(found.some((r) => r.json.id === documentId)).toBe(true);
+
+		await executeDocument.call(liveCtx({ documentId }), 0, 'delete');
+	});
+
+	it('workspace: getCurrentUser + getTheme', async () => {
+		const me = (await executeWorkspace.call(liveCtx({}), 0, 'getCurrentUser')) as any;
+		expect(me.json.user).toBeDefined();
+
+		const theme = (await executeWorkspace.call(
+			liveCtx({ workspaceId: ACCOUNT_ID }),
+			0,
+			'getTheme',
+		)) as any;
+		expect(theme.json).toHaveProperty('primary_color');
+	});
+
+	it('workspace logo: upload → download → delete', async () => {
+		// 1x1 transparent PNG
+		const png = Buffer.from(
+			'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC',
+			'base64',
+		);
+		const ctx = liveCtx({ workspaceId: ACCOUNT_ID, binaryPropertyName: 'data' });
+		ctx.helpers.assertBinaryData = () => ({ fileName: 'logo.png', mimeType: 'image/png' });
+		ctx.helpers.getBinaryDataBuffer = async () => png;
+
+		const uploaded = (await executeWorkspace.call(ctx, 0, 'uploadLogo')) as any;
+		expect(uploaded.json).toHaveProperty('mime_type');
+
+		const downloaded = (await executeWorkspace.call(
+			liveCtx({ workspaceId: ACCOUNT_ID, binaryOutputProperty: 'data' }),
+			0,
+			'downloadLogo',
+		)) as any;
+		expect(downloaded.binary.data).toBeDefined();
+
+		const deleted = (await executeWorkspace.call(
+			liveCtx({ workspaceId: ACCOUNT_ID }),
+			0,
+			'deleteLogo',
+		)) as any;
+		expect(deleted.json.deleted).toBe(true);
+	});
+
 	it('read-only catalogs: statuses, field types, webhook event types', async () => {
 		const statuses = (await executeDocument.call(liveCtx({}), 0, 'listStatuses')) as any;
 		expect(statuses.json.statuses.length).toBeGreaterThan(0);

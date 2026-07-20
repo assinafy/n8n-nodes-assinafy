@@ -104,9 +104,19 @@ export const documentDescription: INodeProperties[] = [
 				action: 'List tags attached to a document',
 			},
 			{
+				name: 'Rename',
+				value: 'rename',
+				action: 'Rename a document',
+			},
+			{
 				name: 'Replace Tags',
 				value: 'replaceTags',
 				action: 'Replace all tags on a document',
+			},
+			{
+				name: 'Search',
+				value: 'search',
+				action: 'Search documents',
 			},
 			{
 				name: 'Send Public Token',
@@ -235,12 +245,50 @@ export const documentDescription: INodeProperties[] = [
 				'getActivities',
 				'getSigningProgress',
 				'listTags',
+				'rename',
 				'replaceTags',
 				'appendTags',
 				'detachTag',
 				'waitUntilReady',
 			]),
 		},
+	},
+
+	// --- rename ---
+	{
+		displayName: 'New Name',
+		name: 'newName',
+		type: 'string',
+		default: '',
+		required: true,
+		placeholder: 'signed-contract.pdf',
+		description: 'New display name for the document',
+		displayOptions: { show: showOnly(['rename']) },
+	},
+
+	// --- search ---
+	{ ...returnAllField, displayOptions: { show: showOnly(['search']) } },
+	{
+		...limitField,
+		displayOptions: { show: { ...showOnly(['search']), returnAll: [false] } },
+	},
+	{
+		displayName: 'Search Filters',
+		name: 'searchFilters',
+		type: 'collection',
+		placeholder: 'Add Filter',
+		default: {},
+		displayOptions: { show: showOnly(['search']) },
+		options: [
+			{ ...searchField },
+			{
+				displayName: 'Status',
+				name: 'status',
+				type: 'string',
+				default: '',
+				description: 'Filter by document status (e.g. metadata_ready, pending_signature)',
+			},
+		],
 	},
 
 	// --- createFromTemplate / estimateCostFromTemplate ---
@@ -492,8 +540,12 @@ export async function executeDocument(
 			return uploadDocument.call(this, itemIndex);
 		case 'list':
 			return listDocuments.call(this, itemIndex);
+		case 'search':
+			return searchDocuments.call(this, itemIndex);
 		case 'get':
 			return wrap(await getDocument.call(this, itemIndex));
+		case 'rename':
+			return wrap(await renameDocument.call(this, itemIndex));
 		case 'delete':
 			return wrap(await deleteDocument.call(this, itemIndex));
 		case 'download':
@@ -605,11 +657,36 @@ async function listDocuments(
 	});
 }
 
+async function searchDocuments(
+	this: IExecuteFunctions,
+	itemIndex: number,
+): Promise<INodeExecutionData[]> {
+	const accountId = await getAccountId(this);
+	const filters = this.getNodeParameter('searchFilters', itemIndex, {}) as IDataObject;
+	return executeListOperation(this, itemIndex, {
+		path: `/accounts/${accountId}/documents/search`,
+		qs: cleanQs(filters),
+	});
+}
+
 async function getDocument(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const documentId = extractDocumentId.call(this, itemIndex);
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'GET',
 		path: `/documents/${documentId}`,
+	});
+}
+
+async function renameDocument(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
+	const documentId = extractDocumentId.call(this, itemIndex);
+	const name = (this.getNodeParameter('newName', itemIndex) as string).trim();
+	if (!name) {
+		throw new NodeOperationError(this.getNode(), 'New Name is required', { itemIndex });
+	}
+	return assinafyApiRequest<IDataObject>(this, {
+		method: 'PATCH',
+		path: `/documents/${documentId}`,
+		body: { name },
 	});
 }
 

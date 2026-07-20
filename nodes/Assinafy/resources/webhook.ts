@@ -22,11 +22,6 @@ export const webhookDescription: INodeProperties[] = [
 		default: 'register',
 		options: [
 			{
-				name: 'Delete Subscription',
-				value: 'delete',
-				action: 'Delete the webhook subscription',
-			},
-			{
 				name: 'Get Subscription',
 				value: 'get',
 				action: 'Get the current webhook subscription',
@@ -34,7 +29,7 @@ export const webhookDescription: INodeProperties[] = [
 			{
 				name: 'Inactivate Subscription',
 				value: 'inactivate',
-				action: 'Inactivate the webhook subscription without deleting it',
+				action: 'Inactivate the webhook subscription',
 			},
 			{
 				name: 'List Dispatches',
@@ -165,8 +160,6 @@ export async function executeWebhook(
 			return wrap(await registerWebhook.call(this, itemIndex));
 		case 'get':
 			return wrap((await getWebhook.call(this)) ?? { subscribed: false });
-		case 'delete':
-			return wrap(await deleteWebhook.call(this));
 		case 'inactivate':
 			return wrap(await inactivateWebhook.call(this));
 		case 'listEventTypes':
@@ -234,15 +227,6 @@ function isEmptySubscription(subscription: IDataObject | null): boolean {
 }
 
 export { isEmptySubscription };
-
-async function deleteWebhook(this: IExecuteFunctions): Promise<IDataObject> {
-	const accountId = await getAccountId(this);
-	await assinafyApiRequest(this, {
-		method: 'DELETE',
-		path: `/accounts/${accountId}/webhooks/subscriptions`,
-	});
-	return { deleted: true };
-}
 
 async function inactivateWebhook(this: IExecuteFunctions): Promise<IDataObject> {
 	const accountId = await getAccountId(this);

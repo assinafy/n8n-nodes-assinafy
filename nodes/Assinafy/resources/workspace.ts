@@ -1,4 +1,5 @@
 import type {
+	IBinaryData,
 	IDataObject,
 	IExecuteFunctions,
 	INodeExecutionData,
@@ -22,9 +23,18 @@ export const workspaceDescription: INodeProperties[] = [
 		options: [
 			{ name: 'Create', value: 'create', action: 'Create a workspace' },
 			{ name: 'Delete', value: 'delete', action: 'Delete a workspace' },
+			{ name: 'Delete Logo', value: 'deleteLogo', action: 'Delete the workspace logo' },
+			{ name: 'Download Logo', value: 'downloadLogo', action: 'Download the workspace logo' },
 			{ name: 'Get', value: 'get', action: 'Get a workspace' },
+			{
+				name: 'Get Current User',
+				value: 'getCurrentUser',
+				action: 'Get the authenticated user and accessible workspaces',
+			},
+			{ name: 'Get Theme', value: 'getTheme', action: 'Get the workspace theme' },
 			{ name: 'List', value: 'list', action: 'List accessible workspaces' },
 			{ name: 'Update', value: 'update', action: 'Update a workspace' },
+			{ name: 'Upload Logo', value: 'uploadLogo', action: 'Upload or replace the workspace logo' },
 		],
 	},
 
@@ -61,15 +71,46 @@ export const workspaceDescription: INodeProperties[] = [
 		],
 	},
 
-	// --- update/get/delete need id ---
+	// --- operations needing a workspace id ---
 	{
 		displayName: 'Workspace ID',
 		name: 'workspaceId',
 		type: 'string',
 		default: '',
 		required: true,
-		displayOptions: { show: showOnly(['get', 'update', 'delete']) },
+		displayOptions: {
+			show: showOnly([
+				'get',
+				'update',
+				'delete',
+				'getTheme',
+				'uploadLogo',
+				'downloadLogo',
+				'deleteLogo',
+			]),
+		},
 		description: 'ID of the workspace to operate on',
+	},
+
+	// --- uploadLogo ---
+	{
+		displayName: 'Binary Property',
+		name: 'binaryPropertyName',
+		type: 'string',
+		default: 'data',
+		required: true,
+		description: 'Name of the binary property holding the logo image (PNG or JPEG)',
+		displayOptions: { show: showOnly(['uploadLogo']) },
+	},
+
+	// --- downloadLogo ---
+	{
+		displayName: 'Put Output In Field',
+		name: 'binaryOutputProperty',
+		type: 'string',
+		default: 'data',
+		description: 'Name of the binary property on the output item to write the logo into',
+		displayOptions: { show: showOnly(['downloadLogo']) },
 	},
 	{
 		displayName: 'Update Fields',
@@ -109,6 +150,16 @@ export async function executeWorkspace(
 			return wrap(await updateWorkspace.call(this, itemIndex));
 		case 'delete':
 			return wrap(await deleteWorkspace.call(this, itemIndex));
+		case 'getCurrentUser':
+			return wrap(await getCurrentUser.call(this));
+		case 'getTheme':
+			return wrap(await getTheme.call(this, itemIndex));
+		case 'uploadLogo':
+			return wrap(await uploadLogo.call(this, itemIndex));
+		case 'downloadLogo':
+			return downloadLogo.call(this, itemIndex);
+		case 'deleteLogo':
+			return wrap(await deleteLogo.call(this, itemIndex));
 		default:
 			throw new NodeOperationError(
 				this.getNode(),
@@ -171,5 +222,69 @@ async function deleteWorkspace(
 ): Promise<IDataObject> {
 	const id = this.getNodeParameter('workspaceId', itemIndex) as string;
 	await assinafyApiRequest(this, { method: 'DELETE', path: `/accounts/${id}` });
+	return { deleted: true, workspaceId: id };
+}
+
+/** GET /users/self — the authenticated user plus the workspaces they can access. */
+async function getCurrentUser(this: IExecuteFunctions): Promise<IDataObject> {
+	return assinafyApiRequest<IDataObject>(this, { method: 'GET', path: '/users/self' });
+}
+
+/** GET /accounts/{id}/theme — branding (name, colors, logo URL) for a workspace. */
+async function getTheme(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
+	const id = this.getNodeParameter('workspaceId', itemIndex) as string;
+	return assinafyApiRequest<IDataObject>(this, { method: 'GET', path: `/accounts/${id}/theme` });
+}
+
+async function uploadLogo(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
+	const id = this.getNodeParameter('workspaceId', itemIndex) as string;
+	const binaryPropertyName = this.getNodeParameter('binaryPropertyName', itemIndex, 'data') as string;
+	const binary = this.helpers.assertBinaryData(itemIndex, binaryPropertyName) as IBinaryData;
+	const buffer = await this.helpers.getBinaryDataBuffer(itemIndex, binaryPropertyName);
+	if (buffer.byteLength === 0) {
+		throw new NodeOperationError(this.getNode(), 'The logo image is empty', { itemIndex });
+	}
+
+	const form = new FormData();
+	const view = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+	form.append('file', new Blob([view], { type: binary.mimeType || 'image/png' }), binary.fileName || 'logo.png');
+	return assinafyApiRequest<IDataObject>(this, {
+		method: 'POST',
+		path: `/accounts/${id}/logo`,
+		body: form,
+	});
+}
+
+async function downloadLogo(
+	this: IExecuteFunctions,
+	itemIndex: number,
+): Promise<INodeExecutionData> {
+	const id = this.getNodeParameter('workspaceId', itemIndex) as string;
+	const outputProperty = this.getNodeParameter('binaryOutputProperty', itemIndex, 'data') as string;
+	const response = (await assinafyApiRequest<unknown>(this, {
+		method: 'GET',
+		path: `/accounts/${id}/logo`,
+		returnBinary: true,
+	})) as { body?: Buffer | ArrayBuffer; headers?: IDataObject };
+
+	const raw = response.body;
+	const buffer = Buffer.isBuffer(raw) ? raw : Buffer.from(raw ?? new ArrayBuffer(0));
+	const headerType = (response.headers?.['content-type'] ?? response.headers?.['Content-Type']) as
+		| string
+		| undefined;
+	const mimeType = headerType ? headerType.split(';')[0].trim() : 'image/png';
+	const extension = mimeType.includes('jpeg') || mimeType.includes('jpg') ? 'jpg' : 'png';
+	const fileName = `${id}-logo.${extension}`;
+
+	const binary = await this.helpers.prepareBinaryData(buffer, fileName, mimeType);
+	return {
+		json: { workspaceId: id, fileName, mimeType, size: buffer.byteLength },
+		binary: { [outputProperty]: binary },
+	};
+}
+
+async function deleteLogo(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
+	const id = this.getNodeParameter('workspaceId', itemIndex) as string;
+	await assinafyApiRequest(this, { method: 'DELETE', path: `/accounts/${id}/logo` });
 	return { deleted: true, workspaceId: id };
 }
