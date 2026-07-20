@@ -3,6 +3,23 @@
 All notable changes to `@assinafy/n8n-nodes-assinafy` will be documented here.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **CI: `build (20.x)` job failed at `npm ci`.** A transitive build-toolchain
+  dependency (`n8n-workflow` → `@n8n/expression-runtime` → `isolated-vm@6`,
+  which declares `engines.node >= 22`) ships a native addon that does not compile
+  against Node 20's V8 (`'SourceLocation' in namespace 'v8' does not name a type`).
+  Node 20 was never actually installable. Dropped `20.x` from the CI matrix
+  (now `['22.x', '24.x']`) and corrected `engines.node` from `>=20.19` to
+  `>=22.22`, matching n8n's documented minimum for building community nodes.
+
+### CI
+
+- Bumped `actions/checkout` and `actions/setup-node` from `v4` to `v5` (Node 24
+  action runtime), clearing GitHub's Node 20 deprecation warnings on every job.
+
 ## [1.4.0] — 2026-07-20
 
 Full re-audit against the live Assinafy v1 API (OpenAPI 3.0 spec, 89 documented

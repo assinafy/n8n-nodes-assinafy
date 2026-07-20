@@ -42,7 +42,7 @@ This package is published to the **GitHub Packages npm registry** (not npmjs.com
 > [!NOTE]
 > n8n Cloud's community-nodes catalog is fed from **npmjs.com**, so packages published only to GitHub Packages are not auto-discoverable there. If you need n8n Cloud support, ask the Assinafy team to mirror releases to npmjs.com, or fork and publish under your own npmjs.com namespace.
 
-Requires n8n ≥ 1.0. Compatible with the `@n8n/node-cli` build toolchain.
+Requires n8n ≥ 1.0. Building from source requires **Node.js ≥ 22** — the `@n8n/node-cli` / `n8n-workflow` build toolchain dropped Node 20 support.
 
 ## Credentials
 
