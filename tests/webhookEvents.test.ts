@@ -1,4 +1,7 @@
-import { WEBHOOK_EVENT_OPTIONS, DEFAULT_WEBHOOK_EVENTS } from '../nodes/Assinafy/resources/webhookEvents';
+import {
+	WEBHOOK_EVENT_OPTIONS,
+	DEFAULT_WEBHOOK_EVENTS,
+} from '../nodes/Assinafy/resources/webhookEvents';
 
 describe('webhookEvents', () => {
 	describe('WEBHOOK_EVENT_OPTIONS', () => {

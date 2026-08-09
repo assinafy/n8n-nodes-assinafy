@@ -6,7 +6,14 @@ import type {
 } from 'n8n-workflow';
 import { NodeOperationError } from 'n8n-workflow';
 import { assinafyApiRequest, getAccountId } from '../shared/transport';
-import { asArray, cleanQs, extractRequiredId, parseJsonParam, showOnly as showOnlyFor, wrap } from '../shared/utils';
+import {
+	asArray,
+	cleanQs,
+	extractRequiredId,
+	parseJsonParam,
+	showOnly as showOnlyFor,
+	wrap,
+} from '../shared/utils';
 
 const showOnly = showOnlyFor('field');
 
@@ -171,8 +178,7 @@ export const fieldDescription: INodeProperties[] = [
 		type: 'json',
 		default: '[]',
 		required: true,
-		description:
-			'Array of {field_id, value} objects: [{ "field_id": "...", "value": "..." }, ...]',
+		description: 'Array of {field_id, value} objects: [{ "field_id": "...", "value": "..." }, ...]',
 		displayOptions: { show: showOnly(['validateMultiple']) },
 	},
 ];
@@ -222,10 +228,7 @@ async function createField(this: IExecuteFunctions, itemIndex: number): Promise<
 	});
 }
 
-async function listFields(
-	this: IExecuteFunctions,
-	itemIndex: number,
-): Promise<IDataObject[]> {
+async function listFields(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject[]> {
 	const accountId = await getAccountId(this);
 	const filters = this.getNodeParameter('filters', itemIndex, {}) as IDataObject;
 	const qs = cleanQs(filters);
@@ -282,7 +285,6 @@ async function validateField(this: IExecuteFunctions, itemIndex: number): Promis
 		path: `/accounts/${accountId}/fields/${fieldId}/validate`,
 		qs: signerCode ? { 'signer-access-code': signerCode } : undefined,
 		body: { value },
-		skipAuth: signerCode.length > 0,
 	});
 }
 
@@ -304,7 +306,6 @@ async function validateMultiple(
 		path: `/accounts/${accountId}/fields/validate-multiple`,
 		qs: signerCode ? { 'signer-access-code': signerCode } : undefined,
 		body: items as unknown as IDataObject,
-		skipAuth: signerCode.length > 0,
 	});
 	return asArray<IDataObject>(response);
 }

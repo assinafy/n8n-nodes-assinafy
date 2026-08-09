@@ -15,13 +15,37 @@ describe('signerDocument request construction (signer-side, no auth)', () => {
 	});
 
 	it('lists documents emitting one item per record', async () => {
-		const { ctx } = makeCtx(
-			{ signerAccessCode: 'code123', signerId: 'sig_1', filters: { method: 'virtual' } },
+		const { ctx, requests } = makeCtx(
+			{
+				signerAccessCode: 'code123',
+				signerId: 'sig_1',
+				filters: { method: 'virtual' },
+				returnAll: false,
+				limit: 25,
+			},
 			{ response: [{ id: 'd1' }, { id: 'd2' }] },
 		);
 		const result = (await executeSignerDocument.call(ctx as any, 0, 'list')) as any;
 		expect(Array.isArray(result)).toBe(true);
 		expect(result).toHaveLength(2);
+		expect(result[0].json).toEqual({ id: 'd1' });
+		expect(lastPublic(requests).qs).toEqual({
+			'signer-access-code': 'code123',
+			method: 'virtual',
+			'per-page': 25,
+		});
+	});
+
+	it('searches visible signer documents', async () => {
+		const { ctx, requests } = makeCtx(
+			{ signerAccessCode: 'code123', signerId: 'sig_1', search: 'contract' },
+			{ response: [{ id: 'd1' }] },
+		);
+		const result = (await executeSignerDocument.call(ctx as any, 0, 'search')) as any[];
+		const req = lastPublic(requests);
+		expect(req.method).toBe('GET');
+		expect(req.url).toBe(`${BASE}/signers/sig_1/documents/search`);
+		expect(req.qs).toEqual({ 'signer-access-code': 'code123', search: 'contract' });
 		expect(result[0].json).toEqual({ id: 'd1' });
 	});
 

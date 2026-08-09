@@ -5,11 +5,13 @@ import type {
 	INodeProperties,
 } from 'n8n-workflow';
 import { NodeOperationError } from 'n8n-workflow';
-import { assinafyApiRequest } from '../shared/transport';
+import { assinafyApiRequest, executeListOperation } from '../shared/transport';
+import { limitField, returnAllField } from '../shared/descriptions';
 import {
 	asArray,
 	cleanQs,
 	extractRequiredId,
+	parseBinaryResponse,
 	parseStringList,
 	requireAccessCode,
 	showOnly as showOnlyFor,
@@ -48,11 +50,21 @@ export const signerDocumentDescription: INodeProperties[] = [
 				action: 'Signer lists their visible documents',
 			},
 			{
+				name: 'Search',
+				value: 'search',
+				action: 'Search visible signer documents',
+			},
+			{
 				name: 'Sign Multiple',
 				value: 'signMultiple',
 				action: 'Signer signs multiple virtual method documents at once',
 			},
 		],
+	},
+	{ ...returnAllField, displayOptions: { show: showOnly(['list']) } },
+	{
+		...limitField,
+		displayOptions: { show: { ...showOnly(['list']), returnAll: [false] } },
 	},
 
 	// shared access code
@@ -73,7 +85,15 @@ export const signerDocumentDescription: INodeProperties[] = [
 		type: 'string',
 		default: '',
 		required: true,
-		displayOptions: { show: showOnly(['getCurrent', 'list', 'download']) },
+		displayOptions: { show: showOnly(['getCurrent', 'list', 'search', 'download']) },
+	},
+	{
+		displayName: 'Search',
+		name: 'search',
+		type: 'string',
+		default: '',
+		description: "Search term matched against the signer's documents",
+		displayOptions: { show: showOnly(['search']) },
 	},
 
 	// list filters
@@ -162,7 +182,9 @@ export async function executeSignerDocument(
 		case 'getCurrent':
 			return wrap(await getCurrent.call(this, itemIndex));
 		case 'list':
-			return (await listDocuments.call(this, itemIndex)).map((doc) => ({ json: doc }));
+			return listDocuments.call(this, itemIndex);
+		case 'search':
+			return (await searchDocuments.call(this, itemIndex)).map((doc) => ({ json: doc }));
 		case 'signMultiple':
 			return wrap(await signMultiple.call(this, itemIndex));
 		case 'declineMultiple':
@@ -176,6 +198,19 @@ export async function executeSignerDocument(
 				{ itemIndex },
 			);
 	}
+}
+
+async function searchDocuments(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject[]> {
+	const code = requireAccessCode(this, itemIndex);
+	const signerId = extractRequiredId(this, 'signerId', 'Signer ID', itemIndex);
+	const search = (this.getNodeParameter('search', itemIndex, '') as string).trim();
+	const response = await assinafyApiRequest<IDataObject[] | { data?: IDataObject[] }>(this, {
+		method: 'GET',
+		path: `/signers/${signerId}/documents/search`,
+		qs: { 'signer-access-code': code, ...(search ? { search } : {}) },
+		skipAuth: true,
+	});
+	return asArray<IDataObject>(response);
 }
 
 async function getCurrent(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
@@ -192,18 +227,16 @@ async function getCurrent(this: IExecuteFunctions, itemIndex: number): Promise<I
 async function listDocuments(
 	this: IExecuteFunctions,
 	itemIndex: number,
-): Promise<IDataObject[]> {
+): Promise<INodeExecutionData[]> {
 	const code = requireAccessCode(this, itemIndex);
 	const signerId = extractRequiredId(this, 'signerId', 'Signer ID', itemIndex);
 	const filters = this.getNodeParameter('filters', itemIndex, {}) as IDataObject;
 	const qs = { 'signer-access-code': code, ...cleanQs(filters) };
-	const response = await assinafyApiRequest<IDataObject[] | { data?: IDataObject[] }>(this, {
-		method: 'GET',
+	return executeListOperation(this, itemIndex, {
 		path: `/signers/${signerId}/documents`,
 		qs,
 		skipAuth: true,
 	});
-	return asArray<IDataObject>(response);
 }
 
 async function signMultiple(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
@@ -224,10 +257,7 @@ async function signMultiple(this: IExecuteFunctions, itemIndex: number): Promise
 	});
 }
 
-async function declineMultiple(
-	this: IExecuteFunctions,
-	itemIndex: number,
-): Promise<IDataObject> {
+async function declineMultiple(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const code = requireAccessCode(this, itemIndex);
 	const csv = this.getNodeParameter('documentIds', itemIndex) as string;
 	const reason = this.getNodeParameter('declineReason', itemIndex) as string;
@@ -246,19 +276,12 @@ async function declineMultiple(
 	});
 }
 
-async function download(
-	this: IExecuteFunctions,
-	itemIndex: number,
-): Promise<INodeExecutionData> {
+async function download(this: IExecuteFunctions, itemIndex: number): Promise<INodeExecutionData> {
 	const code = requireAccessCode(this, itemIndex);
 	const signerId = extractRequiredId(this, 'signerId', 'Signer ID', itemIndex);
 	const documentId = extractRequiredId(this, 'documentId', 'Document ID', itemIndex);
 	const artifact = this.getNodeParameter('artifact', itemIndex, 'certificated') as string;
-	const outputProperty = this.getNodeParameter(
-		'binaryOutputProperty',
-		itemIndex,
-		'data',
-	) as string;
+	const outputProperty = this.getNodeParameter('binaryOutputProperty', itemIndex, 'data') as string;
 	const response = (await assinafyApiRequest<unknown>(this, {
 		method: 'GET',
 		path: `/signers/${signerId}/documents/${documentId}/download/${artifact}`,
@@ -266,12 +289,13 @@ async function download(
 		returnBinary: true,
 		skipAuth: true,
 	})) as { body?: Buffer | ArrayBuffer; headers?: IDataObject };
-	const raw = response.body;
-	const buffer = Buffer.isBuffer(raw) ? raw : Buffer.from(raw ?? new ArrayBuffer(0));
-	const headerType = (response.headers?.['content-type'] ?? response.headers?.['Content-Type']) as
-		| string
-		| undefined;
-	const mime = headerType ? headerType.split(';')[0].trim() : 'application/pdf';
+	const { buffer, mimeType: mime } = parseBinaryResponse(
+		this,
+		response,
+		'application/pdf',
+		'Signer document download',
+		itemIndex,
+	);
 	const fileName = `${documentId}-${artifact}${artifact === 'bundle' ? '.zip' : '.pdf'}`;
 	const binary = await this.helpers.prepareBinaryData(buffer, fileName, mime);
 	return {

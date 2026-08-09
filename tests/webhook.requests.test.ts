@@ -26,7 +26,10 @@ describe('webhook request construction', () => {
 	});
 
 	it('gets the subscription and normalizes the empty sentinel', async () => {
-		const { ctx } = makeCtx({}, { response: { events: [], url: null, email: null, is_active: true } });
+		const { ctx } = makeCtx(
+			{},
+			{ response: { events: [], url: null, email: null, is_active: true } },
+		);
 		const result = (await executeWebhook.call(ctx as any, 0, 'get')) as any;
 		expect(result.json).toEqual({ subscribed: false });
 	});
@@ -47,7 +50,11 @@ describe('webhook request construction', () => {
 
 	it('lists dispatches dropping zero from/to timestamps', async () => {
 		const { ctx, requests } = makeCtx(
-			{ returnAll: false, limit: 25, filters: { event: 'document_ready', from: 0, to: 1700000000 } },
+			{
+				returnAll: false,
+				limit: 25,
+				filters: { event: 'document_ready', from: 0, to: 1700000000 },
+			},
 			{ response: [{ id: 'disp_1' }] },
 		);
 		await executeWebhook.call(ctx as any, 0, 'listDispatches');

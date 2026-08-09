@@ -24,6 +24,96 @@ export function wrap(data: unknown): INodeExecutionData {
 	return { json: (data ?? {}) as IDataObject };
 }
 
+/** Convert an n8n full binary response into a non-empty Buffer and MIME type. */
+export function parseBinaryResponse(
+	ctx: IExecuteFunctions,
+	response: { body?: Buffer | ArrayBuffer | Uint8Array; headers?: IDataObject },
+	defaultMimeType: string,
+	label: string,
+	itemIndex: number,
+): { buffer: Buffer; mimeType: string } {
+	const raw = response.body;
+	let buffer: Buffer;
+	if (Buffer.isBuffer(raw)) {
+		buffer = raw;
+	} else if (raw instanceof ArrayBuffer) {
+		buffer = Buffer.from(raw);
+	} else if (ArrayBuffer.isView(raw)) {
+		buffer = Buffer.from(raw.buffer, raw.byteOffset, raw.byteLength);
+	} else {
+		buffer = Buffer.alloc(0);
+	}
+	if (buffer.byteLength === 0) {
+		throw new NodeOperationError(ctx.getNode(), `${label} response was empty`, { itemIndex });
+	}
+
+	const header = response.headers?.['content-type'] ?? response.headers?.['Content-Type'];
+	const rawContentType = Array.isArray(header) ? header[0] : header;
+	const mimeType = rawContentType ? String(rawContentType).split(';')[0].trim() : defaultMimeType;
+	return { buffer, mimeType };
+}
+
+export type BinaryFormat = 'pdf' | 'png' | 'jpeg';
+
+/** Validate both the declared MIME type and the file signature before upload. */
+export function assertBinaryFormat(
+	ctx: IExecuteFunctions,
+	buffer: Buffer,
+	mimeType: string,
+	allowedFormats: BinaryFormat[],
+	label: string,
+	itemIndex: number,
+): string {
+	const normalizedMime = mimeType.toLowerCase().split(';')[0].trim();
+	const formatByMime: Record<string, BinaryFormat | undefined> = {
+		'application/pdf': 'pdf',
+		'image/png': 'png',
+		'image/jpeg': 'jpeg',
+		'image/jpg': 'jpeg',
+	};
+	const declaredFormat = formatByMime[normalizedMime];
+	const detectedFormat: BinaryFormat | undefined =
+		buffer.subarray(0, 5).toString('ascii') === '%PDF-'
+			? 'pdf'
+			: buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+				? 'png'
+				: buffer.byteLength >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff
+					? 'jpeg'
+					: undefined;
+
+	if (!detectedFormat || !allowedFormats.includes(detectedFormat)) {
+		if (declaredFormat && allowedFormats.includes(declaredFormat)) {
+			throw new NodeOperationError(
+				ctx.getNode(),
+				`${label} content does not match its declared ${normalizedMime} type`,
+				{ itemIndex },
+			);
+		}
+		throw new NodeOperationError(ctx.getNode(), `${label} must be ${formatList(allowedFormats)}`, {
+			itemIndex,
+		});
+	}
+
+	const hasGenericMime = normalizedMime === '' || normalizedMime === 'application/octet-stream';
+	if (!hasGenericMime && declaredFormat !== detectedFormat) {
+		throw new NodeOperationError(
+			ctx.getNode(),
+			`${label} content does not match its declared ${normalizedMime} type`,
+			{ itemIndex },
+		);
+	}
+	return detectedFormat === 'pdf'
+		? 'application/pdf'
+		: detectedFormat === 'png'
+			? 'image/png'
+			: 'image/jpeg';
+}
+
+function formatList(formats: BinaryFormat[]): string {
+	const labels = formats.map((format) => (format === 'jpeg' ? 'JPEG' : format.toUpperCase()));
+	return labels.length === 1 ? labels[0] : `${labels.slice(0, -1).join(', ')} or ${labels.at(-1)}`;
+}
+
 /**
  * Normalize a list endpoint's response into a plain array. `assinafyApiRequest`
  * already unwraps the `{status,message,data}` envelope, so a list call returns
@@ -137,7 +227,15 @@ export function validateSigningSteps(
 	steps: Array<number | string | undefined>,
 	itemIndex: number,
 ): void {
-	const numericSteps = steps.map((step) => Number(step ?? 0)).filter((step) => step > 0);
+	const normalized = steps.map((step) => Number(step ?? 0));
+	if (normalized.some((step) => !Number.isFinite(step) || !Number.isInteger(step) || step < 0)) {
+		throw new NodeOperationError(
+			ctx.getNode(),
+			'Signing steps must be non-negative whole numbers',
+			{ itemIndex },
+		);
+	}
+	const numericSteps = normalized.filter((step) => step > 0);
 	if (numericSteps.length === 0) return;
 	if (numericSteps.length !== steps.length) {
 		throw new NodeOperationError(

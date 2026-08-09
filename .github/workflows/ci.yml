@@ -6,46 +6,59 @@ on:
     branches:
       - main
 
-# Cancel in-progress runs for the same branch/PR to avoid wasting CI minutes.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Least-privilege default: CI only needs to read the repository.
 permissions:
   contents: read
 
 jobs:
-  build:
+  verify:
+    name: Node.js ${{ matrix.node-version }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     strategy:
       fail-fast: false
       matrix:
-        # Test across the Node versions the n8n toolchain supports (matches
-        # package.json engines). The build tooling (n8n-workflow →
-        # @n8n/expression-runtime → isolated-vm) requires Node >= 22, so 20.x
-        # is intentionally excluded — isolated-vm won't compile on Node 20's V8.
+        # Node 24 is the current LTS; Node 22 remains the supported runtime floor.
         node-version: ['22.x', '24.x']
 
     steps:
-      - uses: actions/checkout@v5
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ matrix.node-version }}
-          cache: 'npm'
+          cache: npm
 
-      - name: Install dependencies
+      - name: Use the locked npm version
+        run: npm install --global npm@11.16.0
+
+      - name: Install locked dependencies
         run: npm ci
 
-      - name: Run lint
+      - name: Build
+        run: npm run build
+
+      - name: Lint
         run: npm run lint
 
-      - name: Run tests
-        run: npm test
+      - name: Test with coverage gates
+        run: npm run test:ci
 
-      - name: Run build
-        run: npm run build
+      - name: Audit production dependencies
+        if: matrix.node-version == '24.x'
+        run: npm run audit:prod
+
+      - name: Verify package contents
+        if: matrix.node-version == '24.x'
+        run: |
+          npm pack --dry-run --ignore-scripts --json > "$RUNNER_TEMP/package-contents.json"
+          node -e "const fs = require('node:fs'); const report = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'))[0]; const paths = report.files.map(({ path }) => path); const manifest = require('./package.json'); const required = [...manifest.n8n.credentials, ...manifest.n8n.nodes, 'docs/OPERATIONS.md', 'CHANGELOG.md', 'CONTRIBUTING.md', 'LICENSE.md', 'README.md', 'SECURITY.md']; const missing = required.filter((path) => !paths.includes(path)); const leakedGeneratedFiles = paths.filter((path) => path.endsWith('.tsbuildinfo') || path.startsWith('dist/coverage/')); if (missing.length || leakedGeneratedFiles.length) { throw new Error(JSON.stringify({ missing, leakedGeneratedFiles })); }" "$RUNNER_TEMP/package-contents.json"
+          node -e "const manifest = require('./package.json'); for (const modulePath of [...manifest.n8n.credentials, ...manifest.n8n.nodes]) { require('./' + modulePath); }"

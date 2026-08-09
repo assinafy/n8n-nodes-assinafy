@@ -56,6 +56,42 @@ describe('assignment request construction', () => {
 		expect(req.body.signers).toEqual([{ verification_method: 'Email' }]);
 	});
 
+	it('omits create-only signer IDs and steps from cost estimates', async () => {
+		const { ctx, requests } = makeCtx({
+			documentId: 'doc_1',
+			method: 'virtual',
+			signers: {
+				signer: [
+					{
+						id: 'sig_1',
+						verification_method: 'Whatsapp',
+						notification_methods: ['Whatsapp'],
+						step: 3,
+					},
+				],
+			},
+		});
+		await executeAssignment.call(ctx as any, 0, 'estimateCost');
+		expect(lastAuth(requests).body).toEqual({
+			method: 'virtual',
+			signers: [{ verification_method: 'Whatsapp', notification_methods: ['Whatsapp'] }],
+		});
+	});
+
+	it('estimates collect cost from entries without requiring signers', async () => {
+		const { ctx, requests } = makeCtx({
+			documentId: 'doc_1',
+			method: 'collect',
+			signers: {},
+			entries: '[{"page_id":"p1","fields":[]}]',
+		});
+		await executeAssignment.call(ctx as any, 0, 'estimateCost');
+		expect(lastAuth(requests).body).toEqual({
+			method: 'collect',
+			entries: [{ page_id: 'p1', fields: [] }],
+		});
+	});
+
 	it('resets the expiration date', async () => {
 		const { ctx, requests } = makeCtx({
 			documentId: 'doc_1',
@@ -104,6 +140,19 @@ describe('assignment request construction', () => {
 		);
 	});
 
+	it('lists assignments with the required live account context', async () => {
+		const { ctx, requests } = makeCtx(
+			{ returnAll: false, limit: 25 },
+			{ response: [{ id: 'asg_1' }] },
+		);
+		const result = (await executeAssignment.call(ctx as any, 0, 'list')) as any[];
+		const req = lastAuth(requests);
+		expect(req.method).toBe('GET');
+		expect(req.url).toBe(`${BASE}/assignments`);
+		expect(req.qs).toEqual({ accountId: 'acc_123', 'per-page': 25 });
+		expect(result[0].json).toEqual({ id: 'asg_1' });
+	});
+
 	it('reads the sign page with the access code (no auth)', async () => {
 		const { ctx, requests } = makeCtx({ signerAccessCode: 'code123' });
 		await executeAssignment.call(ctx as any, 0, 'getSignPage');
@@ -111,6 +160,18 @@ describe('assignment request construction', () => {
 		expect(req.method).toBe('GET');
 		expect(req.url).toBe(`${BASE}/sign`);
 		expect(req.qs).toEqual({ 'signer-access-code': 'code123' });
+	});
+
+	it('can accept terms while reading the sign page', async () => {
+		const { ctx, requests } = makeCtx({
+			signerAccessCode: 'code123',
+			hasAcceptedTerms: true,
+		});
+		await executeAssignment.call(ctx as any, 0, 'getSignPage');
+		expect(lastPublic(requests).qs).toEqual({
+			'signer-access-code': 'code123',
+			has_accepted_terms: true,
+		});
 	});
 
 	it('signs an assignment with a raw items array (no auth)', async () => {
@@ -140,6 +201,34 @@ describe('assignment request construction', () => {
 		expect(req.method).toBe('PUT');
 		expect(req.url).toBe(`${BASE}/documents/doc_1/assignments/asg_1/reject`);
 		expect(req.body).toEqual({ decline_reason: 'No thanks' });
+	});
+
+	it.each([
+		['getSignPage', { signerAccessCode: '' }],
+		[
+			'sign',
+			{
+				documentId: 'doc_1',
+				assignmentId: 'asg_1',
+				signerAccessCode: '   ',
+				signItems: '[{"itemId":"i1"}]',
+			},
+		],
+		[
+			'decline',
+			{
+				documentId: 'doc_1',
+				assignmentId: 'asg_1',
+				signerAccessCode: '',
+				declineReason: 'No thanks',
+			},
+		],
+	])('rejects a blank access code for %s', async (operation, params) => {
+		const { ctx, requests } = makeCtx(params);
+		await expect(executeAssignment.call(ctx as any, 0, operation)).rejects.toThrow(
+			'Signer Access Code is required',
+		);
+		expect(requests).toHaveLength(0);
 	});
 
 	it('no longer exposes the removed cancel operation', async () => {

@@ -6,20 +6,23 @@ import type {
 	INodeTypeDescription,
 	IWebhookFunctions,
 	IWebhookResponseData,
+	JsonObject,
 } from 'n8n-workflow';
-import { NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
-import {
-	CREDENTIALS_TYPE,
-	assinafyApiRequest,
-	getAccountId,
-} from '../Assinafy/shared/transport';
-import {
-	DEFAULT_WEBHOOK_EVENTS,
-	WEBHOOK_EVENT_OPTIONS,
-} from '../Assinafy/resources/webhookEvents';
+import { NodeApiError, NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
+import { CREDENTIALS_TYPE, assinafyApiRequest, getAccountId } from '../Assinafy/shared/transport';
+import { DEFAULT_WEBHOOK_EVENTS, WEBHOOK_EVENT_OPTIONS } from '../Assinafy/resources/webhookEvents';
 import { isEmptySubscription } from '../Assinafy/resources/webhook';
 
 const SIGNATURE_HEADER = 'x-assinafy-signature';
+const REDACTED_HEADER_VALUE = '[REDACTED]';
+const SENSITIVE_HEADERS = new Set([
+	'authorization',
+	'cookie',
+	'proxy-authorization',
+	'set-cookie',
+	'x-api-key',
+	SIGNATURE_HEADER,
+]);
 
 export class AssinafyTrigger implements INodeType {
 	description: INodeTypeDescription = {
@@ -28,6 +31,7 @@ export class AssinafyTrigger implements INodeType {
 		icon: { light: 'file:../../icons/assinafy.svg', dark: 'file:../../icons/assinafy.dark.svg' },
 		group: ['trigger'],
 		version: 1,
+		subtitle: 'Webhook events',
 		description:
 			'Starts a workflow when Assinafy posts a webhook event (document ready, signer signed, etc.)',
 		defaults: {
@@ -77,7 +81,7 @@ export class AssinafyTrigger implements INodeType {
 			},
 			{
 				displayName:
-					'⚠ Assinafy supports only one webhook subscription per workspace. Activating this trigger replaces any existing subscription; deactivating it inactivates the subscription (PUT /webhooks/inactivate).',
+					'Important: Assinafy supports only one webhook subscription per workspace. Activating this trigger replaces any existing subscription. Deactivation inactivates it only while the registered URL, notification email, and event set still match this trigger, so an independently replaced subscription is left intact.',
 				name: 'singleSubscriptionNotice',
 				type: 'notice',
 				default: '',
@@ -107,7 +111,7 @@ export class AssinafyTrigger implements INodeType {
 				} catch (error) {
 					const code = (error as { httpCode?: string | number }).httpCode;
 					if (code === 404 || code === '404') return false;
-					throw error;
+					throw new NodeApiError(this.getNode(), error as JsonObject);
 				}
 			},
 
@@ -133,6 +137,23 @@ export class AssinafyTrigger implements INodeType {
 			async delete(this: IHookFunctions): Promise<boolean> {
 				try {
 					const accountId = await getAccountId(this);
+					const webhookUrl = this.getNodeWebhookUrl('default');
+					const email = this.getNodeParameter('email', '') as string;
+					const events = this.getNodeParameter('events', []) as string[];
+					const desiredEvents = events.length > 0 ? events : DEFAULT_WEBHOOK_EVENTS;
+					const existing = await assinafyApiRequest<IDataObject | null>(this, {
+						method: 'GET',
+						path: `/accounts/${accountId}/webhooks/subscriptions`,
+					});
+					if (
+						isEmptySubscription(existing) ||
+						existing!.is_active === false ||
+						existing!.url !== webhookUrl ||
+						existing!.email !== email ||
+						!sameEventSet(existing!.events, desiredEvents)
+					) {
+						return true;
+					}
 					await assinafyApiRequest(this, {
 						method: 'PUT',
 						path: `/accounts/${accountId}/webhooks/inactivate`,
@@ -140,7 +161,7 @@ export class AssinafyTrigger implements INodeType {
 				} catch (error) {
 					const code = (error as { httpCode?: string | number }).httpCode;
 					if (code === 404 || code === '404') return true;
-					throw error;
+					throw new NodeApiError(this.getNode(), error as JsonObject);
 				}
 				return true;
 			},
@@ -150,6 +171,7 @@ export class AssinafyTrigger implements INodeType {
 	async webhook(this: IWebhookFunctions): Promise<IWebhookResponseData> {
 		const req = this.getRequestObject();
 		const headers = this.getHeaderData() as Record<string, string | string[] | undefined>;
+		const safeHeaders = redactSensitiveHeaders(headers);
 		const body = this.getBodyData() as IDataObject;
 
 		const verifySignature = this.getNodeParameter('verifySignature', false) as boolean;
@@ -196,7 +218,7 @@ export class AssinafyTrigger implements INodeType {
 					{
 						json: {
 							event: eventType,
-							headers,
+							headers: safeHeaders,
 							body,
 						},
 					},
@@ -204,6 +226,25 @@ export class AssinafyTrigger implements INodeType {
 			],
 		};
 	}
+}
+
+function redactSensitiveHeaders(
+	headers: Record<string, string | string[] | undefined>,
+): Record<string, string | string[] | undefined> {
+	return Object.fromEntries(
+		Object.entries(headers).map(([name, value]) => [
+			name,
+			isSensitiveHeader(name) ? REDACTED_HEADER_VALUE : value,
+		]),
+	);
+}
+
+function isSensitiveHeader(name: string): boolean {
+	const normalized = name.toLowerCase();
+	return (
+		SENSITIVE_HEADERS.has(normalized) ||
+		/(?:^|[-_])(?:api[-_]?key|token|secret|signature)(?:$|[-_])/.test(normalized)
+	);
 }
 
 function readSignatureHeader(

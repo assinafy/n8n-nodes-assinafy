@@ -1,62 +1,48 @@
 # @assinafy/n8n-nodes-assinafy
 
-Community n8n nodes for [Assinafy](https://assinafy.com.br), the Brazilian electronic-signature platform. This package exposes the public [Assinafy REST API](https://api.assinafy.com.br/v1/docs) (v1) as first-class n8n nodes, mirroring the surface of the official PHP SDK.
+Community n8n nodes for [Assinafy](https://assinafy.com.br), the Brazilian electronic-signature platform. This package maps all 87 operations in the public [Assinafy REST API](https://api.assinafy.com.br/v1/docs) v1 contract to first-class n8n nodes, with a small number of clearly identified convenience and live-API compatibility operations.
 
 This package ships:
 
 - **Assinafy** — an action node exposing every documented endpoint in the v1 API. Resources: `assignment`, `auth`, `document`, `field` (field definition), `signer`, `signerDocument` (signer-side flows), `tag`, `template`, `webhook`, `workspace`.
-- **Assinafy Trigger** — a webhook trigger that subscribes your workflow to Assinafy events and verifies the HMAC-SHA256 signature on each delivery.
+- **Assinafy Trigger** — a webhook trigger that subscribes your workflow to Assinafy events and can verify an HMAC-SHA256 signature when the opt-in check is enabled.
 - **Assinafy API** — a shared credential (X-Api-Key + account ID, with production/sandbox/custom base URLs).
 
 ## Installation
 
-This package is published to the **GitHub Packages npm registry** (not npmjs.com). Because GitHub Packages scopes every package to the repository owner, the npm name is `@assinafy/n8n-nodes-assinafy`.
+Public releases target **npmjs.com** as the primary registry under `@assinafy/n8n-nodes-assinafy`. Once a release is present there, no registry token or custom `.npmrc` is needed to install it. The first npmjs publication and n8n catalog submission are external release steps, not guarantees made by this repository.
 
 ### Self-hosted n8n
 
-1. Create a GitHub Personal Access Token (classic) with the `read:packages` scope at https://github.com/settings/tokens. (A fine-grained PAT with “Packages: read” on the `assinafy` org also works.)
-
-2. Configure npm to resolve the `@assinafy` scope from GitHub Packages and to authenticate with your token. Add to your user `~/.npmrc` (or to an `.npmrc` at your n8n project root):
-
-   ```ini
-   @assinafy:registry=https://npm.pkg.github.com
-   //npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}
-   ```
-
-   Export the token in your shell (or a managed secret) before running npm:
-
-   ```bash
-   export GITHUB_TOKEN=ghp_xxxxxxxxxxxx
-   ```
-
-3. Install the package:
+1. Install the package:
 
    ```bash
    npm install @assinafy/n8n-nodes-assinafy
    ```
 
-   If you're using the n8n UI's **Settings → Community Nodes** installer, enter `@assinafy/n8n-nodes-assinafy` as the package name. The installer reads the `.npmrc` configured for the container running n8n — you must provide the token to that container (see the [n8n community-nodes install docs](https://docs.n8n.io/integrations/community-nodes/installation/) and the [GitHub Packages npm guide](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-npm-registry)).
+2. In n8n, open **Settings → Community Nodes** and enter `@assinafy/n8n-nodes-assinafy`. See the [n8n community-node installation guide](https://docs.n8n.io/integrations/community-nodes/installation/) for container and queue-mode details.
+
+GitHub Packages may be used as an optional release mirror. Installing from that mirror requires an `@assinafy:registry=https://npm.pkg.github.com` scope mapping and a GitHub token with `read:packages`; those settings are not needed for the primary npmjs package.
 
 ### n8n Cloud
 
-> [!NOTE]
-> n8n Cloud's community-nodes catalog is fed from **npmjs.com**, so packages published only to GitHub Packages are not auto-discoverable there. If you need n8n Cloud support, ask the Assinafy team to mirror releases to npmjs.com, or fork and publish under your own npmjs.com namespace.
+Publication to npmjs is required for n8n's verified community-node submission process. Availability in n8n Cloud still depends on n8n review and catalog approval; npm publication alone does not imply Cloud availability.
 
-Requires n8n ≥ 1.0. Building from source requires **Node.js ≥ 22** — the `@n8n/node-cli` / `n8n-workflow` build toolchain dropped Node 20 support.
+The package declares `n8n-workflow` as a peer dependency so the installed n8n instance supplies the compatible runtime. Building and testing this repository requires **Node.js 22.22 or newer**; CI and release jobs use the current LTS line, Node.js 24.
 
 ## Credentials
 
-Create an **Assinafy API** credential and fill in:
+Create an **Assinafy API** credential for account-scoped and API-key operations:
 
-| Field           | Required | Notes                                                                                                                                                     |
-| --------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Environment     | ✓        | `Production` (default), `Sandbox`, or `Custom`. Production resolves to `https://api.assinafy.com.br/v1`; sandbox to `https://sandbox.assinafy.com.br/v1`. |
-| Custom Base URL | —        | Only when `Custom` is selected. Must include the `/v1` path.                                                                                              |
-| API Key         | ✓        | Generated from the Assinafy dashboard. Sent as the `X-Api-Key` request header.                                                                            |
-| Account ID      | ✓        | Default workspace (account) ID. Used by every account-scoped endpoint.                                                                                    |
-| Webhook Secret  | —        | Shared secret for the Assinafy Trigger node to verify HMAC-SHA256 signatures.                                                                             |
+| Field           | Required        | Notes                                                                                                                                                     |
+| --------------- | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Environment     | ✓               | `Production` (default), `Sandbox`, or `Custom`. Production resolves to `https://api.assinafy.com.br/v1`; sandbox to `https://sandbox.assinafy.com.br/v1`. |
+| Custom Base URL | ✓ for `Custom`  | Must be absolute HTTPS and end in `/v1`, with no user info, query, or fragment. HTTP is allowed only for loopback development hosts.                      |
+| API Key         | ✓ in credential | Generated from the Assinafy dashboard. Sent as the `X-Api-Key` request header.                                                                            |
+| Account ID      | ✓ in credential | Default workspace (account) ID. Used by every account-scoped endpoint.                                                                                    |
+| Webhook Secret  | —               | Shared secret for the Assinafy Trigger node to verify HMAC-SHA256 signatures.                                                                             |
 
-The credential test calls `GET /accounts/{accountId}` to confirm the key and account are valid.
+The credential test calls `GET /accounts/{accountId}` to confirm the key and account are valid. Custom URLs are validated and normalized before either the Test request or any authenticated request can attach the API key. The **Assinafy** action credential is optional only for public, signer-access-code, and explicitly Bearer-authenticated operations. Without a selected credential those calls use the production base URL; if a selected credential cannot be loaded, the call fails instead of silently falling back to production. Select a Sandbox credential even for an unauthenticated call when you need the sandbox host. The **Assinafy Trigger** always requires a credential because subscription lifecycle calls are account-scoped.
 
 ## Supported operations
 
@@ -105,8 +91,8 @@ Uploads accept a binary property from the previous node (must be a non-empty PDF
 | Delete                           | `DELETE /accounts/{accountId}/signers/{signerId}`                       |
 | Find by Email                    | `GET /accounts/{accountId}/signers?search={email}`                      |
 | Get Self (Signer Side)           | `GET /signers/self?signer-access-code=…`                                |
-| Accept Terms (Signer Side)       | `PUT /signers/accept-terms`                                             |
-| Verify Code (Signer Side)        | `POST /verify`                                                          |
+| Accept Terms (Signer Side)       | `PUT /signers/accept-terms?signer-access-code=…`                        |
+| Verify Code (Signer Side)        | `POST /verify?signer-access-code=…`                                     |
 | Confirm Data (Signer Side)       | `PUT /documents/{documentId}/signers/confirm-data?signer-access-code=…` |
 | Upload Signature (Signer Side)   | `POST /signature?signer-access-code=…&type=signature\|initial`          |
 | Download Signature (Signer Side) | `GET /signature/{type}?signer-access-code=…`                            |
@@ -124,6 +110,7 @@ Uploads accept a binary property from the previous node (must be a non-empty PDF
 | Get Sign Page (Signer Side) | `GET /sign?signer-access-code=…`                                                                  |
 | Sign (Signer Side)          | `POST /documents/{documentId}/assignments/{assignmentId}?signer-access-code=…`                    |
 | Decline (Signer Side)       | `PUT /documents/{documentId}/assignments/{assignmentId}/reject?signer-access-code=…`              |
+| List                        | `GET /assignments?accountId={accountId}`                                                          |
 
 The `method` can be `virtual` (remote signature via email or WhatsApp) or `collect` (field-placed signatures on the document). Each signer entry accepts optional `verification_method` (`Email` / `Whatsapp`), `notification_methods`, and sequential-signing `step`. For `collect`, the node exposes the SDK-compatible `entries` JSON payload. `copy_receivers` are signer IDs, not email addresses.
 
@@ -134,7 +121,7 @@ The `method` can be `virtual` (remote signature via email or WhatsApp) or `colle
 | List      | `GET /accounts/{accountId}/templates` — filters: `search`, `status`, tag IDs, `sort` |
 | Get       | `GET /accounts/{accountId}/templates/{templateId}`                                   |
 
-Templates are read-only resources created through the Assinafy web app. Use **List** and **Get** to retrieve roles and field placements needed for Create From Template documents.
+Templates are read-only resources created through the Assinafy web app. Use **List** and **Get** to retrieve roles and field placements needed for Create From Template documents. The Get route works in the live API but is not present in the 2026-08-08 OpenAPI snapshot; it is retained as an explicitly documented compatibility operation.
 
 ### Resource: Tag
 
@@ -168,18 +155,20 @@ These endpoints authorize via the per-signer `signer-access-code` query paramete
 | ---------------- | ----------------------------------------------------------------------------------------- |
 | Get Current      | `GET /signers/{signerId}/document?signer-access-code=…`                                   |
 | List             | `GET /signers/{signerId}/documents?signer-access-code=…`                                  |
+| Search           | `GET /signers/{signerId}/documents/search?signer-access-code=…&search=…`                  |
 | Sign Multiple    | `PUT /signers/documents/sign-multiple?signer-access-code=…`                               |
 | Decline Multiple | `PUT /signers/documents/decline-multiple?signer-access-code=…`                            |
 | Download         | `GET /signers/{signerId}/documents/{documentId}/download/{artifact}?signer-access-code=…` |
 
 ### Resource: Authentication
 
-User-account flows. Most return an access token used as `Authorization: Bearer …`; subsequent calls in the same workflow can use the **Custom** environment + that token if needed.
+User-account flows. Login operations return an access token used as `Authorization: Bearer …`. Operations that expose **Access Token** use it when provided and otherwise use the configured API key; public password-reset operations need neither.
 
 | Operation              | Endpoint                                     |
 | ---------------------- | -------------------------------------------- |
 | Login                  | `POST /login`                                |
 | Social Login           | `POST /authentication/social-login`          |
+| Link Social Login      | `POST /auth/link-social-login`               |
 | Create API Key         | `POST /users/api-keys`                       |
 | Get API Key (Masked)   | `GET /users/api-keys`                        |
 | Delete API Key         | `DELETE /users/api-keys`                     |
@@ -189,18 +178,20 @@ User-account flows. Most return an access token used as `Authorization: Bearer �
 
 ### Resource: Workspace
 
-| Operation        | Endpoint                             |
-| ---------------- | ------------------------------------ |
-| Create           | `POST /accounts`                     |
-| List             | `GET /accounts`                      |
-| Get              | `GET /accounts/{workspaceId}`        |
-| Update           | `PUT /accounts/{workspaceId}`        |
-| Delete           | `DELETE /accounts/{workspaceId}`     |
-| Get Current User | `GET /users/self`                    |
-| Get Theme        | `GET /accounts/{workspaceId}/theme`  |
-| Upload Logo      | `POST /accounts/{workspaceId}/logo` (multipart) |
-| Download Logo    | `GET /accounts/{workspaceId}/logo`   |
-| Delete Logo      | `DELETE /accounts/{workspaceId}/logo` |
+| Operation              | Endpoint                                        |
+| ---------------------- | ----------------------------------------------- |
+| Create                 | `POST /accounts`                                |
+| List                   | `GET /accounts`                                 |
+| Get                    | `GET /accounts/{workspaceId}`                   |
+| Update                 | `PUT /accounts/{workspaceId}`                   |
+| Delete                 | `DELETE /accounts/{workspaceId}`                |
+| Get Current User       | `GET /users/self`                               |
+| Get Account Statistics | `GET /accounts/{workspaceId}/stats`             |
+| Get User Statistics    | `GET /users/self/stats`                         |
+| Get Theme              | `GET /accounts/{workspaceId}/theme`             |
+| Upload Logo            | `POST /accounts/{workspaceId}/logo` (multipart) |
+| Download Logo          | `GET /accounts/{workspaceId}/logo`              |
+| Delete Logo            | `DELETE /accounts/{workspaceId}/logo`           |
 
 ### Resource: Webhook
 
@@ -215,12 +206,12 @@ User-account flows. Most return an access token used as `Authorization: Bearer �
 
 ## Assinafy Trigger
 
-The trigger node registers (or replaces) the workspace-wide webhook subscription when the workflow is activated, and **inactivates** it on deactivation via the documented `PUT /accounts/{accountId}/webhooks/inactivate` endpoint. On each incoming delivery it emits `{ event, headers, body }` as a single n8n item.
+The trigger node registers (or replaces) the workspace-wide webhook subscription when the workflow is activated. On deactivation it first reads the current subscription and calls the documented `PUT /accounts/{accountId}/webhooks/inactivate` endpoint only when URL, email, and events still match this trigger, so an independently replaced subscription is left intact. On each incoming delivery it emits `{ event, headers, body }` as a single n8n item with authentication/cookie/signature headers redacted.
 
 **Signature verification is opt-in.** The Assinafy public API docs do not currently document a delivery signature, so `Verify Signature` is **off by default**. If your workspace is configured to sign deliveries, set the credential **Webhook Secret** and enable `Verify Signature`: the node then requires the `X-Assinafy-Signature` header, computes the HMAC-SHA256 digest over the **raw** request body, and rejects the delivery on mismatch (or when the raw body is unavailable — it fails closed).
 
 > [!IMPORTANT]
-> The Assinafy API supports a **single** webhook subscription per workspace. Activating this trigger replaces any existing subscription; deactivating it inactivates the subscription (so delivery history is retained but no further events are sent). If you need to fan out events to multiple destinations, point the trigger at an n8n workflow that rebroadcasts to downstream systems.
+> The Assinafy API supports a **single** webhook subscription per workspace. Activating this trigger replaces any existing subscription; deactivation inactivates only a still-matching subscription. If you need to fan out events to multiple destinations, point the trigger at an n8n workflow that rebroadcasts to downstream systems.
 
 The full event list (source of truth: `nodes/Assinafy/resources/webhookEvents.ts`, shown in the node's **Events** dropdown):
 `assignment_created`, `document_metadata_ready`, `document_prepared`, `document_processing_failed`, `document_ready`, `document_uploaded`, `signature_requested`, `signer_created`, `signer_data_confirmed`, `signer_email_verified`, `signer_rejected_document`, `signer_signed_document`, `signer_viewed_document`, `signer_whatsapp_verified`, `template_created`, `template_processed`, `template_processing_failed`, `user_rejected_document`. When no events are selected, the trigger subscribes to a sensible default set (`document_ready`, `document_prepared`, `signer_signed_document`, `signer_rejected_document`, `document_processing_failed`).
@@ -237,17 +228,24 @@ The full event list (source of truth: `nodes/Assinafy/resources/webhookEvents.ts
 ## Development
 
 ```bash
-npm install
+npm ci            # reproducible install from package-lock.json
 npm run dev       # runs n8n-node dev — starts n8n locally with this package loaded and hot reload
 npm run lint      # n8n-node lint
 npm run build     # compiles TypeScript into dist/
+npm test          # unit and request-shape tests
+npm run test:ci   # tests with enforced coverage thresholds
+npm run audit:prod # production-dependency vulnerability check
 ```
 
-The codebase is intentionally small: one credential, one action node with ten resources (each in its own file under `nodes/Assinafy/resources/`), and one trigger. The `nodes/Assinafy/shared/transport.ts` helper wraps `httpRequestWithAuthentication` (or `httpRequest` when `skipAuth: true` is passed for public/signer-access-code endpoints) and unwraps the `{ status, message, data }` envelope returned by the API. List-search methods under `nodes/Assinafy/listSearch/` back the resource-locator pickers for documents, signers, tags, and templates.
+The codebase contains one credential, one action node with ten resources, and one trigger. The shared transport handles authenticated and public/signer-access-code requests, response-envelope unwrapping, pagination, and retryable rate limits. List-search methods back the resource-locator pickers for documents, signers, tags, and templates.
+
+The optional sandbox suite is intentionally separate from the default test run. It requires explicit sandbox credentials, rejects production hosts, creates disposable records, and cannot complete inbox-dependent login/reset or signer-code flows without credentials/codes supplied by the operator. A route-level or request-shape check is not reported as a successful end-to-end operation. See [the operation reference](docs/OPERATIONS.md#verification-status-and-known-contract-divergences) for the verified limitations.
 
 ## Releasing
 
-`npm run release` lints, builds, and prompts for a version bump. CI publishes to npm on every version tag push (see `.github/workflows/publish.yml`).
+`npm run release` lints, builds, and prompts for a version bump. A version tag builds one immutable tarball, publishes it to npmjs with provenance, and mirrors the same bytes to GitHub Packages (see `.github/workflows/publish.yml`). npmjs trusted-publisher and GitHub Packages permissions must be configured in the external registries before the first release.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the verification and sandbox-test workflow. Report vulnerabilities according to [SECURITY.md](SECURITY.md); never put API keys, signer codes, personal data, or document contents in a public issue.
 
 ## License
 

@@ -5,11 +5,17 @@ import type {
 	INodeProperties,
 } from 'n8n-workflow';
 import { NodeOperationError } from 'n8n-workflow';
-import { assinafyApiRequest } from '../shared/transport';
-import { assignmentIdField, documentResourceLocator } from '../shared/descriptions';
+import { assinafyApiRequest, executeListOperation, getAccountId } from '../shared/transport';
+import {
+	assignmentIdField,
+	documentResourceLocator,
+	limitField,
+	returnAllField,
+} from '../shared/descriptions';
 import {
 	extractRequiredId,
 	parseJsonParam,
+	requireAccessCode,
 	showOnly as showOnlyFor,
 	validateSigningSteps,
 	wrap,
@@ -47,6 +53,7 @@ export const assignmentDescription: INodeProperties[] = [
 				value: 'getSignPage',
 				action: 'Signer reads document data for the signing flow',
 			},
+			{ name: 'List', value: 'list', action: 'List assignments for the current workspace' },
 			{
 				name: 'List WhatsApp Notifications',
 				value: 'listWhatsapp',
@@ -69,8 +76,13 @@ export const assignmentDescription: INodeProperties[] = [
 			},
 		],
 	},
+	{ ...returnAllField, displayOptions: { show: showOnly(['list']) } },
+	{
+		...limitField,
+		displayOptions: { show: { ...showOnly(['list']), returnAll: [false] } },
+	},
 
-	// Document target (used by every operation)
+	// Document target (all document-scoped operations)
 	{
 		...documentResourceLocator,
 		displayOptions: {
@@ -252,6 +264,15 @@ export const assignmentDescription: INodeProperties[] = [
 		description: 'Per-signer access code (from the email/WhatsApp link)',
 		displayOptions: { show: showOnly(['sign', 'decline', 'getSignPage']) },
 	},
+	{
+		displayName: 'Accept Terms While Loading',
+		name: 'hasAcceptedTerms',
+		type: 'boolean',
+		default: false,
+		description:
+			"Whether to accept the Assinafy terms while loading the sign page. Leave disabled to preserve the signer's current state.",
+		displayOptions: { show: showOnly(['getSignPage']) },
+	},
 	{ ...assignmentIdField, displayOptions: { show: showOnly(['sign', 'decline']) } },
 	{
 		displayName: 'Items (JSON)',
@@ -294,6 +315,8 @@ export async function executeAssignment(
 			return wrap({ notifications: await listWhatsappNotifications.call(this, itemIndex) });
 		case 'getSignPage':
 			return wrap(await getSignPage.call(this, itemIndex));
+		case 'list':
+			return listAssignments.call(this, itemIndex);
 		case 'sign':
 			return wrap(await signAssignment.call(this, itemIndex));
 		case 'decline':
@@ -303,6 +326,16 @@ export async function executeAssignment(
 				itemIndex,
 			});
 	}
+}
+
+async function listAssignments(
+	this: IExecuteFunctions,
+	itemIndex: number,
+): Promise<INodeExecutionData[]> {
+	// The running API requires this camelCase account context even though the
+	// published OpenAPI operation currently documents only page/per-page.
+	const accountId = await getAccountId(this);
+	return executeListOperation(this, itemIndex, { path: '/assignments', qs: { accountId } });
 }
 
 interface SignerEntry {
@@ -315,33 +348,35 @@ interface SignerEntry {
 function buildAssignmentBody(
 	this: IExecuteFunctions,
 	itemIndex: number,
-	options: { allowSignersWithoutId?: boolean } = {},
+	options: { forEstimate?: boolean } = {},
 ): IDataObject {
 	const method = this.getNodeParameter('method', itemIndex, 'virtual') as string;
 	const signersParam = this.getNodeParameter('signers', itemIndex, {}) as {
 		signer?: SignerEntry[];
 	};
 	const signerEntries = signersParam.signer ?? [];
-	if (signerEntries.length === 0) {
+	if (signerEntries.length === 0 && (!options.forEstimate || method === 'virtual')) {
 		throw new NodeOperationError(this.getNode(), 'At least one signer is required', {
 			itemIndex,
 		});
 	}
-	validateSigningSteps(
-		this,
-		signerEntries.map((entry) => entry.step),
-		itemIndex,
-	);
+	if (!options.forEstimate) {
+		validateSigningSteps(
+			this,
+			signerEntries.map((entry) => entry.step),
+			itemIndex,
+		);
+	}
 	const signers: IDataObject[] = [];
 	for (const entry of signerEntries) {
 		const ref: IDataObject = {};
-		if (entry.id) ref.id = entry.id;
 		if (entry.verification_method) ref.verification_method = entry.verification_method;
 		if (entry.notification_methods && entry.notification_methods.length > 0) {
 			ref.notification_methods = entry.notification_methods;
 		}
-		if (entry.step && entry.step > 0) ref.step = entry.step;
-		if (!ref.id && !options.allowSignersWithoutId) {
+		if (!options.forEstimate && entry.id) ref.id = entry.id;
+		if (!options.forEstimate && entry.step && entry.step > 0) ref.step = entry.step;
+		if (!options.forEstimate && !ref.id) {
 			throw new NodeOperationError(
 				this.getNode(),
 				'Each signer requires an ID for this operation',
@@ -351,16 +386,19 @@ function buildAssignmentBody(
 		signers.push(ref);
 	}
 
-	const body: IDataObject = { method, signers };
+	const body: IDataObject = { method };
+	if (signers.length > 0) body.signers = signers;
 
-	const additional = this.getNodeParameter('additionalFields', itemIndex, {}) as IDataObject;
-	if (additional.message) body.message = additional.message;
-	if (additional.expires_at) body.expires_at = additional.expires_at;
-	if (
-		Array.isArray(additional.copy_receivers) &&
-		(additional.copy_receivers as unknown[]).length > 0
-	) {
-		body.copy_receivers = additional.copy_receivers;
+	if (!options.forEstimate) {
+		const additional = this.getNodeParameter('additionalFields', itemIndex, {}) as IDataObject;
+		if (additional.message) body.message = additional.message;
+		if (additional.expires_at) body.expires_at = additional.expires_at;
+		if (
+			Array.isArray(additional.copy_receivers) &&
+			(additional.copy_receivers as unknown[]).length > 0
+		) {
+			body.copy_receivers = additional.copy_receivers;
+		}
 	}
 
 	if (method === 'collect') {
@@ -391,7 +429,7 @@ async function createAssignment(this: IExecuteFunctions, itemIndex: number): Pro
 
 async function estimateCost(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const documentId = extractDocumentId.call(this, itemIndex);
-	const body = buildAssignmentBody.call(this, itemIndex, { allowSignersWithoutId: true });
+	const body = buildAssignmentBody.call(this, itemIndex, { forEstimate: true });
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'POST',
 		path: `/documents/${documentId}/assignments/estimate-cost`,
@@ -454,14 +492,14 @@ async function listWhatsappNotifications(
 }
 
 async function getSignPage(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
-	const code = (this.getNodeParameter('signerAccessCode', itemIndex) as string).trim();
-	if (!code) {
-		throw new NodeOperationError(this.getNode(), 'Signer Access Code is required', { itemIndex });
-	}
+	const code = requireAccessCode(this, itemIndex);
+	const hasAcceptedTerms = this.getNodeParameter('hasAcceptedTerms', itemIndex, false) as boolean;
+	const qs: IDataObject = { 'signer-access-code': code };
+	if (hasAcceptedTerms) qs.has_accepted_terms = true;
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'GET',
 		path: '/sign',
-		qs: { 'signer-access-code': code },
+		qs,
 		skipAuth: true,
 	});
 }
@@ -469,7 +507,7 @@ async function getSignPage(this: IExecuteFunctions, itemIndex: number): Promise<
 async function signAssignment(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const documentId = extractDocumentId.call(this, itemIndex);
 	const assignmentId = this.getNodeParameter('assignmentId', itemIndex) as string;
-	const code = (this.getNodeParameter('signerAccessCode', itemIndex) as string).trim();
+	const code = requireAccessCode(this, itemIndex);
 	const raw = this.getNodeParameter('signItems', itemIndex, '[]') as unknown;
 	const items = parseJsonParam(this, raw, 'Items', itemIndex);
 	if (!Array.isArray(items) || items.length === 0) {
@@ -489,7 +527,7 @@ async function signAssignment(this: IExecuteFunctions, itemIndex: number): Promi
 async function declineAssignment(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const documentId = extractDocumentId.call(this, itemIndex);
 	const assignmentId = this.getNodeParameter('assignmentId', itemIndex) as string;
-	const code = (this.getNodeParameter('signerAccessCode', itemIndex) as string).trim();
+	const code = requireAccessCode(this, itemIndex);
 	const reason = this.getNodeParameter('declineReason', itemIndex) as string;
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'PUT',

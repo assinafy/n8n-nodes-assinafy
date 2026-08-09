@@ -5,6 +5,59 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.5.0] — 2026-08-09
+
+### Added
+
+- Completed coverage of the 87-operation OpenAPI snapshot captured on 2026-08-08:
+  Assignment `List`, Authentication `Link Social Login`, Signer Document `Search`,
+  Workspace `Get Account Statistics`, and Workspace `Get User Statistics`.
+- Added request/response documentation for the new operations and a shared schema catalog,
+  contract snapshot hash, binary/envelope conventions, and explicit live-versus-OpenAPI
+  compatibility notes.
+- Added `notification_sender_type` to Workspace Create/Update, `force` to Workspace Delete,
+  `has_accepted_terms` to Assignment Get Sign Page, and signature reuse control.
+
+### Changed
+
+- Corrected signer Accept Terms and Verify Code to send `signer-access-code` in the query
+  string; Verify Code sends only `verification-code` in the JSON body.
+- Signer Confirm Data now exposes the published `full_name`, `email`, and `government_id`
+  fields while retaining clearly labelled legacy runtime fields. Signature uploads reject
+  empty data and preserve sandbox-compatible JPEG support alongside documented PNG.
+- Field validation retains configured account authentication when optional signer context is
+  supplied.
+- Documentation now treats npmjs as the primary registry, uses synthetic identities and
+  placeholders throughout, and no longer overstates live-test coverage.
+- Centralized transport now validates base URLs, consistently wraps API failures, retries HTTP
+  429 rate limits (including HTTP-date `Retry-After` values), and handles pagination when response
+  headers are absent.
+- Credential Test and runtime authentication now share the same HTTPS/loopback URL validation and
+  reject invalid custom targets before attaching the API key. Credential-optional requests default
+  to production only when no credential is selected; selected-credential load failures fail closed.
+- Pagination detects repeated pages and enforces a generous page limit instead of allowing an
+  upstream proxy that ignores `page` to grow memory indefinitely.
+- Binary uploads validate both specific declared MIME type and file signature before making a
+  request, while safely inferring allowed content from magic bytes for generic binary MIME data.
+- Template document creation enforces the published one-notification-method rule per signer,
+  while template cost estimates retain support for pricing both methods and omit create-only
+  signer IDs and signing steps.
+- The live sandbox harness is sandbox-URL locked, gates every mutation explicitly, cleans up in
+  `finally` blocks, and keeps workspace/logo mutations behind a separate disposable-workspace
+  gate.
+
+### Compatibility notes
+
+- The sandbox deployment tested on 2026-08-08 returned route-level HTTP 404 responses for the OpenAPI-published account
+  and current-user statistics endpoints. The operations remain implemented for deployments that
+  expose the published contract.
+- The sandbox deployment tested on 2026-08-08 rejected the OpenAPI-published `notification_sender_type` workspace field
+  with HTTP 400. The optional field remains available for contract-compatible deployments and is
+  documented as unsupported on that sandbox.
+- The live sandbox continues to require `{ recipient, channel }` for public-token delivery and
+  accepts document tag names, despite the current OpenAPI describing `{ email }` and tag IDs.
+  Proven working behavior was preserved and documented rather than removed.
+
 ### Fixed
 
 - **CI: `build (20.x)` job failed at `npm ci`.** A transitive build-toolchain
@@ -17,14 +70,17 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### CI
 
-- Bumped `actions/checkout` and `actions/setup-node` from `v4` to `v5` (Node 24
-  action runtime), clearing GitHub's Node 20 deprecation warnings on every job.
+- Updated GitHub Actions to the current major releases pinned by full commit SHA, and moved
+  CI/release execution to Node.js 24 LTS with least-privilege permissions.
+- Added coverage-gated GitHub and GitLab pipelines, production dependency auditing, package
+  content/runtime-entry checks, npmjs provenance publishing, and a GitHub Packages mirror.
 
 ## [1.4.0] — 2026-07-20
 
-Full re-audit against the live Assinafy v1 API (OpenAPI 3.0 spec, 89 documented
-operations). Every operation — existing and new — was exercised end-to-end against
-the sandbox through the real SDK code paths.
+API contract review against Assinafy v1 and selected live sandbox flows. The operation
+count quoted by the earlier release notes was provisional; the authoritative 2026-08-08
+snapshot contains 87 operations. Request-shape coverage and route checks must not be read as
+proof that every inbox-dependent, credential-dependent, or destructive flow completed end to end.
 
 ### Added
 
@@ -53,9 +109,9 @@ the sandbox through the real SDK code paths.
 
 ## [1.3.0] — 2026-06-05
 
-Production-hardening audit against the live Assinafy v1 API (sandbox-verified, every
-operation exercised). Adds a full per-operation reference, a much larger test suite,
-and CI that actually runs it.
+Production-hardening release against the Assinafy v1 API with selected sandbox verification.
+It added a per-operation reference, a larger request-shape test suite, and CI execution. Some
+inbox-dependent and destructive flows were not successful end-to-end tests.
 
 ### Removed
 
@@ -69,7 +125,7 @@ and CI that actually runs it.
 
 - **Signer reuse race now handles the real conflict status.** A duplicate-email create
   returns **HTTP 400** (`"Um signatário com este e-mail já existe."`), not 409. `Create`
-  (with *Reuse If Exists*) now treats 400 and 409 alike: it re-resolves and returns the
+  (with _Reuse If Exists_) now treats 400 and 409 alike: it re-resolves and returns the
   existing signer instead of surfacing the error.
 - **`Verify` (document by hash) now calls the public endpoint with `skipAuth`,** matching the
   other public endpoints, so it works without an API key.
@@ -176,7 +232,7 @@ authenticate via `signer-access-code` and the public/unauthenticated endpoints.
 
 ## [1.1.0] — 2026-05-06
 
-Full audit against the Assinafy REST API v1 docs (`https://api.assinafy.com.br/v1/docs`).
+Full coverage review against the Assinafy REST API v1 docs (`https://api.assinafy.com.br/v1/docs`).
 All endpoints re-verified. Three new Document operations and a complete Template resource added.
 
 ### Added
@@ -192,7 +248,7 @@ All endpoints re-verified. Three new Document operations and a complete Template
 ### Fixed
 
 - **Document Upload — multipart boundary** — removed the explicit `Content-Type: multipart/form-data` header from `uploadDocument`. When `FormData` is passed as the request body the HTTP client generates the `Content-Type` header including the required boundary string; setting it explicitly dropped the boundary and caused server-side parse errors.
-- **Signer Create — email now optional** — the API allows signers to be created with a WhatsApp phone number and no email address (WhatsApp-only verification flow). The `email` field is no longer required; the node now throws a validation error only when *neither* email nor `whatsapp_phone_number` is supplied.
+- **Signer Create — email now optional** — the API allows signers to be created with a WhatsApp phone number and no email address (WhatsApp-only verification flow). The `email` field is no longer required; the node now throws a validation error only when _neither_ email nor `whatsapp_phone_number` is supplied.
 
 ### Changed
 
@@ -218,6 +274,6 @@ Initial release. Mirrors the surface of the official Assinafy PHP SDK and the pu
 
 ### Changed
 
-- Audited the assignment node against the API so `collect` assignments accept the SDK-compatible `entries` payload and `copy_receivers` are correctly documented as signer IDs.
+- Updated the assignment node against the API so `collect` assignments accept the SDK-compatible `entries` payload and `copy_receivers` are correctly documented as signer IDs.
 - Aligned webhook registration defaults and trigger signature verification with the API behavior (`document_prepared` stays in the default event set; only `X-Assinafy-Signature` is trusted for HMAC verification).
 - Added guardrails for document uploads (reject empty PDFs and files larger than 25 MB) and signer email validation.

@@ -8,13 +8,17 @@ describe('workspace request construction', () => {
 	it('creates a workspace (account)', async () => {
 		const { ctx, requests } = makeCtx({
 			name: 'New WS',
-			additionalFields: { primary_color: 'ff0000' },
+			additionalFields: { notification_sender_type: 'Account', primary_color: 'ff0000' },
 		});
 		await executeWorkspace.call(ctx as any, 0, 'create');
 		const req = lastAuth(requests);
 		expect(req.method).toBe('POST');
 		expect(req.url).toBe(`${BASE}/accounts`);
-		expect(req.body).toEqual({ name: 'New WS', primary_color: 'ff0000' });
+		expect(req.body).toEqual({
+			name: 'New WS',
+			notification_sender_type: 'Account',
+			primary_color: 'ff0000',
+		});
 	});
 
 	it('lists workspaces with a per-page limit', async () => {
@@ -35,12 +39,15 @@ describe('workspace request construction', () => {
 	});
 
 	it('updates a workspace', async () => {
-		const { ctx, requests } = makeCtx({ workspaceId: 'ws_1', updateFields: { name: 'Renamed' } });
+		const { ctx, requests } = makeCtx({
+			workspaceId: 'ws_1',
+			updateFields: { name: 'Renamed', notification_sender_type: 'User' },
+		});
 		await executeWorkspace.call(ctx as any, 0, 'update');
 		const req = lastAuth(requests);
 		expect(req.method).toBe('PUT');
 		expect(req.url).toBe(`${BASE}/accounts/ws_1`);
-		expect(req.body).toEqual({ name: 'Renamed' });
+		expect(req.body).toEqual({ name: 'Renamed', notification_sender_type: 'User' });
 	});
 
 	it('deletes a workspace', async () => {
@@ -50,12 +57,49 @@ describe('workspace request construction', () => {
 		expect(result.json).toEqual({ deleted: true, workspaceId: 'ws_1' });
 	});
 
+	it('can force-delete a disposable workspace', async () => {
+		const { ctx, requests } = makeCtx({ workspaceId: 'ws_disposable', force: true });
+		await executeWorkspace.call(ctx as any, 0, 'delete');
+		expect(lastAuth(requests).body).toEqual({ force: true });
+	});
+
 	it('gets the current user from /users/self', async () => {
 		const { ctx, requests } = makeCtx({}, { response: { user: { id: 'u1' }, accounts: [] } });
 		await executeWorkspace.call(ctx as any, 0, 'getCurrentUser');
 		const req = lastAuth(requests);
 		expect(req.method).toBe('GET');
 		expect(req.url).toBe(`${BASE}/users/self`);
+	});
+
+	it('gets monthly account statistics', async () => {
+		const { ctx, requests } = makeCtx(
+			{ workspaceId: 'ws_1', granularity: 'monthly' },
+			{ response: [{ period: '2026-08', total_documents: 3 }] },
+		);
+		const result = (await executeWorkspace.call(ctx as any, 0, 'getAccountStats')) as any[];
+		const req = lastAuth(requests);
+		expect(req.url).toBe(`${BASE}/accounts/ws_1/stats`);
+		expect(req.qs).toEqual({ granularity: 'monthly' });
+		expect(result[0].json.period).toBe('2026-08');
+	});
+
+	it('gets daily current-user statistics for one month', async () => {
+		const { ctx, requests } = makeCtx(
+			{ granularity: 'daily', statsMonth: '2026-08' },
+			{ response: [{ period: '2026-08-01' }] },
+		);
+		await executeWorkspace.call(ctx as any, 0, 'getUserStats');
+		const req = lastAuth(requests);
+		expect(req.url).toBe(`${BASE}/users/self/stats`);
+		expect(req.qs).toEqual({ granularity: 'daily', month: '2026-08' });
+	});
+
+	it('rejects an invalid daily statistics month before the request', async () => {
+		const { ctx, requests } = makeCtx({ granularity: 'daily', statsMonth: '08/2026' });
+		await expect(executeWorkspace.call(ctx as any, 0, 'getUserStats')).rejects.toThrow(
+			'Month must use YYYY-MM format',
+		);
+		expect(requests).toHaveLength(0);
 	});
 
 	it('gets the workspace theme', async () => {
@@ -67,13 +111,30 @@ describe('workspace request construction', () => {
 	it('uploads a logo as multipart', async () => {
 		const { ctx, requests } = makeCtx(
 			{ workspaceId: 'ws_1', binaryPropertyName: 'data' },
-			{ binaryBuffer: Buffer.from('PNG'), binaryMeta: { fileName: 'logo.png', mimeType: 'image/png' } },
+			{
+				binaryBuffer: Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex'),
+				binaryMeta: { fileName: 'logo.png', mimeType: 'image/png' },
+			},
 		);
 		await executeWorkspace.call(ctx as any, 0, 'uploadLogo');
 		const req = lastAuth(requests);
 		expect(req.method).toBe('POST');
 		expect(req.url).toBe(`${BASE}/accounts/ws_1/logo`);
 		expect(req.body).toBeInstanceOf(FormData);
+	});
+
+	it('rejects a logo whose bytes do not match its declared image type', async () => {
+		const { ctx, requests } = makeCtx(
+			{ workspaceId: 'ws_1', binaryPropertyName: 'data' },
+			{
+				binaryBuffer: Buffer.from('not an image'),
+				binaryMeta: { fileName: 'logo.png', mimeType: 'image/png' },
+			},
+		);
+		await expect(executeWorkspace.call(ctx as any, 0, 'uploadLogo')).rejects.toThrow(
+			'content does not match',
+		);
+		expect(requests).toHaveLength(0);
 	});
 
 	it('downloads the logo as binary', async () => {

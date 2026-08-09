@@ -31,14 +31,27 @@ export const authDescription: INodeProperties[] = [
 				value: 'getApiKey',
 				action: 'Retrieve a masked view of the current API key',
 			},
+			{
+				name: 'Link Social Login',
+				value: 'linkSocialLogin',
+				action: 'Link a social provider to the authenticated user',
+			},
 			{ name: 'Login', value: 'login', action: 'Exchange email and password for an access token' },
 			{
 				name: 'Request Password Reset',
 				value: 'requestPasswordReset',
 				action: 'Email password reset instructions to a user',
 			},
-			{ name: 'Reset Password', value: 'resetPassword', action: 'Set a new password using the reset token' },
-			{ name: 'Social Login', value: 'socialLogin', action: 'Trade a social provider token for an access token' },
+			{
+				name: 'Reset Password',
+				value: 'resetPassword',
+				action: 'Set a new password using the reset token',
+			},
+			{
+				name: 'Social Login',
+				value: 'socialLogin',
+				action: 'Trade a social provider token for an access token',
+			},
 		],
 	},
 
@@ -51,12 +64,7 @@ export const authDescription: INodeProperties[] = [
 		required: true,
 		placeholder: 'name@example.com',
 		displayOptions: {
-			show: showOnly([
-				'login',
-				'changePassword',
-				'requestPasswordReset',
-				'resetPassword',
-			]),
+			show: showOnly(['login', 'changePassword', 'requestPasswordReset', 'resetPassword']),
 		},
 	},
 	{
@@ -76,7 +84,7 @@ export const authDescription: INodeProperties[] = [
 		type: 'options',
 		default: 'google',
 		options: [{ name: 'Google', value: 'google' }],
-		displayOptions: { show: showOnly(['socialLogin']) },
+		displayOptions: { show: showOnly(['socialLogin', 'linkSocialLogin']) },
 	},
 	{
 		displayName: 'Social Token',
@@ -86,7 +94,7 @@ export const authDescription: INodeProperties[] = [
 		default: '',
 		required: true,
 		description: 'Access or ID token received from the social provider',
-		displayOptions: { show: showOnly(['socialLogin']) },
+		displayOptions: { show: showOnly(['socialLogin', 'linkSocialLogin']) },
 	},
 	{
 		displayName: 'Has Accepted Terms',
@@ -103,10 +111,16 @@ export const authDescription: INodeProperties[] = [
 		type: 'string',
 		typeOptions: { password: true },
 		default: '',
-		required: true,
-		description: 'JWT access token from Login or Social Login',
+		description:
+			'Optional JWT from Login or Social Login. Leave empty to authenticate with the configured API key.',
 		displayOptions: {
-			show: showOnly(['createApiKey', 'getApiKey', 'deleteApiKey', 'changePassword']),
+			show: showOnly([
+				'linkSocialLogin',
+				'createApiKey',
+				'getApiKey',
+				'deleteApiKey',
+				'changePassword',
+			]),
 		},
 	},
 
@@ -152,6 +166,8 @@ export async function executeAuth(
 			return wrap(await login.call(this, itemIndex));
 		case 'socialLogin':
 			return wrap(await socialLogin.call(this, itemIndex));
+		case 'linkSocialLogin':
+			return wrap(await linkSocialLogin.call(this, itemIndex));
 		case 'createApiKey':
 			return wrap(await createApiKey.call(this, itemIndex));
 		case 'getApiKey':
@@ -171,8 +187,25 @@ export async function executeAuth(
 	}
 }
 
+async function linkSocialLogin(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
+	const provider = this.getNodeParameter('provider', itemIndex, 'google') as string;
+	const token = this.getNodeParameter('socialToken', itemIndex) as string;
+	const accessToken = this.getNodeParameter('accessToken', itemIndex, '') as string;
+	return assinafyApiRequest<IDataObject>(this, {
+		method: 'POST',
+		path: '/auth/link-social-login',
+		body: { provider, token },
+		...optionalBearer(accessToken),
+	});
+}
+
 function bearerHeader(token: string): IDataObject {
 	return { Authorization: `Bearer ${token}` };
+}
+
+function optionalBearer(token: string): { headers?: IDataObject; skipAuth?: boolean } {
+	const trimmed = token.trim();
+	return trimmed ? { headers: bearerHeader(trimmed), skipAuth: true } : {};
 }
 
 async function login(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
@@ -199,52 +232,45 @@ async function socialLogin(this: IExecuteFunctions, itemIndex: number): Promise<
 }
 
 async function createApiKey(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
-	const accessToken = this.getNodeParameter('accessToken', itemIndex) as string;
+	const accessToken = this.getNodeParameter('accessToken', itemIndex, '') as string;
 	const password = this.getNodeParameter('authPassword', itemIndex) as string;
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'POST',
 		path: '/users/api-keys',
-		headers: bearerHeader(accessToken),
 		body: { password },
-		skipAuth: true,
+		...optionalBearer(accessToken),
 	});
 }
 
 async function getApiKey(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
-	const accessToken = this.getNodeParameter('accessToken', itemIndex) as string;
+	const accessToken = this.getNodeParameter('accessToken', itemIndex, '') as string;
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'GET',
 		path: '/users/api-keys',
-		headers: bearerHeader(accessToken),
-		skipAuth: true,
+		...optionalBearer(accessToken),
 	});
 }
 
 async function deleteApiKey(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
-	const accessToken = this.getNodeParameter('accessToken', itemIndex) as string;
+	const accessToken = this.getNodeParameter('accessToken', itemIndex, '') as string;
 	await assinafyApiRequest(this, {
 		method: 'DELETE',
 		path: '/users/api-keys',
-		headers: bearerHeader(accessToken),
-		skipAuth: true,
+		...optionalBearer(accessToken),
 	});
 	return { deleted: true };
 }
 
-async function changePassword(
-	this: IExecuteFunctions,
-	itemIndex: number,
-): Promise<IDataObject> {
-	const accessToken = this.getNodeParameter('accessToken', itemIndex) as string;
+async function changePassword(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
+	const accessToken = this.getNodeParameter('accessToken', itemIndex, '') as string;
 	const email = this.getNodeParameter('authEmail', itemIndex) as string;
 	const password = this.getNodeParameter('currentPassword', itemIndex) as string;
 	const newPassword = this.getNodeParameter('newPassword', itemIndex) as string;
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'PUT',
 		path: '/authentication/change-password',
-		headers: bearerHeader(accessToken),
 		body: { email, password, new_password: newPassword },
-		skipAuth: true,
+		...optionalBearer(accessToken),
 	});
 }
 
@@ -261,10 +287,7 @@ async function requestPasswordReset(
 	});
 }
 
-async function resetPassword(
-	this: IExecuteFunctions,
-	itemIndex: number,
-): Promise<IDataObject> {
+async function resetPassword(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const email = this.getNodeParameter('authEmail', itemIndex) as string;
 	const token = this.getNodeParameter('resetToken', itemIndex, '') as string;
 	const newPassword = this.getNodeParameter('newPassword', itemIndex) as string;

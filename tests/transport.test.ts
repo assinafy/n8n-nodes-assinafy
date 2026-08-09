@@ -1,5 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { getBaseUrl, getAccountId, unwrapEnvelope, DEFAULT_BASE_URL, CREDENTIALS_TYPE } from '../nodes/Assinafy/shared/transport';
+import {
+	assinafyApiRequest,
+	assinafyApiRequestAllItems,
+	CREDENTIALS_TYPE,
+	DEFAULT_BASE_URL,
+	getAccountId,
+	getBaseUrl,
+	unwrapEnvelope,
+} from '../nodes/Assinafy/shared/transport';
 
 const createMockContext = (credentials: Record<string, unknown>) => ({
 	getCredentials: jest.fn().mockResolvedValue(credentials),
@@ -19,12 +27,23 @@ describe('shared/transport', () => {
 		});
 
 		it('should return custom URL when environment is custom', async () => {
-			const ctx = createMockContext({ environment: 'custom', customBaseUrl: 'https://custom.api.com/v1' });
+			const ctx = createMockContext({
+				environment: 'custom',
+				customBaseUrl: 'https://custom.api.com/v1',
+			});
 			await expect(getBaseUrl(ctx as any)).resolves.toBe('https://custom.api.com/v1');
 		});
 
+		it('should reject a blank URL when Custom is explicitly selected', async () => {
+			const ctx = createMockContext({ environment: 'custom', customBaseUrl: '' });
+			await expect(getBaseUrl(ctx as any)).rejects.toThrow('valid absolute URL');
+		});
+
 		it('should strip trailing slash from custom URL', async () => {
-			const ctx = createMockContext({ environment: 'custom', customBaseUrl: 'https://custom.api.com/v1/' });
+			const ctx = createMockContext({
+				environment: 'custom',
+				customBaseUrl: 'https://custom.api.com/v1/',
+			});
 			await expect(getBaseUrl(ctx as any)).resolves.toBe('https://custom.api.com/v1');
 		});
 
@@ -37,6 +56,168 @@ describe('shared/transport', () => {
 			const ctx = createMockContext({});
 			await expect(getBaseUrl(ctx as any)).resolves.toBe(DEFAULT_BASE_URL);
 		});
+
+		it('should allow public operations to use production without configured credentials', async () => {
+			const ctx = {
+				getCredentials: jest.fn().mockRejectedValue({ message: 'Credentials not found' }),
+				getNode: jest.fn().mockReturnValue({ name: 'TestNode' }),
+			};
+			await expect(getBaseUrl(ctx as any, true)).resolves.toBe(DEFAULT_BASE_URL);
+			await expect(getBaseUrl(ctx as any)).rejects.toThrow(
+				'Assinafy credentials are required for this operation',
+			);
+		});
+
+		it('does not fall back to production when selected credentials fail to load', async () => {
+			const ctx = {
+				getCredentials: jest.fn().mockRejectedValue({ message: 'Credential decryption failed' }),
+				getNode: jest.fn().mockReturnValue({
+					name: 'TestNode',
+					credentials: { assinafyApi: { id: 'cred_1', name: 'Sandbox' } },
+				}),
+			};
+
+			await expect(getBaseUrl(ctx as any, true)).rejects.toThrow(
+				'Selected Assinafy credentials could not be loaded',
+			);
+		});
+
+		it('should reject non-HTTPS remote custom URLs', async () => {
+			const ctx = createMockContext({
+				environment: 'custom',
+				customBaseUrl: 'http://custom.api.com/v1',
+			});
+			await expect(getBaseUrl(ctx as any)).rejects.toThrow('must use HTTPS');
+		});
+
+		it('should allow an HTTP loopback URL for local development', async () => {
+			const ctx = createMockContext({
+				environment: 'custom',
+				customBaseUrl: 'http://127.0.0.1:3000/v1/',
+			});
+			await expect(getBaseUrl(ctx as any)).resolves.toBe('http://127.0.0.1:3000/v1');
+		});
+
+		it.each([
+			['https://user:password@custom.api.com/v1', 'embedded credentials'],
+			['https://custom.api.com/v1?target=other', 'query string or fragment'],
+			['https://custom.api.com/v1#fragment', 'query string or fragment'],
+			['https://custom.api.com/api', 'include the /v1 API path'],
+		])('should reject an ambiguous custom URL: %s', async (customBaseUrl, message) => {
+			const ctx = createMockContext({ environment: 'custom', customBaseUrl });
+			await expect(getBaseUrl(ctx as any)).rejects.toThrow(message);
+		});
+	});
+
+	describe('requests and pagination', () => {
+		function requestContext(authenticatedRequest: jest.Mock) {
+			return {
+				getCredentials: jest.fn().mockResolvedValue({ baseUrl: DEFAULT_BASE_URL }),
+				getNode: jest.fn().mockReturnValue({ name: 'TestNode' }),
+				helpers: {
+					httpRequestWithAuthentication: authenticatedRequest,
+					httpRequest: jest.fn(),
+				},
+			};
+		}
+
+		it('unwraps an authenticated response and retries a transient 429', async () => {
+			const rateLimitError = {
+				httpCode: 429,
+				response: { headers: { 'retry-after': '0' } },
+			};
+			const request = jest
+				.fn()
+				.mockRejectedValueOnce(rateLimitError)
+				.mockResolvedValue({ status: 200, data: { id: 'doc_1' } });
+			const ctx = requestContext(request);
+
+			await expect(
+				assinafyApiRequest(ctx as any, { method: 'GET', path: '/documents/doc_1' }),
+			).resolves.toEqual({ id: 'doc_1' });
+			expect(request).toHaveBeenCalledTimes(2);
+		});
+
+		it('collects all pages from pagination headers', async () => {
+			const request = jest
+				.fn()
+				.mockResolvedValueOnce({
+					body: { status: 200, data: [{ id: 'doc_1' }, { id: 'doc_2' }] },
+					headers: { 'x-pagination-page-count': '2' },
+				})
+				.mockResolvedValueOnce({
+					body: { status: 200, data: [{ id: 'doc_3' }] },
+					headers: { 'x-pagination-page-count': '2' },
+				});
+			const ctx = requestContext(request);
+
+			await expect(
+				assinafyApiRequestAllItems(ctx as any, {
+					method: 'GET',
+					path: '/documents',
+					perPage: 2,
+				}),
+			).resolves.toEqual([{ id: 'doc_1' }, { id: 'doc_2' }, { id: 'doc_3' }]);
+			expect(request.mock.calls[0][1].qs).toEqual({ page: 1, 'per-page': 2 });
+			expect(request.mock.calls[1][1].qs).toEqual({ page: 2, 'per-page': 2 });
+		});
+
+		it('probes the next page when pagination headers are absent', async () => {
+			const request = jest
+				.fn()
+				.mockResolvedValueOnce({
+					body: { status: 200, data: [{ id: 'doc_1' }, { id: 'doc_2' }] },
+					headers: {},
+				})
+				.mockResolvedValueOnce({
+					body: { status: 200, data: [{ id: 'doc_3' }] },
+					headers: {},
+				});
+			const ctx = requestContext(request);
+
+			const result = await assinafyApiRequestAllItems<{ id: string }>(ctx as any, {
+				method: 'GET',
+				path: '/documents',
+				perPage: 2,
+			});
+			expect(result).toHaveLength(3);
+			expect(request).toHaveBeenCalledTimes(2);
+		});
+
+		it('fails safely when an upstream server repeats a page', async () => {
+			const repeated = {
+				body: { status: 200, data: [{ id: 'doc_1' }, { id: 'doc_2' }] },
+				headers: {},
+			};
+			const request = jest.fn().mockResolvedValue(repeated);
+			const ctx = requestContext(request);
+
+			await expect(
+				assinafyApiRequestAllItems(ctx as any, {
+					method: 'GET',
+					path: '/documents',
+					perPage: 2,
+				}),
+			).rejects.toThrow('pagination returned a repeated page');
+			expect(request).toHaveBeenCalledTimes(2);
+		});
+
+		it('rejects a hostile pagination page count before requesting more pages', async () => {
+			const request = jest.fn().mockResolvedValue({
+				body: { status: 200, data: [{ id: 'doc_1' }] },
+				headers: { 'x-pagination-page-count': '10001' },
+			});
+			const ctx = requestContext(request);
+
+			await expect(
+				assinafyApiRequestAllItems(ctx as any, {
+					method: 'GET',
+					path: '/documents',
+					perPage: 2,
+				}),
+			).rejects.toThrow('exceeding the 10000-page safety limit');
+			expect(request).toHaveBeenCalledTimes(1);
+		});
 	});
 
 	describe('getAccountId', () => {
@@ -47,12 +228,16 @@ describe('shared/transport', () => {
 
 		it('should throw error when accountId is missing', async () => {
 			const ctx = createMockContext({});
-			await expect(getAccountId(ctx as any)).rejects.toThrow('Assinafy credentials are missing an Account ID');
+			await expect(getAccountId(ctx as any)).rejects.toThrow(
+				'Assinafy credentials are missing an Account ID',
+			);
 		});
 
 		it('should throw error when accountId is empty string', async () => {
 			const ctx = createMockContext({ accountId: '' });
-			await expect(getAccountId(ctx as any)).rejects.toThrow('Assinafy credentials are missing an Account ID');
+			await expect(getAccountId(ctx as any)).rejects.toThrow(
+				'Assinafy credentials are missing an Account ID',
+			);
 		});
 	});
 

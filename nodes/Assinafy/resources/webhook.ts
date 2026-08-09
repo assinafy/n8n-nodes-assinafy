@@ -3,8 +3,9 @@ import type {
 	IExecuteFunctions,
 	INodeExecutionData,
 	INodeProperties,
+	JsonObject,
 } from 'n8n-workflow';
-import { NodeOperationError } from 'n8n-workflow';
+import { NodeApiError, NodeOperationError } from 'n8n-workflow';
 import { assinafyApiRequest, executeListOperation, getAccountId } from '../shared/transport';
 import { limitField, returnAllField } from '../shared/descriptions';
 import { DEFAULT_WEBHOOK_EVENTS, WEBHOOK_EVENT_OPTIONS } from './webhookEvents';
@@ -68,7 +69,7 @@ export const webhookDescription: INodeProperties[] = [
 		displayName: 'Notification Email',
 		name: 'email',
 		type: 'string',
-		placeholder: 'name@email.com',
+		placeholder: 'name@example.com',
 		default: '',
 		required: true,
 		description: 'Email contacted if webhook deliveries start failing',
@@ -169,18 +170,13 @@ export async function executeWebhook(
 		case 'retryDispatch':
 			return wrap(await retryDispatch.call(this, itemIndex));
 		default:
-			throw new NodeOperationError(
-				this.getNode(),
-				`Unknown webhook operation: ${operation}`,
-				{ itemIndex },
-			);
+			throw new NodeOperationError(this.getNode(), `Unknown webhook operation: ${operation}`, {
+				itemIndex,
+			});
 	}
 }
 
-async function registerWebhook(
-	this: IExecuteFunctions,
-	itemIndex: number,
-): Promise<IDataObject> {
+async function registerWebhook(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const accountId = await getAccountId(this);
 	const url = this.getNodeParameter('url', itemIndex) as string;
 	const email = this.getNodeParameter('email', itemIndex) as string;
@@ -209,7 +205,7 @@ async function getWebhook(this: IExecuteFunctions): Promise<IDataObject | null> 
 	} catch (error) {
 		const code = (error as { httpCode?: string | number }).httpCode;
 		if (code === 404 || code === '404') return null;
-		throw error;
+		throw new NodeApiError(this.getNode(), error as JsonObject);
 	}
 }
 
@@ -256,10 +252,7 @@ async function listDispatches(
 	});
 }
 
-async function retryDispatch(
-	this: IExecuteFunctions,
-	itemIndex: number,
-): Promise<IDataObject> {
+async function retryDispatch(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const accountId = await getAccountId(this);
 	const dispatchId = this.getNodeParameter('dispatchId', itemIndex) as string;
 	return assinafyApiRequest<IDataObject>(this, {

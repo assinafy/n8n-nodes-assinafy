@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { executeAuth } from '../nodes/Assinafy/resources/auth';
-import { makeCtx, lastPublic } from './helpers';
+import { makeCtx, lastAuth, lastPublic } from './helpers';
 
 const BASE = 'https://api.assinafy.com.br/v1';
 
@@ -26,6 +26,25 @@ describe('auth request construction (all unauthenticated / Bearer)', () => {
 		expect(req.body).toEqual({ provider: 'google', token: 'tok', has_accepted_terms: true });
 	});
 
+	it('links a social login with the configured API key', async () => {
+		const { ctx, requests } = makeCtx({ provider: 'google', socialToken: 'tok' });
+		await executeAuth.call(ctx as any, 0, 'linkSocialLogin');
+		const req = lastAuth(requests);
+		expect(req.method).toBe('POST');
+		expect(req.url).toBe(`${BASE}/auth/link-social-login`);
+		expect(req.body).toEqual({ provider: 'google', token: 'tok' });
+	});
+
+	it('links a social login with an explicit Bearer token', async () => {
+		const { ctx, requests } = makeCtx({
+			provider: 'google',
+			socialToken: 'tok',
+			accessToken: ' jwt ',
+		});
+		await executeAuth.call(ctx as any, 0, 'linkSocialLogin');
+		expect(lastPublic(requests).headers.Authorization).toBe('Bearer jwt');
+	});
+
 	it('creates an API key with a Bearer token', async () => {
 		const { ctx, requests } = makeCtx({ accessToken: 'jwt', authPassword: 'pw' });
 		await executeAuth.call(ctx as any, 0, 'createApiKey');
@@ -43,6 +62,12 @@ describe('auth request construction (all unauthenticated / Bearer)', () => {
 		expect(req.method).toBe('GET');
 		expect(req.url).toBe(`${BASE}/users/api-keys`);
 		expect(req.headers.Authorization).toBe('Bearer jwt');
+	});
+
+	it('gets the masked API key with configured API-key authentication when Bearer is omitted', async () => {
+		const { ctx, requests } = makeCtx({});
+		await executeAuth.call(ctx as any, 0, 'getApiKey');
+		expect(lastAuth(requests).url).toBe(`${BASE}/users/api-keys`);
 	});
 
 	it('deletes the API key', async () => {

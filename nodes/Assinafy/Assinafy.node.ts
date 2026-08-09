@@ -40,7 +40,7 @@ export class Assinafy implements INodeType {
 		credentials: [
 			{
 				name: 'assinafyApi',
-				required: true,
+				required: false,
 			},
 		],
 		properties: [
@@ -149,7 +149,7 @@ export class Assinafy implements INodeType {
 					});
 					continue;
 				}
-				throw error;
+				throw new NodeOperationError(this.getNode(), error as Error, { itemIndex: i });
 			}
 		}
 

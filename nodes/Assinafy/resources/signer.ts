@@ -4,8 +4,9 @@ import type {
 	IExecuteFunctions,
 	INodeExecutionData,
 	INodeProperties,
+	JsonObject,
 } from 'n8n-workflow';
-import { NodeOperationError } from 'n8n-workflow';
+import { NodeApiError, NodeOperationError } from 'n8n-workflow';
 import { assinafyApiRequest, executeListOperation, getAccountId } from '../shared/transport';
 import {
 	limitField,
@@ -16,11 +17,13 @@ import {
 } from '../shared/descriptions';
 import {
 	asArray,
+	assertBinaryFormat,
 	assertEmail,
 	cleanQs,
 	extractRequiredId,
+	parseBinaryResponse,
+	parseJsonParam,
 	requireAccessCode,
-	safeJsonParse,
 	sanitizeCpf,
 	showOnly as showOnlyFor,
 	wrap,
@@ -133,8 +136,7 @@ export const signerDescription: INodeProperties[] = [
 				type: 'string',
 				default: '',
 				placeholder: '123.456.789-00',
-				description:
-					'Brazilian tax ID (CPF). Non-digit characters are stripped before sending.',
+				description: 'Brazilian tax ID (CPF). Non-digit characters are stripped before sending.',
 			},
 			{
 				displayName: 'Metadata (JSON)',
@@ -189,7 +191,7 @@ export const signerDescription: INodeProperties[] = [
 				displayName: 'Email',
 				name: 'email',
 				type: 'string',
-				placeholder: 'name@email.com',
+				placeholder: 'name@example.com',
 				default: '',
 			},
 			{ displayName: 'Full Name', name: 'full_name', type: 'string', default: '' },
@@ -269,11 +271,27 @@ export const signerDescription: INodeProperties[] = [
 		displayOptions: { show: showOnly(['confirmData']) },
 		options: [
 			{
+				displayName: 'Accept Terms',
+				name: 'has_accepted_terms',
+				type: 'boolean',
+				default: false,
+				description:
+					'Whether to accept terms through this legacy runtime-compatible field. Prefer the dedicated Accept Terms operation.',
+			},
+			{
 				displayName: 'Email',
 				name: 'email',
 				type: 'string',
-				placeholder: 'name@email.com',
+				placeholder: 'name@example.com',
 				default: '',
+			},
+			{ displayName: 'Full Name', name: 'full_name', type: 'string', default: '' },
+			{
+				displayName: 'Government ID',
+				name: 'government_id',
+				type: 'string',
+				default: '',
+				description: 'Government-issued identifier to confirm for this signer',
 			},
 			{
 				displayName: 'WhatsApp Phone Number',
@@ -281,13 +299,7 @@ export const signerDescription: INodeProperties[] = [
 				type: 'string',
 				default: '',
 				placeholder: '+5548999990000',
-			},
-			{
-				displayName: 'Accept Terms',
-				name: 'has_accepted_terms',
-				type: 'boolean',
-				default: false,
-				description: 'Whether to also accept the terms of use in this request',
+				description: 'Legacy runtime-compatible field; not listed in the current OpenAPI schema',
 			},
 		],
 	},
@@ -312,6 +324,24 @@ export const signerDescription: INodeProperties[] = [
 		required: true,
 		description: 'PNG/JPEG image binary on the incoming item (uploadSignature)',
 		displayOptions: { show: showOnly(['uploadSignature']) },
+	},
+	{
+		displayName: 'Signature Options',
+		name: 'signatureOptions',
+		type: 'collection',
+		placeholder: 'Add Option',
+		default: {},
+		displayOptions: { show: showOnly(['uploadSignature']) },
+		options: [
+			{
+				displayName: 'Reuse in Future Processes',
+				name: 'reuse',
+				type: 'boolean',
+				default: false,
+				description:
+					'Whether the signer opted to reuse this signature later. Leave this option unset to preserve the existing preference.',
+			},
+		],
 	},
 	{
 		displayName: 'Put Output In Field',
@@ -356,11 +386,9 @@ export async function executeSigner(
 		case 'downloadSignature':
 			return downloadSignature.call(this, itemIndex);
 		default:
-			throw new NodeOperationError(
-				this.getNode(),
-				`Unknown signer operation: ${operation}`,
-				{ itemIndex },
-			);
+			throw new NodeOperationError(this.getNode(), `Unknown signer operation: ${operation}`, {
+				itemIndex,
+			});
 	}
 }
 
@@ -393,13 +421,16 @@ async function createSigner(
 
 	const body: IDataObject = { full_name: fullName };
 	if (email) body.email = email;
-	if (additional.whatsapp_phone_number) body.whatsapp_phone_number = additional.whatsapp_phone_number;
+	if (additional.whatsapp_phone_number)
+		body.whatsapp_phone_number = additional.whatsapp_phone_number;
 	if (additional.cpf) body.cpf = sanitizeCpf(additional.cpf as string);
 	if (additional.metadata !== undefined && additional.metadata !== '') {
-		const metadata =
-			typeof additional.metadata === 'string'
-				? safeJsonParse(additional.metadata)
-				: additional.metadata;
+		const metadata = parseJsonParam(this, additional.metadata, 'Metadata', itemIndex);
+		if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+			throw new NodeOperationError(this.getNode(), 'Metadata must be a JSON object', {
+				itemIndex,
+			});
+		}
 		body.metadata = metadata as IDataObject;
 	}
 
@@ -419,7 +450,7 @@ async function createSigner(
 			const existing = await lookupSignerByEmail.call(this, accountId, email);
 			if (existing) return existing;
 		}
-		throw error;
+		throw new NodeApiError(this.getNode(), error as JsonObject);
 	}
 }
 
@@ -455,11 +486,9 @@ async function updateSigner(
 	const signerId = extractSignerId.call(this, itemIndex);
 	const updates = this.getNodeParameter('updateFields', itemIndex, {}) as IDataObject;
 	if (Object.keys(updates).length === 0) {
-		throw new NodeOperationError(
-			this.getNode(),
-			'At least one update field is required',
-			{ itemIndex },
-		);
+		throw new NodeOperationError(this.getNode(), 'At least one update field is required', {
+			itemIndex,
+		});
 	}
 	const body: IDataObject = { ...updates };
 	if (body.cpf) body.cpf = sanitizeCpf(body.cpf as string);
@@ -508,13 +537,11 @@ async function lookupSignerByEmail(
 			qs: { search: email, 'per-page': 100 },
 		});
 		const signers = asArray<IDataObject>(response);
-		return (
-			signers.find((s) => String(s.email ?? '').toLowerCase() === email.toLowerCase()) ?? null
-		);
+		return signers.find((s) => String(s.email ?? '').toLowerCase() === email.toLowerCase()) ?? null;
 	} catch (error) {
 		const code = (error as { httpCode?: string | number }).httpCode;
 		if (code === 404 || code === '404') return null;
-		throw error;
+		throw new NodeApiError(this.getNode(), error as JsonObject);
 	}
 }
 
@@ -537,7 +564,7 @@ async function acceptTerms(this: IExecuteFunctions, itemIndex: number): Promise<
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'PUT',
 		path: '/signers/accept-terms',
-		body: { 'signer-access-code': code },
+		qs: { 'signer-access-code': code },
 		skipAuth: true,
 	});
 }
@@ -551,7 +578,8 @@ async function verifyCode(this: IExecuteFunctions, itemIndex: number): Promise<I
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'POST',
 		path: '/verify',
-		body: { 'signer-access-code': code, 'verification-code': verification },
+		qs: { 'signer-access-code': code },
+		body: { 'verification-code': verification },
 		skipAuth: true,
 	});
 }
@@ -564,7 +592,9 @@ async function confirmData(this: IExecuteFunctions, itemIndex: number): Promise<
 	}
 	const fields = this.getNodeParameter('confirmFields', itemIndex, {}) as IDataObject;
 	const body: IDataObject = {};
+	if (fields.full_name) body.full_name = fields.full_name;
 	if (fields.email) body.email = fields.email;
+	if (fields.government_id) body.government_id = fields.government_id;
 	if (fields.whatsapp_phone_number) body.whatsapp_phone_number = fields.whatsapp_phone_number;
 	if (fields.has_accepted_terms) body.has_accepted_terms = true;
 	return assinafyApiRequest<IDataObject>(this, {
@@ -576,27 +606,30 @@ async function confirmData(this: IExecuteFunctions, itemIndex: number): Promise<
 	});
 }
 
-async function uploadSignature(
-	this: IExecuteFunctions,
-	itemIndex: number,
-): Promise<IDataObject> {
+async function uploadSignature(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const code = requireAccessCode(this, itemIndex);
 	const type = this.getNodeParameter('signatureType', itemIndex, 'signature') as string;
 	const binaryProperty = this.getNodeParameter('binaryPropertyName', itemIndex, 'data') as string;
 	const binary = this.helpers.assertBinaryData(itemIndex, binaryProperty) as IBinaryData;
 	const buffer = await this.helpers.getBinaryDataBuffer(itemIndex, binaryProperty);
-	const mime = (binary.mimeType || 'image/png').toLowerCase();
-	if (!/^image\/(png|jpeg)$/.test(mime)) {
-		throw new NodeOperationError(
-			this.getNode(),
-			'Signature uploads must be image/png or image/jpeg',
-			{ itemIndex },
-		);
+	if (buffer.byteLength === 0) {
+		throw new NodeOperationError(this.getNode(), 'Signature image cannot be empty', { itemIndex });
 	}
+	const mime = assertBinaryFormat(
+		this,
+		buffer,
+		binary.mimeType || 'application/octet-stream',
+		['png', 'jpeg'],
+		'Signature image',
+		itemIndex,
+	);
+	const options = this.getNodeParameter('signatureOptions', itemIndex, {}) as IDataObject;
+	const qs: IDataObject = { 'signer-access-code': code, type };
+	if (typeof options.reuse === 'boolean') qs.reuse = options.reuse;
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'POST',
 		path: '/signature',
-		qs: { 'signer-access-code': code, type },
+		qs,
 		body: buffer,
 		headers: { 'Content-Type': mime },
 		skipAuth: true,
@@ -609,11 +642,7 @@ async function downloadSignature(
 ): Promise<INodeExecutionData> {
 	const code = requireAccessCode(this, itemIndex);
 	const type = this.getNodeParameter('signatureType', itemIndex, 'signature') as string;
-	const outputProperty = this.getNodeParameter(
-		'binaryOutputProperty',
-		itemIndex,
-		'data',
-	) as string;
+	const outputProperty = this.getNodeParameter('binaryOutputProperty', itemIndex, 'data') as string;
 	const response = (await assinafyApiRequest<unknown>(this, {
 		method: 'GET',
 		path: `/signature/${type}`,
@@ -621,12 +650,13 @@ async function downloadSignature(
 		returnBinary: true,
 		skipAuth: true,
 	})) as { body?: Buffer | ArrayBuffer; headers?: IDataObject };
-	const raw = response.body;
-	const buffer = Buffer.isBuffer(raw) ? raw : Buffer.from(raw ?? new ArrayBuffer(0));
-	const headerType = (response.headers?.['content-type'] ?? response.headers?.['Content-Type']) as
-		| string
-		| undefined;
-	const mime = headerType ? headerType.split(';')[0].trim() : 'image/png';
+	const { buffer, mimeType: mime } = parseBinaryResponse(
+		this,
+		response,
+		'image/png',
+		'Signature download',
+		itemIndex,
+	);
 	const ext = mime.includes('jpeg') ? 'jpg' : 'png';
 	const fileName = `${type}.${ext}`;
 	const data = await this.helpers.prepareBinaryData(buffer, fileName, mime);

@@ -1,8 +1,9 @@
 {
 	"name": "@assinafy/n8n-nodes-assinafy",
-	"version": "1.4.0",
+	"version": "1.5.0",
 	"description": "n8n community nodes for the Assinafy electronic-signature API (documents, signers, assignments, templates, tags, webhooks).",
 	"license": "MIT",
+	"packageManager": "npm@11.16.0",
 	"homepage": "https://github.com/assinafy/n8n-nodes-assinafy",
 	"keywords": [
 		"n8n-community-node-package",
@@ -21,8 +22,9 @@
 		"url": "https://github.com/assinafy/n8n-nodes-assinafy.git"
 	},
 	"publishConfig": {
-		"registry": "https://npm.pkg.github.com",
-		"access": "public"
+		"registry": "https://registry.npmjs.org",
+		"access": "public",
+		"provenance": true
 	},
 	"scripts": {
 		"build": "n8n-node build",
@@ -33,14 +35,23 @@
 		"release": "n8n-node release",
 		"prepublishOnly": "n8n-node prerelease",
 		"test": "jest",
+		"test:ci": "jest --coverage --runInBand",
 		"test:watch": "jest --watch",
-		"test:coverage": "jest --coverage"
+		"test:coverage": "jest --coverage",
+		"audit:prod": "npm audit --omit=dev --audit-level=high"
 	},
 	"engines": {
 		"node": ">=22.22"
 	},
 	"files": [
-		"dist"
+		"dist",
+		"!dist/coverage",
+		"docs/OPERATIONS.md",
+		"CHANGELOG.md",
+		"CONTRIBUTING.md",
+		"LICENSE.md",
+		"README.md",
+		"SECURITY.md"
 	],
 	"n8n": {
 		"n8nNodesApiVersion": 1,
@@ -54,14 +65,13 @@
 		]
 	},
 	"devDependencies": {
-		"@n8n/node-cli": "^0.23.0",
+		"@n8n/node-cli": "^0.42.2",
 		"@types/jest": "^30.0.0",
 		"eslint": "9.39.4",
-		"jest": "^30.3.0",
-		"n8n-workflow": "^2.16.0",
-		"prettier": "3.8.1",
-		"release-it": "19.2.4",
-		"ts-jest": "^29.4.9",
+		"jest": "^30.4.2",
+		"n8n-workflow": "2.33.2",
+		"prettier": "3.9.6",
+		"ts-jest": "^29.4.12",
 		"typescript": "5.9.3"
 	},
 	"peerDependencies": {

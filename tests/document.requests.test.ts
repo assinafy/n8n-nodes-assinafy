@@ -27,6 +27,20 @@ describe('document request construction', () => {
 		);
 	});
 
+	it('rejects a PDF filename whose content is not a PDF', async () => {
+		const { ctx, requests } = makeCtx(
+			{ binaryPropertyName: 'data', fileName: 'spoofed.pdf', additionalFields: {} },
+			{
+				binaryMeta: { fileName: 'spoofed.pdf', mimeType: 'application/pdf' },
+				binaryBuffer: Buffer.from('not a pdf'),
+			},
+		);
+		await expect(executeDocument.call(ctx as any, 0, 'upload')).rejects.toThrow(
+			'content does not match',
+		);
+		expect(requests).toHaveLength(0);
+	});
+
 	it('gets a document by id', async () => {
 		const { ctx, requests } = makeCtx({ documentId: 'doc_123' });
 		await executeDocument.call(ctx as any, 0, 'get');
@@ -46,12 +60,18 @@ describe('document request construction', () => {
 
 	it('rejects a rename with an empty new name', async () => {
 		const { ctx } = makeCtx({ documentId: 'doc_123', newName: '  ' });
-		await expect(executeDocument.call(ctx as any, 0, 'rename')).rejects.toThrow('New Name is required');
+		await expect(executeDocument.call(ctx as any, 0, 'rename')).rejects.toThrow(
+			'New Name is required',
+		);
 	});
 
 	it('searches documents via the lightweight search endpoint', async () => {
 		const { ctx, requests } = makeCtx(
-			{ returnAll: false, limit: 15, searchFilters: { search: 'contract', status: 'metadata_ready' } },
+			{
+				returnAll: false,
+				limit: 15,
+				searchFilters: { search: 'contract', status: 'metadata_ready' },
+			},
 			{ response: [{ id: 'doc_1' }] },
 		);
 		await executeDocument.call(ctx as any, 0, 'search');
@@ -91,6 +111,36 @@ describe('document request construction', () => {
 		expect(lastAuth(requests).url).toBe(`${BASE}/documents/doc_123/pages/pg_1/download`);
 	});
 
+	it('downloads a document thumbnail', async () => {
+		const { ctx, requests } = makeCtx(
+			{ documentId: 'doc_123', binaryOutputProperty: 'thumbnail' },
+			{ binaryBuffer: Buffer.from('JPEG'), headers: { 'content-type': 'image/jpeg' } },
+		);
+		const result = (await executeDocument.call(ctx as any, 0, 'downloadThumbnail')) as any;
+		expect(lastAuth(requests).url).toBe(`${BASE}/documents/doc_123/thumbnail`);
+		expect(result.binary.thumbnail).toBeDefined();
+	});
+
+	it('gets document activities', async () => {
+		const { ctx, requests } = makeCtx(
+			{ documentId: 'doc_123' },
+			{ response: [{ event: 'document_created' }] },
+		);
+		const result = (await executeDocument.call(ctx as any, 0, 'getActivities')) as any;
+		expect(lastAuth(requests).url).toBe(`${BASE}/documents/doc_123/activities`);
+		expect(result.json.activities).toEqual([{ event: 'document_created' }]);
+	});
+
+	it('waits until the document is already ready', async () => {
+		const { ctx, requests } = makeCtx(
+			{ documentId: 'doc_123', maxWaitMs: 1000, pollIntervalMs: 250 },
+			{ response: { id: 'doc_123', status: 'metadata_ready' } },
+		);
+		const result = (await executeDocument.call(ctx as any, 0, 'waitUntilReady')) as any;
+		expect(lastAuth(requests).url).toBe(`${BASE}/documents/doc_123`);
+		expect(result.json.status).toBe('metadata_ready');
+	});
+
 	it('summarizes signing progress from assignment.summary', async () => {
 		const { ctx } = makeCtx(
 			{ documentId: 'doc_123' },
@@ -119,6 +169,31 @@ describe('document request construction', () => {
 		expect(req.body.name).toBe('Contract');
 	});
 
+	it('requires signer IDs when creating a document from a template', async () => {
+		const { ctx, requests } = makeCtx({
+			templateId: 'tpl_1',
+			templateSigners: { signer: [{ role_id: 'role_1' }] },
+			additionalFields: {},
+		});
+		await expect(executeDocument.call(ctx as any, 0, 'createFromTemplate')).rejects.toThrow(
+			'Each template signer requires a Signer ID',
+		);
+		expect(requests).toHaveLength(0);
+	});
+
+	it('requires Editor Fields to be a JSON array', async () => {
+		const { ctx, requests } = makeCtx({
+			templateId: 'tpl_1',
+			templateSigners: { signer: [{ role_id: 'role_1', id: 'sig_1' }] },
+			additionalFields: { editor_fields: '{"field_id":"field_1","value":"not-an-array"}' },
+		});
+
+		await expect(executeDocument.call(ctx as any, 0, 'createFromTemplate')).rejects.toThrow(
+			'Editor Fields must be a valid JSON array',
+		);
+		expect(requests).toHaveLength(0);
+	});
+
 	it('estimates cost from a template (signers may omit ids)', async () => {
 		const { ctx, requests } = makeCtx({
 			templateId: 'tpl_1',
@@ -128,6 +203,71 @@ describe('document request construction', () => {
 		const req = lastAuth(requests);
 		expect(req.url).toBe(`${BASE}/accounts/acc_123/templates/tpl_1/documents/estimate-cost`);
 		expect(req.body.signers).toEqual([{ role_id: 'role_1' }]);
+	});
+
+	it('omits signer IDs and signing steps from a template cost estimate', async () => {
+		const { ctx, requests } = makeCtx({
+			templateId: 'tpl_1',
+			templateSigners: {
+				signer: [
+					{
+						role_id: 'role_1',
+						id: 'sig_1',
+						verification_method: 'Email',
+						notification_methods: ['Email'],
+						step: 4,
+					},
+				],
+			},
+		});
+		await executeDocument.call(ctx as any, 0, 'estimateCostFromTemplate');
+		expect(lastAuth(requests).body.signers).toEqual([
+			{
+				role_id: 'role_1',
+				verification_method: 'Email',
+				notification_methods: ['Email'],
+			},
+		]);
+	});
+
+	it('rejects multiple notification methods for one template signer', async () => {
+		const { ctx, requests } = makeCtx({
+			templateId: 'tpl_1',
+			templateSigners: {
+				signer: [
+					{
+						role_id: 'role_1',
+						id: 'sig_1',
+						notification_methods: ['Email', 'Whatsapp'],
+					},
+				],
+			},
+			additionalFields: {},
+		});
+		await expect(executeDocument.call(ctx as any, 0, 'createFromTemplate')).rejects.toThrow(
+			'at most one Notification Method',
+		);
+		expect(requests).toHaveLength(0);
+	});
+
+	it('allows multiple notification methods when estimating template cost', async () => {
+		const { ctx, requests } = makeCtx({
+			templateId: 'tpl_1',
+			templateSigners: {
+				signer: [
+					{
+						role_id: 'role_1',
+						notification_methods: ['Email', 'Whatsapp'],
+					},
+				],
+			},
+		});
+
+		await executeDocument.call(ctx as any, 0, 'estimateCostFromTemplate');
+
+		expect(lastAuth(requests).body.signers).toEqual([
+			{ role_id: 'role_1', notification_methods: ['Email', 'Whatsapp'] },
+		]);
 	});
 
 	it('verifies a document by hash without authentication', async () => {
@@ -161,6 +301,16 @@ describe('document request construction', () => {
 		const { ctx, requests } = makeCtx({}, { response: [{ code: 'metadata_ready' }] });
 		await executeDocument.call(ctx as any, 0, 'listStatuses');
 		expect(lastAuth(requests).url).toBe(`${BASE}/documents/statuses`);
+	});
+
+	it('lists tags attached to a document', async () => {
+		const { ctx, requests } = makeCtx(
+			{ documentId: 'doc_123' },
+			{ response: [{ id: 'tag_1', name: 'Legal' }] },
+		);
+		const result = (await executeDocument.call(ctx as any, 0, 'listTags')) as any[];
+		expect(lastAuth(requests).url).toBe(`${BASE}/accounts/acc_123/documents/doc_123/tags`);
+		expect(result[0].json.name).toBe('Legal');
 	});
 
 	it('replaces document tags', async () => {

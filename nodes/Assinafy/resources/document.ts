@@ -16,9 +16,12 @@ import {
 	tagResourceLocator,
 } from '../shared/descriptions';
 import {
+	assertBinaryFormat,
 	cleanQs,
 	extractRequiredId,
 	normalizeTagFilter,
+	parseBinaryResponse,
+	parseJsonParam,
 	parseStringList,
 	showOnly as showOnlyFor,
 	validateSigningSteps,
@@ -322,6 +325,8 @@ export const documentDescription: INodeProperties[] = [
 						name: 'notification_methods',
 						type: 'multiOptions',
 						default: ['Email'],
+						description:
+							'Create From Template accepts one method per signer. Estimate Cost can price one or both methods.',
 						options: [
 							{ name: 'Email', value: 'Email' },
 							{ name: 'WhatsApp', value: 'Whatsapp' },
@@ -622,10 +627,18 @@ async function uploadDocument(
 			itemIndex,
 		});
 	}
+	const mimeType = assertBinaryFormat(
+		this,
+		buffer,
+		binary.mimeType || 'application/octet-stream',
+		['pdf'],
+		'Document upload',
+		itemIndex,
+	);
 
 	const form = new FormData();
 	const view = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
-	form.append('file', new Blob([view], { type: binary.mimeType || 'application/pdf' }), fileName);
+	form.append('file', new Blob([view], { type: mimeType }), fileName);
 	form.append('name', fileName);
 	if (additional.metadata !== undefined && additional.metadata !== '') {
 		const metadataValue =
@@ -733,12 +746,9 @@ async function downloadArtifact(
 		returnBinary: true,
 	})) as { body?: Buffer | ArrayBuffer; headers?: IDataObject };
 
-	const raw = response.body;
-	const buffer = Buffer.isBuffer(raw) ? raw : Buffer.from(raw ?? new ArrayBuffer(0));
-	const headerType = (response.headers?.['content-type'] ?? response.headers?.['Content-Type']) as
-		| string
-		| undefined;
-	if (headerType) mimeType = headerType.split(';')[0].trim();
+	const parsed = parseBinaryResponse(this, response, mimeType, 'Document download', itemIndex);
+	const { buffer } = parsed;
+	mimeType = parsed.mimeType;
 
 	const binary = await this.helpers.prepareBinaryData(buffer, suggestedFileName, mimeType);
 	return {
@@ -827,30 +837,69 @@ function extractDocumentId(this: IExecuteFunctions, itemIndex: number): string {
 }
 
 /** Map the fixedCollection template-signer rows into the documented `signers[]` payload. */
-function buildTemplateSigners(signersRaw: IDataObject[]): IDataObject[] {
+function buildTemplateSigners(
+	signersRaw: IDataObject[],
+	options: { forEstimate?: boolean } = {},
+): IDataObject[] {
 	return signersRaw.map((s) => {
 		const entry: IDataObject = { role_id: s.role_id };
-		if (s.id) entry.id = s.id;
+		if (!options.forEstimate && s.id) entry.id = s.id;
 		if (s.verification_method) entry.verification_method = s.verification_method;
 		if (Array.isArray(s.notification_methods) && (s.notification_methods as unknown[]).length > 0) {
 			entry.notification_methods = s.notification_methods;
 		}
-		const step = Number(s.step ?? 0);
-		if (step > 0) entry.step = step;
+		if (!options.forEstimate) {
+			const step = Number(s.step ?? 0);
+			if (step > 0) entry.step = step;
+		}
 		return entry;
 	});
 }
 
 /** Read + validate the shared template-signer rows for create/estimate operations. */
-function readTemplateSigners(this: IExecuteFunctions, itemIndex: number): IDataObject[] {
+function readTemplateSigners(
+	this: IExecuteFunctions,
+	itemIndex: number,
+	requireSignerId: boolean,
+): IDataObject[] {
 	const signersRaw =
 		(this.getNodeParameter('templateSigners', itemIndex, {}) as { signer?: IDataObject[] })
 			.signer ?? [];
-	validateSigningSteps(
-		this,
-		signersRaw.map((signer) => signer.step as number | string | undefined),
-		itemIndex,
-	);
+	if (signersRaw.length === 0) {
+		throw new NodeOperationError(this.getNode(), 'At least one template signer is required', {
+			itemIndex,
+		});
+	}
+	for (const signer of signersRaw) {
+		if (!signer.role_id) {
+			throw new NodeOperationError(this.getNode(), 'Each template signer requires a Role ID', {
+				itemIndex,
+			});
+		}
+		if (requireSignerId && !signer.id) {
+			throw new NodeOperationError(this.getNode(), 'Each template signer requires a Signer ID', {
+				itemIndex,
+			});
+		}
+		if (
+			requireSignerId &&
+			Array.isArray(signer.notification_methods) &&
+			(signer.notification_methods as unknown[]).length > 1
+		) {
+			throw new NodeOperationError(
+				this.getNode(),
+				'Each template signer supports at most one Notification Method',
+				{ itemIndex },
+			);
+		}
+	}
+	if (requireSignerId) {
+		validateSigningSteps(
+			this,
+			signersRaw.map((signer) => signer.step as number | string | undefined),
+			itemIndex,
+		);
+	}
 	return signersRaw;
 }
 
@@ -864,30 +913,21 @@ async function createFromTemplate(
 		throw new NodeOperationError(this.getNode(), 'Template ID is required', { itemIndex });
 	}
 	const additional = this.getNodeParameter('additionalFields', itemIndex, {}) as IDataObject;
-	const signersRaw = readTemplateSigners.call(this, itemIndex);
-
-	if (signersRaw.length === 0) {
-		throw new NodeOperationError(
-			this.getNode(),
-			'At least one signer is required to create a document from a template',
-			{ itemIndex },
-		);
-	}
+	const signersRaw = readTemplateSigners.call(this, itemIndex, true);
 
 	const body: IDataObject = { signers: buildTemplateSigners(signersRaw) };
 
 	if (additional.name) body.name = additional.name;
 	if (additional.message) body.message = additional.message;
 	if (additional.expires_at) body.expires_at = additional.expires_at;
-	if (additional.editor_fields && (additional.editor_fields as string) !== '[]') {
-		const raw = additional.editor_fields as string;
-		try {
-			body.editor_fields = typeof raw === 'string' ? JSON.parse(raw) : raw;
-		} catch {
+	if (additional.editor_fields !== undefined && additional.editor_fields !== '') {
+		const editorFields = parseJsonParam(this, additional.editor_fields, 'Editor Fields', itemIndex);
+		if (!Array.isArray(editorFields)) {
 			throw new NodeOperationError(this.getNode(), 'Editor Fields must be a valid JSON array', {
 				itemIndex,
 			});
 		}
+		if (editorFields.length > 0) body.editor_fields = editorFields;
 	}
 	const tags = parseStringList(additional.tags);
 	if (tags.length > 0) body.tags = tags;
@@ -908,12 +948,12 @@ async function estimateCostFromTemplate(
 	if (!templateId) {
 		throw new NodeOperationError(this.getNode(), 'Template ID is required', { itemIndex });
 	}
-	const signersRaw = readTemplateSigners.call(this, itemIndex);
+	const signersRaw = readTemplateSigners.call(this, itemIndex, false);
 
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'POST',
 		path: `/accounts/${accountId}/templates/${templateId}/documents/estimate-cost`,
-		body: { signers: buildTemplateSigners(signersRaw) },
+		body: { signers: buildTemplateSigners(signersRaw, { forEstimate: true }) },
 	});
 }
 

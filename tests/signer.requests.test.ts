@@ -15,7 +15,11 @@ describe('signer request construction', () => {
 		const req = lastAuth(requests);
 		expect(req.method).toBe('POST');
 		expect(req.url).toBe(`${BASE}/accounts/acc_123/signers`);
-		expect(req.body).toEqual({ full_name: 'Jane Doe', email: 'jane@example.com', cpf: '12345678900' });
+		expect(req.body).toEqual({
+			full_name: 'Jane Doe',
+			email: 'jane@example.com',
+			cpf: '12345678900',
+		});
 	});
 
 	it('requires email or whatsapp to create a signer', async () => {
@@ -23,6 +27,18 @@ describe('signer request construction', () => {
 		await expect(executeSigner.call(ctx as any, 0, 'create')).rejects.toThrow(
 			'At least one of Email or WhatsApp',
 		);
+	});
+
+	it('rejects invalid signer metadata instead of silently replacing it', async () => {
+		const { ctx, requests } = makeCtx({
+			fullName: 'Jane Doe',
+			email: 'jane@example.com',
+			additionalFields: { reuseIfExists: false, metadata: '{invalid' },
+		});
+		await expect(executeSigner.call(ctx as any, 0, 'create')).rejects.toThrow(
+			'Metadata must be valid JSON',
+		);
+		expect(requests).toHaveLength(0);
 	});
 
 	it('reuses an existing signer by email before creating', async () => {
@@ -81,50 +97,96 @@ describe('signer request construction', () => {
 		expect(req.qs).toEqual({ 'signer-access-code': 'code123' });
 	});
 
-	it('acceptTerms sends the access code in the body without auth', async () => {
+	it('acceptTerms sends the access code as query authentication', async () => {
 		const { ctx, requests } = makeCtx({ signerAccessCode: 'code123' });
 		await executeSigner.call(ctx as any, 0, 'acceptTerms');
 		const req = lastPublic(requests);
 		expect(req.method).toBe('PUT');
 		expect(req.url).toBe(`${BASE}/signers/accept-terms`);
-		expect(req.body).toEqual({ 'signer-access-code': 'code123' });
+		expect(req.qs).toEqual({ 'signer-access-code': 'code123' });
+		expect(req.body).toBeUndefined();
 	});
 
-	it('verifyCode posts the access + verification codes without auth', async () => {
+	it('verifyCode authenticates by query and posts only the verification code', async () => {
 		const { ctx, requests } = makeCtx({ signerAccessCode: 'code123', verificationCode: '654321' });
 		await executeSigner.call(ctx as any, 0, 'verifyCode');
 		const req = lastPublic(requests);
 		expect(req.method).toBe('POST');
 		expect(req.url).toBe(`${BASE}/verify`);
-		expect(req.body).toEqual({ 'signer-access-code': 'code123', 'verification-code': '654321' });
+		expect(req.qs).toEqual({ 'signer-access-code': 'code123' });
+		expect(req.body).toEqual({ 'verification-code': '654321' });
 	});
 
 	it('confirmData sends code in query and fields in body', async () => {
 		const { ctx, requests } = makeCtx({
 			signerAccessCode: 'code123',
 			confirmDocumentId: 'doc_1',
-			confirmFields: { email: 'jane@example.com', has_accepted_terms: true },
+			confirmFields: {
+				full_name: 'Jane Doe',
+				email: 'jane@example.com',
+				government_id: '12345678900',
+				has_accepted_terms: true,
+			},
 		});
 		await executeSigner.call(ctx as any, 0, 'confirmData');
 		const req = lastPublic(requests);
 		expect(req.method).toBe('PUT');
 		expect(req.url).toBe(`${BASE}/documents/doc_1/signers/confirm-data`);
 		expect(req.qs).toEqual({ 'signer-access-code': 'code123' });
-		expect(req.body).toEqual({ email: 'jane@example.com', has_accepted_terms: true });
+		expect(req.body).toEqual({
+			full_name: 'Jane Doe',
+			email: 'jane@example.com',
+			government_id: '12345678900',
+			has_accepted_terms: true,
+		});
 	});
 
-	it('uploadSignature posts the image buffer with code + type query', async () => {
+	it('uploadSignature posts the image buffer with code, type, and reuse query', async () => {
 		const { ctx, requests } = makeCtx(
-			{ signerAccessCode: 'code123', signatureType: 'signature', binaryPropertyName: 'data' },
-			{ binaryMeta: { mimeType: 'image/png' }, binaryBuffer: Buffer.from('PNG') },
+			{
+				signerAccessCode: 'code123',
+				signatureType: 'signature',
+				binaryPropertyName: 'data',
+				signatureOptions: { reuse: true },
+			},
+			{
+				binaryMeta: { mimeType: 'image/png' },
+				binaryBuffer: Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex'),
+			},
 		);
 		await executeSigner.call(ctx as any, 0, 'uploadSignature');
 		const req = lastPublic(requests);
 		expect(req.method).toBe('POST');
 		expect(req.url).toBe(`${BASE}/signature`);
-		expect(req.qs).toEqual({ 'signer-access-code': 'code123', type: 'signature' });
+		expect(req.qs).toEqual({
+			'signer-access-code': 'code123',
+			type: 'signature',
+			reuse: true,
+		});
 		expect(Buffer.isBuffer(req.body)).toBe(true);
 		expect(req.headers['Content-Type']).toBe('image/png');
+	});
+
+	it('uploadSignature rejects an empty image before making a request', async () => {
+		const { ctx, requests } = makeCtx(
+			{ signerAccessCode: 'code123', signatureType: 'signature', binaryPropertyName: 'data' },
+			{ binaryMeta: { mimeType: 'image/png' }, binaryBuffer: Buffer.alloc(0) },
+		);
+		await expect(executeSigner.call(ctx as any, 0, 'uploadSignature')).rejects.toThrow(
+			'Signature image cannot be empty',
+		);
+		expect(requests).toHaveLength(0);
+	});
+
+	it('uploadSignature rejects bytes that do not match the declared image type', async () => {
+		const { ctx, requests } = makeCtx(
+			{ signerAccessCode: 'code123', signatureType: 'signature', binaryPropertyName: 'data' },
+			{ binaryMeta: { mimeType: 'image/png' }, binaryBuffer: Buffer.from('not png') },
+		);
+		await expect(executeSigner.call(ctx as any, 0, 'uploadSignature')).rejects.toThrow(
+			'content does not match',
+		);
+		expect(requests).toHaveLength(0);
 	});
 
 	it('downloadSignature gets the image binary without auth', async () => {

@@ -1,23 +1,5 @@
-# Publishes @assinafy/n8n-nodes-assinafy to the GitHub Packages npm registry
-# whenever a version tag is pushed.
-#
-# Authentication: the built-in GITHUB_TOKEN is used. No external secrets are
-# required when the token's default permissions include `packages: write`
-# (granted explicitly in this workflow).
-#
-# Tag convention: tags matching `*.*.*` (e.g. `0.2.0`). If you prefer `v`-
-# prefixed tags (e.g. `v0.2.0`), change the filter below to `v*.*.*`.
-#
-# Local release flow:
-#   npm run release
-# which lints, builds, bumps the version, commits the changelog, tags, and
-# pushes — the tag push triggers this workflow to publish.
-#
-# Dual-publishing to npmjs.com (optional): add an additional job that sets
-# `registry-url: 'https://registry.npmjs.org'` and uses an `NPM_TOKEN`
-# secret (or OIDC trusted publishing). Remove the `publishConfig.registry`
-# field from package.json only if you drop GitHub Packages entirely.
-
+# A version tag builds one immutable tarball, publishes it to npmjs with
+# provenance, and mirrors the same bytes to GitHub Packages.
 name: Publish
 
 on:
@@ -25,54 +7,132 @@ on:
     tags:
       - '*.*.*'
 
-jobs:
-  publish:
-    name: Publish to GitHub Packages
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
 
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Verify and package
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js 24 LTS
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.x'
+          package-manager-cache: false
+
+      - name: Use the locked npm version
+        run: npm install --global npm@11.16.0
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Verify tag matches package version
+        run: |
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if [ "$PACKAGE_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::Tag '$GITHUB_REF_NAME' does not match package version '$PACKAGE_VERSION'"
+            exit 1
+          fi
+
+      - name: Build
+        run: npm run build
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test with coverage gates
+        run: npm run test:ci
+
+      - name: Audit production dependencies
+        run: npm run audit:prod
+
+      - name: Verify package contents
+        run: |
+          npm pack --dry-run --ignore-scripts --json > "$RUNNER_TEMP/package-contents.json"
+          node -e "const fs = require('node:fs'); const report = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'))[0]; const paths = report.files.map(({ path }) => path); const manifest = require('./package.json'); const required = [...manifest.n8n.credentials, ...manifest.n8n.nodes, 'docs/OPERATIONS.md', 'CHANGELOG.md', 'CONTRIBUTING.md', 'LICENSE.md', 'README.md', 'SECURITY.md']; const missing = required.filter((path) => !paths.includes(path)); const leakedGeneratedFiles = paths.filter((path) => path.endsWith('.tsbuildinfo') || path.startsWith('dist/coverage/')); if (missing.length || leakedGeneratedFiles.length) { throw new Error(JSON.stringify({ missing, leakedGeneratedFiles })); }" "$RUNNER_TEMP/package-contents.json"
+          node -e "const manifest = require('./package.json'); for (const modulePath of [...manifest.n8n.credentials, ...manifest.n8n.nodes]) { require('./' + modulePath); }"
+
+      - name: Create immutable package tarball
+        run: |
+          PACKAGE_TARBALL="$(npm pack --ignore-scripts)"
+          mv "$PACKAGE_TARBALL" assinafy-package.tgz
+
+      - name: Upload package tarball
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: assinafy-package
+          path: assinafy-package.tgz
+          if-no-files-found: error
+          retention-days: 1
+
+  npmjs:
+    name: Publish to npmjs
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Set up Node.js 24 LTS
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.x'
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Use the locked npm version
+        run: npm install --global npm@11.16.0
+
+      - name: Download package tarball
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: assinafy-package
+
+      - name: Publish with provenance
+        run: npm publish assinafy-package.tgz --ignore-scripts --access public --provenance --registry=https://registry.npmjs.org
+
+  github-packages:
+    name: Mirror to GitHub Packages
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
       packages: write
 
     steps:
-      - uses: actions/checkout@v5
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v5
+      - name: Set up Node.js 24 LTS
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '22.x'
-          cache: 'npm'
-          registry-url: 'https://npm.pkg.github.com'
+          node-version: '24.x'
+          registry-url: https://npm.pkg.github.com
           scope: '@assinafy'
+          package-manager-cache: false
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Use the locked npm version
+        run: npm install --global npm@11.16.0
 
-      - name: Verify tag matches package.json version
-        run: |
-          PKG_VERSION="$(node -p "require('./package.json').version")"
-          # Accept both `1.3.0` and `v1.3.0` tag styles (repo uses the v-prefix).
-          TAG="${GITHUB_REF_NAME#v}"
-          if [ "$PKG_VERSION" != "$TAG" ]; then
-            echo "::error::Tag '$GITHUB_REF_NAME' does not match package.json version '$PKG_VERSION'"
-            exit 1
-          fi
+      - name: Download package tarball
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: assinafy-package
 
-      - name: Lint
-        run: npm run lint
-
-      - name: Test
-        run: npm test
-
-      - name: Build
-        run: npm run build
-
-      - name: Publish
-        # --ignore-scripts skips the `prepublishOnly` → `n8n-node prerelease`
-        # lifecycle hook, which is a hardcoded guard that refuses `npm publish`
-        # and tells you to run `npm run release` instead. That guard is meant
-        # for local use; in CI we've already built and lint-checked above.
-        run: npm publish --ignore-scripts
+      - name: Publish mirror
+        run: npm publish assinafy-package.tgz --ignore-scripts --access public --provenance=false --registry=https://npm.pkg.github.com
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

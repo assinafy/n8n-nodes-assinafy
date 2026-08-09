@@ -174,11 +174,9 @@ async function updateTag(this: IExecuteFunctions, itemIndex: number): Promise<ID
 
 	const hasColor = updates.color !== undefined && updates.color !== '';
 	if (updates.clearColor && hasColor) {
-		throw new NodeOperationError(
-			this.getNode(),
-			'Set either Color or Clear Color, not both',
-			{ itemIndex },
-		);
+		throw new NodeOperationError(this.getNode(), 'Set either Color or Clear Color, not both', {
+			itemIndex,
+		});
 	}
 
 	const body: IDataObject = {};

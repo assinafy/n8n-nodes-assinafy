@@ -1,5 +1,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import type { ICredentialDataDecryptedObject, IHttpRequestOptions } from 'n8n-workflow';
 import { AssinafyApi } from '../credentials/AssinafyApi.credentials';
+
+type AuthenticateFunction = (
+	credentials: ICredentialDataDecryptedObject,
+	requestOptions: IHttpRequestOptions,
+) => Promise<IHttpRequestOptions>;
 
 describe('AssinafyApi Credentials', () => {
 	let credentials: AssinafyApi;
@@ -28,6 +34,11 @@ describe('AssinafyApi Credentials', () => {
 		expect(envProp!.type).toBe('options');
 	});
 
+	it('requires a Custom Base URL when the Custom environment is selected', () => {
+		const customUrl = credentials.properties.find((property) => property.name === 'customBaseUrl');
+		expect(customUrl).toMatchObject({ required: true });
+	});
+
 	it('should have apiKey property', () => {
 		const apiKeyProp = credentials.properties.find((p: any) => p.name === 'apiKey');
 		expect(apiKeyProp).toBeDefined();
@@ -49,11 +60,49 @@ describe('AssinafyApi Credentials', () => {
 
 	it('should have authenticate configuration', () => {
 		expect(credentials.authenticate).toBeDefined();
-		expect(credentials.authenticate.type).toBe('generic');
-		expect(credentials.authenticate.properties).toBeDefined();
-		expect(credentials.authenticate.properties.headers).toBeDefined();
-		const headers = credentials.authenticate.properties.headers as Record<string, string>;
-		expect(headers['X-Api-Key']).toBeDefined();
+		expect(typeof credentials.authenticate).toBe('function');
+	});
+
+	it('validates and normalizes the base URL before attaching the API key', async () => {
+		const authenticate = credentials.authenticate as AuthenticateFunction;
+		const result = await authenticate(
+			{ apiKey: 'test-key', baseUrl: 'https://custom.example.com/v1/' },
+			{ method: 'GET', url: '/accounts/acc_123', baseURL: 'https://custom.example.com/v1/' },
+		);
+
+		expect(result.baseURL).toBe('https://custom.example.com/v1');
+		expect(result.headers).toMatchObject({
+			Accept: 'application/json',
+			'X-Api-Key': 'test-key',
+		});
+	});
+
+	it.each([
+		['blank URL', '', 'valid absolute URL'],
+		['unencrypted remote URL', 'http://attacker.example.com/v1', 'must use HTTPS'],
+		['embedded credentials', 'https://user:pass@example.com/v1', 'embedded credentials'],
+		['query string', 'https://example.com/v1?redirect=elsewhere', 'query string or fragment'],
+	])('rejects a custom %s before attaching authentication', async (_label, baseUrl, message) => {
+		const authenticate = credentials.authenticate as AuthenticateFunction;
+		const request: any = { method: 'GET', url: '/accounts/acc_123', baseURL: baseUrl };
+
+		await expect(
+			authenticate(
+				{ apiKey: 'test-key', environment: 'custom', customBaseUrl: baseUrl, baseUrl },
+				request,
+			),
+		).rejects.toThrow(message);
+		expect(request.headers).toBeUndefined();
+	});
+
+	it('allows an HTTP loopback base URL for local development', async () => {
+		const authenticate = credentials.authenticate as AuthenticateFunction;
+		const result = await authenticate(
+			{ apiKey: 'test-key', environment: 'custom', customBaseUrl: 'http://127.0.0.1:5678/v1' },
+			{ method: 'GET', url: '/accounts/acc_123' },
+		);
+
+		expect(result.headers).toMatchObject({ 'X-Api-Key': 'test-key' });
 	});
 
 	it('should have test configuration', () => {

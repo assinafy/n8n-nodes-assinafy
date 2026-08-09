@@ -67,10 +67,20 @@ export function makeCtx(params: Record<string, unknown>, opts: MockOptions = {})
 		continueOnFail: jest.fn().mockReturnValue(false),
 		getInputData: jest.fn().mockReturnValue([{ json: {} }]),
 		getNodeParameter: jest.fn(
-			(name: string, _itemIndex: number, defaultValue?: unknown, options?: { extractValue?: boolean }) => {
+			(
+				name: string,
+				_itemIndex: number,
+				defaultValue?: unknown,
+				options?: { extractValue?: boolean },
+			) => {
 				if (!(name in params)) return defaultValue;
 				const value = params[name];
-				if (options?.extractValue && value && typeof value === 'object' && 'value' in (value as any)) {
+				if (
+					options?.extractValue &&
+					value &&
+					typeof value === 'object' &&
+					'value' in (value as any)
+				) {
 					return (value as any).value;
 				}
 				return value;
@@ -79,10 +89,12 @@ export function makeCtx(params: Record<string, unknown>, opts: MockOptions = {})
 		helpers: {
 			httpRequestWithAuthentication,
 			httpRequest,
-			assertBinaryData: jest.fn().mockReturnValue(
-				opts.binaryMeta ?? { fileName: 'file.pdf', mimeType: 'application/pdf' },
-			),
-			getBinaryDataBuffer: jest.fn().mockResolvedValue(opts.binaryBuffer ?? Buffer.from('PDFDATA')),
+			assertBinaryData: jest
+				.fn()
+				.mockReturnValue(opts.binaryMeta ?? { fileName: 'file.pdf', mimeType: 'application/pdf' }),
+			getBinaryDataBuffer: jest
+				.fn()
+				.mockResolvedValue(opts.binaryBuffer ?? Buffer.from('%PDF-1.4\nmock document')),
 			prepareBinaryData: jest.fn(async (buffer: Buffer, fileName: string, mimeType: string) => ({
 				data: buffer.toString('base64'),
 				fileName,

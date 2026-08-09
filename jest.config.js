@@ -5,20 +5,17 @@ module.exports = {
 	roots: ['<rootDir>/tests'],
 	testMatch: ['**/*.test.ts'],
 	moduleFileExtensions: ['ts', 'js', 'json'],
-	collectCoverageFrom: [
-		'nodes/**/*.ts',
-		'credentials/**/*.ts',
-		'!**/*.test.ts',
-	],
-	coverageDirectory: 'coverage',
-	// Floors set below current coverage (~80% statements) to catch regressions
-	// without being brittle. Raise over time as coverage grows.
+	collectCoverageFrom: ['nodes/**/*.ts', 'credentials/**/*.ts', '!**/*.test.ts'],
+	// Keep generated reports under dist, which the strict n8n ESLint preset ignores.
+	coverageDirectory: 'dist/coverage',
+	// Keep a small buffer below the verified baseline so dependency-level
+	// instrumentation changes do not make the gate brittle.
 	coverageThreshold: {
 		global: {
-			statements: 75,
-			branches: 50,
-			functions: 80,
-			lines: 75,
+			statements: 85,
+			branches: 65,
+			functions: 95,
+			lines: 85,
 		},
 	},
 	verbose: true,

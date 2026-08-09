@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import {
+	assertBinaryFormat,
 	assertEmail,
 	cleanQs,
 	extractRequiredId,
@@ -189,6 +190,80 @@ describe('shared/utils', () => {
 		});
 	});
 
+	describe('assertBinaryFormat', () => {
+		const ctx = {
+			getNode: jest.fn().mockReturnValue({ name: 'TestNode' }),
+		};
+
+		it('accepts matching PDF, PNG, and JPEG signatures', () => {
+			expect(
+				assertBinaryFormat(
+					ctx as any,
+					Buffer.from('%PDF-1.7\n'),
+					'application/pdf',
+					['pdf'],
+					'Document',
+					0,
+				),
+			).toBe('application/pdf');
+			expect(
+				assertBinaryFormat(
+					ctx as any,
+					Buffer.from('89504e470d0a1a0a', 'hex'),
+					'image/png',
+					['png'],
+					'Image',
+					0,
+				),
+			).toBe('image/png');
+			expect(
+				assertBinaryFormat(
+					ctx as any,
+					Buffer.from('ffd8ffe000', 'hex'),
+					'image/jpg',
+					['jpeg'],
+					'Image',
+					0,
+				),
+			).toBe('image/jpeg');
+		});
+
+		it('infers an allowed format from magic bytes for generic binary MIME types', () => {
+			expect(
+				assertBinaryFormat(
+					ctx as any,
+					Buffer.from('%PDF-1.7\n'),
+					'application/octet-stream',
+					['pdf'],
+					'Document',
+					0,
+				),
+			).toBe('application/pdf');
+		});
+
+		it('rejects a recognized MIME type that contradicts the magic bytes', () => {
+			expect(() =>
+				assertBinaryFormat(
+					ctx as any,
+					Buffer.from('ffd8ffe000', 'hex'),
+					'image/png',
+					['png', 'jpeg'],
+					'Image',
+					0,
+				),
+			).toThrow('content does not match');
+		});
+
+		it('rejects unsupported or spoofed content', () => {
+			expect(() =>
+				assertBinaryFormat(ctx as any, Buffer.from('text'), 'text/plain', ['pdf'], 'Document', 0),
+			).toThrow('Document must be PDF');
+			expect(() =>
+				assertBinaryFormat(ctx as any, Buffer.from('not png'), 'image/png', ['png'], 'Image', 0),
+			).toThrow('content does not match');
+		});
+	});
+
 	describe('validateSigningSteps', () => {
 		const ctx = {
 			getNode: jest.fn().mockReturnValue({ name: 'TestNode' }),
@@ -208,6 +283,16 @@ describe('shared/utils', () => {
 		it('should require contiguous signing steps', () => {
 			expect(() => validateSigningSteps(ctx as any, [1, 3], 0)).toThrow(
 				'Signing steps must form a contiguous sequence starting at 1',
+			);
+		});
+
+		it.each([
+			[-1, 1],
+			[1.5, 2],
+			['not-a-number', 1],
+		])('should reject invalid signing steps: %j', (...steps) => {
+			expect(() => validateSigningSteps(ctx as any, steps, 0)).toThrow(
+				'Signing steps must be non-negative whole numbers',
 			);
 		});
 	});

@@ -1,6 +1,6 @@
 {
 	"node": "@assinafy/n8n-nodes-assinafy.assinafyTrigger",
-	"nodeVersion": "1.3.0",
+	"nodeVersion": "1.5.0",
 	"codexVersion": "1.0.0",
 	"categories": ["Productivity", "Miscellaneous"],
 	"resources": {
@@ -11,7 +11,7 @@
 		],
 		"primaryDocumentation": [
 			{
-				"url": "https://api.assinafy.com.br/v1/docs"
+				"url": "https://github.com/assinafy/n8n-nodes-assinafy#assinafy-trigger"
 			}
 		]
 	}
