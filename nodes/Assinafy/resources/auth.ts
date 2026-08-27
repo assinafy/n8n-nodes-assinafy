@@ -6,7 +6,7 @@ import type {
 } from 'n8n-workflow';
 import { NodeOperationError } from 'n8n-workflow';
 import { assinafyApiRequest } from '../shared/transport';
-import { showOnly as showOnlyFor, wrap } from '../shared/utils';
+import { assertEmail, showOnly as showOnlyFor, wrap } from '../shared/utils';
 
 const showOnly = showOnlyFor('auth');
 
@@ -189,7 +189,12 @@ export async function executeAuth(
 
 async function linkSocialLogin(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const provider = this.getNodeParameter('provider', itemIndex, 'google') as string;
-	const token = this.getNodeParameter('socialToken', itemIndex) as string;
+	const token = requireNonBlank(
+		this,
+		this.getNodeParameter('socialToken', itemIndex),
+		'Social Token',
+		itemIndex,
+	).trim();
 	const accessToken = this.getNodeParameter('accessToken', itemIndex, '') as string;
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'POST',
@@ -209,8 +214,13 @@ function optionalBearer(token: string): { headers?: IDataObject; skipAuth?: bool
 }
 
 async function login(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
-	const email = this.getNodeParameter('authEmail', itemIndex) as string;
-	const password = this.getNodeParameter('authPassword', itemIndex) as string;
+	const email = requireEmail(this, itemIndex);
+	const password = requireNonBlank(
+		this,
+		this.getNodeParameter('authPassword', itemIndex),
+		'Password',
+		itemIndex,
+	);
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'POST',
 		path: '/login',
@@ -221,7 +231,12 @@ async function login(this: IExecuteFunctions, itemIndex: number): Promise<IDataO
 
 async function socialLogin(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const provider = this.getNodeParameter('provider', itemIndex, 'google') as string;
-	const token = this.getNodeParameter('socialToken', itemIndex) as string;
+	const token = requireNonBlank(
+		this,
+		this.getNodeParameter('socialToken', itemIndex),
+		'Social Token',
+		itemIndex,
+	).trim();
 	const hasAcceptedTerms = this.getNodeParameter('hasAcceptedTerms', itemIndex, true) as boolean;
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'POST',
@@ -233,7 +248,12 @@ async function socialLogin(this: IExecuteFunctions, itemIndex: number): Promise<
 
 async function createApiKey(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const accessToken = this.getNodeParameter('accessToken', itemIndex, '') as string;
-	const password = this.getNodeParameter('authPassword', itemIndex) as string;
+	const password = requireNonBlank(
+		this,
+		this.getNodeParameter('authPassword', itemIndex),
+		'Password',
+		itemIndex,
+	);
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'POST',
 		path: '/users/api-keys',
@@ -263,9 +283,19 @@ async function deleteApiKey(this: IExecuteFunctions, itemIndex: number): Promise
 
 async function changePassword(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const accessToken = this.getNodeParameter('accessToken', itemIndex, '') as string;
-	const email = this.getNodeParameter('authEmail', itemIndex) as string;
-	const password = this.getNodeParameter('currentPassword', itemIndex) as string;
-	const newPassword = this.getNodeParameter('newPassword', itemIndex) as string;
+	const email = requireEmail(this, itemIndex);
+	const password = requireNonBlank(
+		this,
+		this.getNodeParameter('currentPassword', itemIndex),
+		'Current Password',
+		itemIndex,
+	);
+	const newPassword = requireNonBlank(
+		this,
+		this.getNodeParameter('newPassword', itemIndex),
+		'New Password',
+		itemIndex,
+	);
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'PUT',
 		path: '/authentication/change-password',
@@ -278,7 +308,7 @@ async function requestPasswordReset(
 	this: IExecuteFunctions,
 	itemIndex: number,
 ): Promise<IDataObject> {
-	const email = this.getNodeParameter('authEmail', itemIndex) as string;
+	const email = requireEmail(this, itemIndex);
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'PUT',
 		path: '/authentication/request-password-reset',
@@ -288,9 +318,14 @@ async function requestPasswordReset(
 }
 
 async function resetPassword(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
-	const email = this.getNodeParameter('authEmail', itemIndex) as string;
-	const token = this.getNodeParameter('resetToken', itemIndex, '') as string;
-	const newPassword = this.getNodeParameter('newPassword', itemIndex) as string;
+	const email = requireEmail(this, itemIndex);
+	const token = (this.getNodeParameter('resetToken', itemIndex, '') as string).trim();
+	const newPassword = requireNonBlank(
+		this,
+		this.getNodeParameter('newPassword', itemIndex),
+		'New Password',
+		itemIndex,
+	);
 	const body: IDataObject = { email, new_password: newPassword };
 	if (token) body.token = token;
 	return assinafyApiRequest<IDataObject>(this, {
@@ -299,4 +334,29 @@ async function resetPassword(this: IExecuteFunctions, itemIndex: number): Promis
 		body,
 		skipAuth: true,
 	});
+}
+
+function requireEmail(ctx: IExecuteFunctions, itemIndex: number): string {
+	const email = requireNonBlank(
+		ctx,
+		ctx.getNodeParameter('authEmail', itemIndex),
+		'Email',
+		itemIndex,
+	).trim();
+	if (!assertEmail(email)) {
+		throw new NodeOperationError(ctx.getNode(), 'Invalid email address', { itemIndex });
+	}
+	return email;
+}
+
+function requireNonBlank(
+	ctx: IExecuteFunctions,
+	value: unknown,
+	label: string,
+	itemIndex: number,
+): string {
+	if (typeof value !== 'string' || !value.trim()) {
+		throw new NodeOperationError(ctx.getNode(), `${label} is required`, { itemIndex });
+	}
+	return value;
 }

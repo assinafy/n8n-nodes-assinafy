@@ -12,6 +12,7 @@
 //   ASSINAFY_LIVE=1 \
 //   ASSINAFY_LIVE_DESTRUCTIVE=1 \
 //   ASSINAFY_LIVE_WORKSPACE_MUTATIONS=1 \
+//   ASSINAFY_LIVE_CREDIT_MUTATIONS=1 \
 //   ASSINAFY_API_KEY=<key> \
 //   ASSINAFY_ACCOUNT_ID=<id> \
 //   ASSINAFY_TEST_EMAIL_PRIMARY=<sandbox-test-email> \
@@ -27,11 +28,13 @@ import { executeAssignment } from '../nodes/Assinafy/resources/assignment';
 import { executeWebhook } from '../nodes/Assinafy/resources/webhook';
 import { executeTemplate } from '../nodes/Assinafy/resources/template';
 import { executeSigner } from '../nodes/Assinafy/resources/signer';
+import { executeSignerDocument } from '../nodes/Assinafy/resources/signerDocument';
 
 const env = process.env;
 const LIVE = env.ASSINAFY_LIVE === '1';
 const DESTRUCTIVE = env.ASSINAFY_LIVE_DESTRUCTIVE === '1';
 const WORKSPACE_MUTATIONS = env.ASSINAFY_LIVE_WORKSPACE_MUTATIONS === '1';
+const CREDIT_MUTATIONS = env.ASSINAFY_LIVE_CREDIT_MUTATIONS === '1';
 const API_KEY = env.ASSINAFY_API_KEY ?? '';
 const ACCOUNT_ID = env.ASSINAFY_ACCOUNT_ID ?? '';
 const SANDBOX_BASE_URL = 'https://sandbox.assinafy.com.br/v1';
@@ -64,11 +67,25 @@ async function realRequest(requestOptions: any, auth: boolean): Promise<unknown>
 		headers['Content-Type'] = headers['Content-Type'] ?? 'application/json';
 	}
 
-	const res = await fetch(url, { method: requestOptions.method, headers, body });
+	const res = await fetch(url, {
+		method: requestOptions.method,
+		headers,
+		body,
+		signal: AbortSignal.timeout(30_000),
+	});
 	const buf = Buffer.from(await res.arrayBuffer());
 
 	if (!res.ok) {
-		const err: any = new Error(`HTTP ${res.status}`);
+		let message = `HTTP ${res.status}`;
+		try {
+			const parsed = JSON.parse(buf.toString()) as { message?: unknown };
+			if (typeof parsed.message === 'string' && parsed.message.trim()) {
+				message += `: ${parsed.message.trim()}`;
+			}
+		} catch {
+			/* non-JSON error */
+		}
+		const err: any = new Error(message);
 		err.httpCode = res.status;
 		err.response = {
 			statusCode: res.status,
@@ -127,11 +144,17 @@ function liveCtx(params: Record<string, unknown>, accountId = ACCOUNT_ID) {
 const d = LIVE ? describe : describe.skip;
 const destructiveIt = LIVE && DESTRUCTIVE ? it : it.skip;
 const workspaceIt = LIVE && DESTRUCTIVE && WORKSPACE_MUTATIONS ? it : it.skip;
-const emailIt = LIVE && DESTRUCTIVE && TEST_EMAIL_PRIMARY && TEST_EMAIL_SECONDARY ? it : it.skip;
+const emailIt =
+	LIVE && DESTRUCTIVE && CREDIT_MUTATIONS && TEST_EMAIL_PRIMARY && TEST_EMAIL_SECONDARY
+		? it
+		: it.skip;
 
 function assertSandboxConfiguration(): void {
 	if (!API_KEY) throw new Error('ASSINAFY_API_KEY is required when ASSINAFY_LIVE=1');
 	if (!ACCOUNT_ID) throw new Error('ASSINAFY_ACCOUNT_ID is required when ASSINAFY_LIVE=1');
+	if (CREDIT_MUTATIONS && (!TEST_EMAIL_PRIMARY || !TEST_EMAIL_SECONDARY)) {
+		throw new Error('Both Assinafy sandbox test-email variables are required for credit mutations');
+	}
 
 	let parsed: URL;
 	try {
@@ -162,9 +185,10 @@ d('LIVE sandbox integration (real SDK code paths)', () => {
 
 	destructiveIt('tag lifecycle: create → list → update → delete', async () => {
 		let tagId: string | undefined;
+		const tagName = `it-tag-${Date.now()}`;
 		try {
 			const created = (await executeTag.call(
-				liveCtx({ name: `it-tag-${Date.now()}`, color: 'ff8800' }),
+				liveCtx({ name: tagName, color: 'ff8800' }),
 				0,
 				'create',
 			)) as any;
@@ -172,7 +196,7 @@ d('LIVE sandbox integration (real SDK code paths)', () => {
 			expect(tagId).toBeTruthy();
 
 			const listed = (await executeTag.call(
-				liveCtx({ returnAll: false, limit: 100, filters: {} }),
+				liveCtx({ returnAll: false, limit: 100, filters: { search: tagName } }),
 				0,
 				'list',
 			)) as any[];
@@ -196,7 +220,7 @@ d('LIVE sandbox integration (real SDK code paths)', () => {
 				liveCtx({
 					fieldType: 'text',
 					fieldName: `it-field-${Date.now()}`,
-					additionalFields: { is_active: true },
+					additionalFields: { is_active: false, is_required: true },
 				}),
 				0,
 				'create',
@@ -206,14 +230,15 @@ d('LIVE sandbox integration (real SDK code paths)', () => {
 
 			const got = (await executeField.call(liveCtx({ fieldId }), 0, 'get')) as any;
 			expect(got.json.id).toBe(fieldId);
+			expect(got.json.is_active).toBe(false);
+			expect(got.json.is_required).toBe(true);
 
-			const renamedField = `it-field-renamed-${Date.now()}`;
-			const updated = (await executeField.call(
-				liveCtx({ fieldId, updateFields: { name: renamedField } }),
+			const activated = (await executeField.call(
+				liveCtx({ fieldId, updateFields: { is_active: true } }),
 				0,
 				'update',
 			)) as any;
-			expect(updated.json.name).toBe(renamedField);
+			expect(activated.json.is_active).toBe(true);
 
 			const listed = (await executeField.call(
 				liveCtx({ filters: { include_inactive: true } }),
@@ -223,11 +248,34 @@ d('LIVE sandbox integration (real SDK code paths)', () => {
 			expect(listed.json.fields.some((field: any) => field.id === fieldId)).toBe(true);
 
 			const validated = (await executeField.call(
-				liveCtx({ fieldId, validateValue: 'hello', signerAccessCode: '' }),
+				liveCtx({ fieldId, validateValue: 'user@example.com', signerAccessCode: '' }),
 				0,
 				'validate',
 			)) as any;
 			expect(validated.json).toHaveProperty('success');
+
+			const multiple = (await executeField.call(
+				liveCtx({
+					validateItems: JSON.stringify([{ field_id: fieldId, value: 'user@example.com' }]),
+					signerAccessCode: '',
+				}),
+				0,
+				'validateMultiple',
+			)) as any;
+			expect(Array.isArray(multiple.json.results)).toBe(true);
+
+			const renamedField = `it-field-renamed-${Date.now()}`;
+			const updated = (await executeField.call(
+				liveCtx({
+					fieldId,
+					updateFields: { name: renamedField, type: 'email', is_required: false },
+				}),
+				0,
+				'update',
+			)) as any;
+			expect(updated.json.name).toBe(renamedField);
+			expect(updated.json.type).toBe('email');
+			expect(updated.json.is_required).toBe(false);
 		} finally {
 			if (fieldId) await executeField.call(liveCtx({ fieldId }), 0, 'delete');
 		}
@@ -235,9 +283,10 @@ d('LIVE sandbox integration (real SDK code paths)', () => {
 
 	destructiveIt('document: upload → wait → get → activities → estimate-cost → delete', async () => {
 		let documentId: string | undefined;
+		const fileName = `sdk-test-${Date.now()}.pdf`;
 		try {
 			const uploaded = (await executeDocument.call(
-				liveCtx({ binaryPropertyName: 'data', fileName: 'sdk-test.pdf', additionalFields: {} }),
+				liveCtx({ binaryPropertyName: 'data', fileName, additionalFields: {} }),
 				0,
 				'upload',
 			)) as any;
@@ -250,6 +299,35 @@ d('LIVE sandbox integration (real SDK code paths)', () => {
 				'waitUntilReady',
 			)) as any;
 			expect(['metadata_ready', 'pending_signature', 'certificated']).toContain(ready.json.status);
+
+			const got = (await executeDocument.call(liveCtx({ documentId }), 0, 'get')) as any;
+			expect(got.json.id).toBe(documentId);
+
+			const listed = (await executeDocument.call(
+				liveCtx({ returnAll: false, limit: 100, filters: { search: fileName } }),
+				0,
+				'list',
+			)) as any[];
+			expect(listed.some((item) => item.json.id === documentId)).toBe(true);
+
+			const original = (await executeDocument.call(
+				liveCtx({ documentId, artifact: 'original', binaryOutputProperty: 'data' }),
+				0,
+				'download',
+			)) as any;
+			expect(original.binary.data).toBeDefined();
+
+			const progress = (await executeDocument.call(
+				liveCtx({ documentId }),
+				0,
+				'getSigningProgress',
+			)) as any;
+			expect(progress.json.documentId).toBe(documentId);
+			if (progress.json.available) {
+				expect(progress.json).toMatchObject({ signed: 0, total: 0 });
+			} else {
+				expect(progress.json).toMatchObject({ signed: null, total: null });
+			}
 
 			const activities = (await executeDocument.call(
 				liveCtx({ documentId }),
@@ -286,13 +364,18 @@ d('LIVE sandbox integration (real SDK code paths)', () => {
 				const created = (await executeWorkspace.call(
 					liveCtx({
 						name: `it-ws-${Date.now()}`,
-						additionalFields: {},
+						additionalFields: {
+							primary_color: '#112233',
+							secondary_color: '#abcdef',
+						},
 					}),
 					0,
 					'create',
 				)) as any;
 				workspaceId = created.json.id;
 				expect(workspaceId).toBeTruthy();
+				expect(created.json.primary_color).toBe('112233');
+				expect(created.json.secondary_color).toBe('abcdef');
 
 				const got = (await executeWorkspace.call(liveCtx({ workspaceId }), 0, 'get')) as any;
 				expect(got.json.id).toBe(workspaceId);
@@ -302,11 +385,14 @@ d('LIVE sandbox integration (real SDK code paths)', () => {
 						workspaceId,
 						updateFields: {
 							name: `it-ws-renamed-${Date.now()}`,
+							primary_color: '#445566',
 						},
 					}),
 					0,
 					'update',
 				);
+				const theme = (await executeWorkspace.call(liveCtx({ workspaceId }), 0, 'getTheme')) as any;
+				expect(theme.json.primary_color).toBe('445566');
 
 				// 1x1 transparent PNG, installed only on the disposable workspace.
 				const png = Buffer.from(
@@ -445,9 +531,9 @@ d('LIVE sandbox integration (real SDK code paths)', () => {
 			try {
 				if (documentId) await executeDocument.call(liveCtx({ documentId }), 0, 'delete');
 			} finally {
-				await Promise.all(
-					tagIds.map((tagId) => executeTag.call(liveCtx({ tagId, force: true }), 0, 'delete')),
-				);
+				for (const tagId of tagIds) {
+					await executeTag.call(liveCtx({ tagId, force: true }), 0, 'delete');
+				}
 			}
 		}
 	});
@@ -462,6 +548,52 @@ d('LIVE sandbox integration (real SDK code paths)', () => {
 			'getTheme',
 		)) as any;
 		expect(theme.json).toHaveProperty('primary_color');
+
+		const workspaces = (await executeWorkspace.call(
+			liveCtx({ returnAll: true }),
+			0,
+			'list',
+		)) as any[];
+		expect(workspaces.some((item) => item.json.id === ACCOUNT_ID)).toBe(true);
+	});
+
+	destructiveIt('contactless signer lifecycle: create → list → get → update → delete', async () => {
+		let signerId: string | undefined;
+		const fullName = `Assinafy SDK Contactless ${Date.now()}`;
+		try {
+			const created = (await executeSigner.call(
+				liveCtx({
+					fullName,
+					email: '',
+					additionalFields: { reuseIfExists: false },
+				}),
+				0,
+				'create',
+			)) as any;
+			signerId = created.json.id;
+			expect(signerId).toBeTruthy();
+			expect(created.json.email).toBeNull();
+
+			const listed = (await executeSigner.call(
+				liveCtx({ returnAll: false, limit: 100, filters: { search: fullName } }),
+				0,
+				'list',
+			)) as any[];
+			expect(listed.some((item) => item.json.id === signerId)).toBe(true);
+
+			const got = (await executeSigner.call(liveCtx({ signerId }), 0, 'get')) as any;
+			expect(got.json.id).toBe(signerId);
+
+			const updatedName = `Assinafy SDK Contactless Updated ${Date.now()}`;
+			const updated = (await executeSigner.call(
+				liveCtx({ signerId, updateFields: { full_name: updatedName } }),
+				0,
+				'update',
+			)) as any;
+			expect(updated.json.full_name).toBe(updatedName);
+		} finally {
+			if (signerId) await executeSigner.call(liveCtx({ signerId }), 0, 'delete');
+		}
 	});
 
 	it('read-only catalogs: statuses, field types, webhook event types', async () => {
@@ -498,6 +630,8 @@ d('LIVE sandbox integration (real SDK code paths)', () => {
 		'signer + assignment lifecycle uses both configured inboxes and public token delivery',
 		async () => {
 			let documentId: string | undefined;
+			let assignmentId: string | undefined;
+			let primaryAccessCode: string | undefined;
 			const createdSignerIds: string[] = [];
 			const signerIds: string[] = [];
 
@@ -556,8 +690,45 @@ d('LIVE sandbox integration (real SDK code paths)', () => {
 					0,
 					'create',
 				)) as any;
-				const assignmentId = assignment.json.id as string;
+				assignmentId = assignment.json.id as string;
 				expect(assignmentId).toBeTruthy();
+				const signingUrl = (assignment.json.signing_urls as any[])?.find(
+					(entry) => entry.signer_id === signerIds[0],
+				)?.url;
+				expect(typeof signingUrl).toBe('string');
+				const parsedSigningUrl = new URL(signingUrl);
+				primaryAccessCode =
+					parsedSigningUrl.searchParams.get('signer-access-code') ??
+					parsedSigningUrl.pathname.split('/').filter(Boolean).at(-1);
+				expect(primaryAccessCode).toBeTruthy();
+
+				const progress = (await executeDocument.call(
+					liveCtx({ documentId }),
+					0,
+					'getSigningProgress',
+				)) as any;
+				expect(progress.json).toMatchObject({ available: true, signed: 0, total: 2 });
+
+				const signPage = (await executeAssignment.call(
+					liveCtx({ signerAccessCode: primaryAccessCode }),
+					0,
+					'getSignPage',
+				)) as any;
+				expect(signPage.json).toBeDefined();
+
+				const signerSelf = (await executeSigner.call(
+					liveCtx({ signerAccessCode: primaryAccessCode }),
+					0,
+					'getSelf',
+				)) as any;
+				expect(signerSelf.json.id).toBe(signerIds[0]);
+
+				const currentDocument = (await executeSignerDocument.call(
+					liveCtx({ signerAccessCode: primaryAccessCode, signerId: signerIds[0] }),
+					0,
+					'getCurrent',
+				)) as any;
+				expect(currentDocument.json.id).toBe(documentId);
 
 				const assignments = (await executeAssignment.call(
 					liveCtx({ returnAll: false, limit: 100 }),
@@ -593,7 +764,7 @@ d('LIVE sandbox integration (real SDK code paths)', () => {
 				)) as any;
 				expect(publicInfo.json.id).toBe(documentId);
 
-				await executeDocument.call(
+				const tokenDelivery = (await executeDocument.call(
 					liveCtx({
 						publicDocumentId: documentId,
 						recipient: TEST_EMAIL_PRIMARY,
@@ -601,16 +772,28 @@ d('LIVE sandbox integration (real SDK code paths)', () => {
 					}),
 					0,
 					'sendPublicToken',
-				);
+				)) as any;
+				expect(tokenDelivery.json).toEqual(expect.any(Object));
+				expect(Array.isArray(tokenDelivery.json)).toBe(false);
+
+				const declined = (await executeAssignment.call(
+					liveCtx({
+						documentId,
+						assignmentId,
+						signerAccessCode: primaryAccessCode,
+						declineReason: 'Automated sandbox lifecycle test',
+					}),
+					0,
+					'decline',
+				)) as any;
+				expect(declined.json).toEqual({ data: [] });
 			} finally {
 				try {
 					if (documentId) await executeDocument.call(liveCtx({ documentId }), 0, 'delete');
 				} finally {
-					await Promise.all(
-						createdSignerIds.map((signerId) =>
-							executeSigner.call(liveCtx({ signerId }), 0, 'delete'),
-						),
-					);
+					for (const signerId of createdSignerIds) {
+						await executeSigner.call(liveCtx({ signerId }), 0, 'delete');
+					}
 				}
 			}
 		},

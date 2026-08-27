@@ -50,28 +50,44 @@ describe('signerDocument request construction (signer-side, no auth)', () => {
 	});
 
 	it('signs multiple documents', async () => {
-		const { ctx, requests } = makeCtx({
-			signerAccessCode: 'code123',
-			documentIds: 'd1, d2 ,d3',
-		});
-		await executeSignerDocument.call(ctx as any, 0, 'signMultiple');
+		const { ctx, requests } = makeCtx(
+			{
+				signerAccessCode: 'code123',
+				documentIds: 'd1, d2 ,d3',
+			},
+			{ response: [] },
+		);
+		const result = (await executeSignerDocument.call(ctx as any, 0, 'signMultiple')) as any;
 		const req = lastPublic(requests);
 		expect(req.method).toBe('PUT');
 		expect(req.url).toBe(`${BASE}/signers/documents/sign-multiple`);
 		expect(req.qs).toEqual({ 'signer-access-code': 'code123' });
 		expect(req.body).toEqual({ document_ids: ['d1', 'd2', 'd3'] });
+		expect(result.json).toEqual({ data: [] });
 	});
 
 	it('declines multiple documents with a reason', async () => {
 		const { ctx, requests } = makeCtx({
 			signerAccessCode: 'code123',
 			documentIds: 'd1,d2',
-			declineReason: 'No',
+			declineReason: ' No ',
 		});
 		await executeSignerDocument.call(ctx as any, 0, 'declineMultiple');
 		const req = lastPublic(requests);
 		expect(req.url).toBe(`${BASE}/signers/documents/decline-multiple`);
 		expect(req.body).toEqual({ document_ids: ['d1', 'd2'], decline_reason: 'No' });
+	});
+
+	it('rejects a blank multiple-decline reason before making a request', async () => {
+		const { ctx, requests } = makeCtx({
+			signerAccessCode: 'code123',
+			documentIds: 'd1,d2',
+			declineReason: '   ',
+		});
+		await expect(executeSignerDocument.call(ctx as any, 0, 'declineMultiple')).rejects.toThrow(
+			'Decline Reason is required',
+		);
+		expect(requests).toHaveLength(0);
 	});
 
 	it('downloads a signer document artifact', async () => {
@@ -90,5 +106,38 @@ describe('signerDocument request construction (signer-side, no auth)', () => {
 		expect(req.url).toBe(`${BASE}/signers/sig_1/documents/doc_1/download/certificated`);
 		expect(req.qs).toEqual({ 'signer-access-code': 'code123' });
 		expect(result.binary.data).toBeDefined();
+	});
+
+	it('downloads the public PAdES artifact without requiring an access code', async () => {
+		const { ctx, requests } = makeCtx(
+			{
+				signerAccessCode: '',
+				signerId: 'sig_1',
+				documentId: 'doc_1',
+				artifact: 'pades',
+				binaryOutputProperty: 'data',
+			},
+			{ binaryBuffer: Buffer.from('PDF'), headers: { 'content-type': 'application/pdf' } },
+		);
+		await executeSignerDocument.call(ctx as any, 0, 'download');
+		const req = lastPublic(requests);
+		expect(req.url).toBe(`${BASE}/signers/sig_1/documents/doc_1/download/pades`);
+		expect(req.qs).toBeUndefined();
+	});
+
+	it('uses a ZIP fallback MIME type for a bundle without a content-type header', async () => {
+		const { ctx } = makeCtx(
+			{
+				signerAccessCode: '',
+				signerId: 'sig_1',
+				documentId: 'doc_1',
+				artifact: 'bundle',
+				binaryOutputProperty: 'data',
+			},
+			{ binaryBuffer: Buffer.from('ZIP'), headers: {} },
+		);
+		const result = (await executeSignerDocument.call(ctx as any, 0, 'download')) as any;
+		expect(result.json.mimeType).toBe('application/zip');
+		expect(result.json.fileName).toBe('doc_1-bundle.zip');
 	});
 });

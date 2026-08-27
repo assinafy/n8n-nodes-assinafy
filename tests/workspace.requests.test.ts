@@ -7,8 +7,8 @@ const BASE = 'https://api.assinafy.com.br/v1';
 describe('workspace request construction', () => {
 	it('creates a workspace (account)', async () => {
 		const { ctx, requests } = makeCtx({
-			name: 'New WS',
-			additionalFields: { notification_sender_type: 'Account', primary_color: 'ff0000' },
+			name: ' New WS ',
+			additionalFields: { notification_sender_type: 'Account', primary_color: '#FF0000' },
 		});
 		await executeWorkspace.call(ctx as any, 0, 'create');
 		const req = lastAuth(requests);
@@ -19,6 +19,14 @@ describe('workspace request construction', () => {
 			notification_sender_type: 'Account',
 			primary_color: 'ff0000',
 		});
+	});
+
+	it('rejects a blank workspace name before making a request', async () => {
+		const { ctx, requests } = makeCtx({ name: '   ', additionalFields: {} });
+		await expect(executeWorkspace.call(ctx as any, 0, 'create')).rejects.toThrow(
+			'Name is required',
+		);
+		expect(requests).toHaveLength(0);
 	});
 
 	it('lists workspaces with a per-page limit', async () => {
@@ -41,13 +49,41 @@ describe('workspace request construction', () => {
 	it('updates a workspace', async () => {
 		const { ctx, requests } = makeCtx({
 			workspaceId: 'ws_1',
-			updateFields: { name: 'Renamed', notification_sender_type: 'User' },
+			updateFields: {
+				name: 'Renamed',
+				notification_sender_type: 'User',
+				secondary_color: '#ABCDEF',
+			},
 		});
 		await executeWorkspace.call(ctx as any, 0, 'update');
 		const req = lastAuth(requests);
 		expect(req.method).toBe('PUT');
 		expect(req.url).toBe(`${BASE}/accounts/ws_1`);
-		expect(req.body).toEqual({ name: 'Renamed', notification_sender_type: 'User' });
+		expect(req.body).toEqual({
+			name: 'Renamed',
+			notification_sender_type: 'User',
+			secondary_color: 'abcdef',
+		});
+	});
+
+	it.each([
+		[{ workspaceId: 'ws_1', updateFields: {} }, 'At least one update field is required'],
+		[{ workspaceId: 'ws_1', updateFields: { name: '   ' } }, 'Name cannot be blank'],
+	])('rejects an invalid workspace update before making a request', async (params, message) => {
+		const { ctx, requests } = makeCtx(params);
+		await expect(executeWorkspace.call(ctx as any, 0, 'update')).rejects.toThrow(message);
+		expect(requests).toHaveLength(0);
+	});
+
+	it('rejects a color format the API cannot accept', async () => {
+		const { ctx, requests } = makeCtx({
+			name: 'New WS',
+			additionalFields: { primary_color: 'red' },
+		});
+		await expect(executeWorkspace.call(ctx as any, 0, 'create')).rejects.toThrow(
+			'Primary Color must be a 6-character hex value',
+		);
+		expect(requests).toHaveLength(0);
 	});
 
 	it('deletes a workspace', async () => {
@@ -69,6 +105,56 @@ describe('workspace request construction', () => {
 		const req = lastAuth(requests);
 		expect(req.method).toBe('GET');
 		expect(req.url).toBe(`${BASE}/users/self`);
+	});
+
+	it('gets the current user notification preferences', async () => {
+		const { ctx, requests } = makeCtx(
+			{},
+			{ response: { DocumentCompleted: true, SignerDeclined: false } },
+		);
+		await executeWorkspace.call(ctx as any, 0, 'getNotificationPreferences');
+		const req = lastAuth(requests);
+		expect(req.method).toBe('GET');
+		expect(req.url).toBe(`${BASE}/users/self/notification-preferences`);
+	});
+
+	it('partially updates the current user notification preferences', async () => {
+		const { ctx, requests } = makeCtx({
+			notificationPreferences: { DocumentCompleted: false, SignerDeclined: true },
+		});
+		await executeWorkspace.call(ctx as any, 0, 'updateNotificationPreferences');
+		const req = lastAuth(requests);
+		expect(req.method).toBe('PUT');
+		expect(req.url).toBe(`${BASE}/users/self/notification-preferences`);
+		expect(req.body).toEqual({ DocumentCompleted: false, SignerDeclined: true });
+	});
+
+	it('rejects an empty notification-preference update before the request', async () => {
+		const { ctx, requests } = makeCtx({ notificationPreferences: {} });
+		await expect(
+			executeWorkspace.call(ctx as any, 0, 'updateNotificationPreferences'),
+		).rejects.toThrow('At least one notification preference is required');
+		expect(requests).toHaveLength(0);
+	});
+
+	it('rejects a non-boolean notification-preference value before the request', async () => {
+		const { ctx, requests } = makeCtx({
+			notificationPreferences: { DocumentCompleted: 'false' },
+		});
+		await expect(
+			executeWorkspace.call(ctx as any, 0, 'updateNotificationPreferences'),
+		).rejects.toThrow('Notification preferences must be boolean values');
+		expect(requests).toHaveLength(0);
+	});
+
+	it('rejects an unknown notification-preference key before the request', async () => {
+		const { ctx, requests } = makeCtx({
+			notificationPreferences: { UnknownPreference: true },
+		});
+		await expect(
+			executeWorkspace.call(ctx as any, 0, 'updateNotificationPreferences'),
+		).rejects.toThrow('Unknown notification preference: UnknownPreference');
+		expect(requests).toHaveLength(0);
 	});
 
 	it('gets monthly account statistics', async () => {

@@ -16,12 +16,10 @@ import { NodeApiError, NodeOperationError, sleep } from 'n8n-workflow';
 import { DEFAULT_BASE_URL, SANDBOX_BASE_URL, validateAssinafyBaseUrl } from './baseUrl';
 import { asArray } from './utils';
 
-export { DEFAULT_BASE_URL, SANDBOX_BASE_URL, validateAssinafyBaseUrl } from './baseUrl';
-
 export const CREDENTIALS_TYPE = 'assinafyApi';
 
 /** Documented maximum page size (`per-page`) accepted by the API. */
-export const MAX_PER_PAGE = 100;
+const MAX_PER_PAGE = 100;
 
 /** Bounded retry budget for transient HTTP 429 (Too Many Requests) responses. */
 const MAX_RETRIES = 3;
@@ -36,25 +34,15 @@ export interface AssinafyRequestOptions {
 	method: IHttpRequestMethods;
 	path: string;
 	qs?: IDataObject;
-	body?: IDataObject | Buffer | FormData;
+	body?: IDataObject | IDataObject[] | Buffer | FormData;
 	headers?: IDataObject;
 	/** Request binary response (full response with Buffer body). Used for artifact downloads. */
 	returnBinary?: boolean;
-	/** Opt out of the standard {status,message,data} envelope unwrapping. */
-	rawResponse?: boolean;
-	/** Override the credential's base URL (used for ad-hoc calls). */
-	baseUrlOverride?: string;
 	/**
 	 * Skip the X-Api-Key authentication header — for `/public/*` endpoints and
 	 * signer-access-code flows where the API key is irrelevant.
 	 */
 	skipAuth?: boolean;
-}
-
-export interface AssinafyBinaryResponse {
-	body: Buffer;
-	headers: IDataObject;
-	statusCode: number;
 }
 
 /** Resolve the effective base URL from credentials (respects environment/custom override). */
@@ -88,13 +76,13 @@ export async function getBaseUrl(
 }
 
 /** Resolve the default account (workspace) ID from credentials. Throws if missing. */
-export async function getAccountId(ctx: AssinafyContext): Promise<string> {
+export async function getAccountId(ctx: AssinafyContext, encodeForPath = true): Promise<string> {
 	const credentials = (await ctx.getCredentials(CREDENTIALS_TYPE)) as { accountId?: string };
-	const accountId = credentials.accountId;
+	const accountId = String(credentials.accountId ?? '').trim();
 	if (!accountId) {
 		throw new NodeOperationError(ctx.getNode(), 'Assinafy credentials are missing an Account ID');
 	}
-	return accountId;
+	return encodeForPath ? encodeURIComponent(accountId) : accountId;
 }
 
 /** Assemble the n8n HTTP options for an Assinafy request. */
@@ -118,12 +106,13 @@ function buildHttpOptions(
 	}
 
 	if (options.body !== undefined) {
-		if (options.body instanceof FormData) {
-			requestOptions.body = options.body as unknown as IDataObject;
-		} else if (Buffer.isBuffer(options.body)) {
-			requestOptions.body = options.body;
+		const body = options.body;
+		if (body instanceof FormData) {
+			requestOptions.body = body as unknown as IDataObject;
+		} else if (Buffer.isBuffer(body)) {
+			requestOptions.body = body;
 		} else {
-			requestOptions.body = options.body;
+			requestOptions.body = body as unknown as IDataObject;
 			requestOptions.json = true;
 		}
 	}
@@ -139,7 +128,7 @@ function buildHttpOptions(
 	return requestOptions;
 }
 
-/** Issue the HTTP call (auth or unauthenticated) with bounded retry on HTTP 429. */
+/** Issue the HTTP call, retrying only read-only GET requests after HTTP 429. */
 async function sendRequest(
 	ctx: AssinafyContext,
 	options: AssinafyRequestOptions,
@@ -155,7 +144,7 @@ async function sendRequest(
 						requestOptions,
 					)) as unknown);
 		} catch (error) {
-			if (getHttpCode(error) === 429 && attempt < MAX_RETRIES) {
+			if (options.method === 'GET' && getHttpCode(error) === 429 && attempt < MAX_RETRIES) {
 				await sleep(retryDelayMs(error, attempt));
 				continue;
 			}
@@ -174,14 +163,12 @@ export async function assinafyApiRequest<T = IDataObject>(
 	ctx: AssinafyContext,
 	options: AssinafyRequestOptions,
 ): Promise<T> {
-	const baseURL = options.baseUrlOverride
-		? normalizeBaseUrl(ctx, options.baseUrlOverride)
-		: await getBaseUrl(ctx, options.skipAuth === true);
+	const baseURL = await getBaseUrl(ctx, options.skipAuth === true);
 	const url = `${baseURL}${ensureLeadingSlash(options.path)}`;
 	const requestOptions = buildHttpOptions(url, options);
 
 	const response = await sendRequest(ctx, options, requestOptions);
-	if (options.returnBinary || options.rawResponse) {
+	if (options.returnBinary) {
 		return response as T;
 	}
 	return unwrapEnvelope<T>(response);
@@ -190,11 +177,9 @@ export async function assinafyApiRequest<T = IDataObject>(
 /** Collect every page of a list endpoint via the X-Pagination-* headers. */
 export async function assinafyApiRequestAllItems<T = IDataObject>(
 	ctx: AssinafyContext,
-	options: Omit<AssinafyRequestOptions, 'rawResponse' | 'returnBinary'> & { perPage?: number },
+	options: Omit<AssinafyRequestOptions, 'returnBinary'> & { perPage?: number },
 ): Promise<T[]> {
-	const baseURL = options.baseUrlOverride
-		? normalizeBaseUrl(ctx, options.baseUrlOverride)
-		: await getBaseUrl(ctx, options.skipAuth === true);
+	const baseURL = await getBaseUrl(ctx, options.skipAuth === true);
 	const perPage = clampPageSize(options.perPage ?? MAX_PER_PAGE);
 	const url = `${baseURL}${ensureLeadingSlash(options.path)}`;
 
@@ -256,7 +241,7 @@ export async function assinafyApiRequestAllItems<T = IDataObject>(
 export async function executeListOperation(
 	ctx: IExecuteFunctions,
 	itemIndex: number,
-	opts: { path: string; qs?: IDataObject; headers?: IDataObject; skipAuth?: boolean },
+	opts: { path: string; qs?: IDataObject; skipAuth?: boolean },
 ): Promise<INodeExecutionData[]> {
 	const returnAll = ctx.getNodeParameter('returnAll', itemIndex, false) as boolean;
 
@@ -265,18 +250,16 @@ export async function executeListOperation(
 			method: 'GET',
 			path: opts.path,
 			qs: opts.qs,
-			headers: opts.headers,
 			skipAuth: opts.skipAuth,
 		});
 		return items.map((item) => ({ json: item }));
 	}
 
 	const limit = clampPageSize(ctx.getNodeParameter('limit', itemIndex, 50) as number);
-	const response = await assinafyApiRequest<IDataObject[] | { data?: IDataObject[] }>(ctx, {
+	const response = await assinafyApiRequest<IDataObject[]>(ctx, {
 		method: 'GET',
 		path: opts.path,
 		qs: { ...(opts.qs ?? {}), 'per-page': limit },
-		headers: opts.headers,
 		skipAuth: opts.skipAuth,
 	});
 	return asArray<IDataObject>(response).map((item) => ({ json: item }));

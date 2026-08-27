@@ -6,18 +6,18 @@ const BASE = 'https://api.assinafy.com.br/v1';
 
 describe('auth request construction (all unauthenticated / Bearer)', () => {
 	it('logs in', async () => {
-		const { ctx, requests } = makeCtx({ authEmail: 'a@b.com', authPassword: 'pw' });
+		const { ctx, requests } = makeCtx({ authEmail: ' user@example.com ', authPassword: 'pw' });
 		await executeAuth.call(ctx as any, 0, 'login');
 		const req = lastPublic(requests);
 		expect(req.method).toBe('POST');
 		expect(req.url).toBe(`${BASE}/login`);
-		expect(req.body).toEqual({ email: 'a@b.com', password: 'pw' });
+		expect(req.body).toEqual({ email: 'user@example.com', password: 'pw' });
 	});
 
 	it('social logs in', async () => {
 		const { ctx, requests } = makeCtx({
 			provider: 'google',
-			socialToken: 'tok',
+			socialToken: ' tok ',
 			hasAcceptedTerms: true,
 		});
 		await executeAuth.call(ctx as any, 0, 'socialLogin');
@@ -80,7 +80,7 @@ describe('auth request construction (all unauthenticated / Bearer)', () => {
 	it('changes the password', async () => {
 		const { ctx, requests } = makeCtx({
 			accessToken: 'jwt',
-			authEmail: 'a@b.com',
+			authEmail: 'user@example.com',
 			currentPassword: 'old',
 			newPassword: 'new',
 		});
@@ -88,26 +88,67 @@ describe('auth request construction (all unauthenticated / Bearer)', () => {
 		const req = lastPublic(requests);
 		expect(req.method).toBe('PUT');
 		expect(req.url).toBe(`${BASE}/authentication/change-password`);
-		expect(req.body).toEqual({ email: 'a@b.com', password: 'old', new_password: 'new' });
+		expect(req.body).toEqual({
+			email: 'user@example.com',
+			password: 'old',
+			new_password: 'new',
+		});
 	});
 
 	it('requests a password reset', async () => {
-		const { ctx, requests } = makeCtx({ authEmail: 'a@b.com' });
+		const { ctx, requests } = makeCtx({ authEmail: 'user@example.com' });
 		await executeAuth.call(ctx as any, 0, 'requestPasswordReset');
 		const req = lastPublic(requests);
 		expect(req.url).toBe(`${BASE}/authentication/request-password-reset`);
-		expect(req.body).toEqual({ email: 'a@b.com' });
+		expect(req.body).toEqual({ email: 'user@example.com' });
 	});
 
 	it('resets the password with a token', async () => {
 		const { ctx, requests } = makeCtx({
-			authEmail: 'a@b.com',
+			authEmail: 'user@example.com',
 			resetToken: 'rtok',
 			newPassword: 'new',
 		});
 		await executeAuth.call(ctx as any, 0, 'resetPassword');
 		const req = lastPublic(requests);
 		expect(req.url).toBe(`${BASE}/authentication/reset-password`);
-		expect(req.body).toEqual({ email: 'a@b.com', new_password: 'new', token: 'rtok' });
+		expect(req.body).toEqual({
+			email: 'user@example.com',
+			new_password: 'new',
+			token: 'rtok',
+		});
+	});
+
+	it.each(['not-an-email', '   '])('rejects an invalid required email: %j', async (authEmail) => {
+		const { ctx, requests } = makeCtx({ authEmail, authPassword: 'pw' });
+		await expect(executeAuth.call(ctx as any, 0, 'login')).rejects.toThrow();
+		expect(requests).toHaveLength(0);
+	});
+
+	it.each([
+		['login', { authEmail: 'user@example.com', authPassword: ' ' }],
+		['socialLogin', { provider: 'google', socialToken: ' ' }],
+		['linkSocialLogin', { provider: 'google', socialToken: ' ' }],
+		['createApiKey', { authPassword: ' ' }],
+		['changePassword', { authEmail: 'user@example.com', currentPassword: ' ', newPassword: 'new' }],
+		['changePassword', { authEmail: 'user@example.com', currentPassword: 'old', newPassword: ' ' }],
+		['resetPassword', { authEmail: 'user@example.com', newPassword: ' ' }],
+	] as const)('rejects blank required credentials for %s', async (operation, params) => {
+		const { ctx, requests } = makeCtx(params);
+		await expect(executeAuth.call(ctx as any, 0, operation)).rejects.toThrow('required');
+		expect(requests).toHaveLength(0);
+	});
+
+	it('omits a blank optional reset token', async () => {
+		const { ctx, requests } = makeCtx({
+			authEmail: 'user@example.com',
+			resetToken: '   ',
+			newPassword: 'new',
+		});
+		await executeAuth.call(ctx as any, 0, 'resetPassword');
+		expect(lastPublic(requests).body).toEqual({
+			email: 'user@example.com',
+			new_password: 'new',
+		});
 	});
 });

@@ -1,14 +1,15 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import {
+	asArray,
 	assertBinaryFormat,
 	assertEmail,
 	cleanQs,
 	extractRequiredId,
 	normalizeHexColor,
 	parseStringList,
-	safeJsonParse,
 	sanitizeCpf,
 	showOnly,
+	validateDigitalCertificateSteps,
 	validateSigningSteps,
 	wrap,
 } from '../nodes/Assinafy/shared/utils';
@@ -59,6 +60,20 @@ describe('shared/utils', () => {
 		});
 	});
 
+	describe('asArray', () => {
+		it('returns documented array payloads unchanged', () => {
+			const items = [{ id: 'one' }, { id: 'two' }];
+			expect(asArray(items)).toBe(items);
+		});
+
+		it.each([null, {}, { data: [] }, 'not-an-array'])(
+			'rejects an invalid list payload: %j',
+			(payload) => {
+				expect(() => asArray(payload)).toThrow('invalid list response');
+			},
+		);
+	});
+
 	describe('showOnly', () => {
 		it('should build a displayOptions show clause scoped to a resource', () => {
 			const show = showOnly('signer');
@@ -77,7 +92,7 @@ describe('shared/utils', () => {
 		});
 
 		it('returns the value when present', () => {
-			const ctx = createCtx('abc123');
+			const ctx = createCtx(' abc123 ');
 			expect(extractRequiredId(ctx as any, 'documentId', 'Document ID', 0)).toBe('abc123');
 			expect(ctx.getNodeParameter).toHaveBeenCalledWith('documentId', 0, '', {
 				extractValue: true,
@@ -88,6 +103,13 @@ describe('shared/utils', () => {
 			const ctx = createCtx('');
 			expect(() => extractRequiredId(ctx as any, 'signerId', 'Signer ID', 2)).toThrow(
 				'Signer ID is required',
+			);
+		});
+
+		it('encodes an opaque ID as one safe URL path segment', () => {
+			const ctx = createCtx('opaque/id?value');
+			expect(extractRequiredId(ctx as any, 'documentId', 'Document ID', 0)).toBe(
+				'opaque%2Fid%3Fvalue',
 			);
 		});
 	});
@@ -110,35 +132,10 @@ describe('shared/utils', () => {
 			expect(result.json.users).toHaveLength(2);
 			expect(result.json.count).toBe(2);
 		});
-	});
 
-	describe('safeJsonParse', () => {
-		it('should parse valid JSON strings', () => {
-			expect(safeJsonParse('{"name":"John"}')).toEqual({ name: 'John' });
-			expect(safeJsonParse('{"a":1,"b":2}')).toEqual({ a: 1, b: 2 });
-		});
-
-		it('should return empty object for invalid JSON', () => {
-			expect(safeJsonParse('not json')).toEqual({});
-			expect(safeJsonParse('')).toEqual({});
-			expect(safeJsonParse('{broken')).toEqual({});
-		});
-
-		it('should return input if already an object', () => {
-			const obj = { name: 'John' };
-			expect(safeJsonParse(obj)).toBe(obj);
-		});
-
-		it('should return empty object for non-object parsed values', () => {
-			expect(safeJsonParse('"just a string"')).toEqual({});
-			expect(safeJsonParse('123')).toEqual({});
-			expect(safeJsonParse('null')).toEqual({});
-			expect(safeJsonParse('true')).toEqual({});
-		});
-
-		it('should return arrays as-is', () => {
-			const result = safeJsonParse('[1,2,3]');
-			expect(result).toEqual([1, 2, 3]);
+		it('keeps an array response inside a valid n8n JSON object', () => {
+			expect(wrap([])).toEqual({ json: { data: [] } });
+			expect(wrap([{ id: 'tag_1' }])).toEqual({ json: { data: [{ id: 'tag_1' }] } });
 		});
 	});
 
@@ -162,13 +159,17 @@ describe('shared/utils', () => {
 	});
 
 	describe('parseStringList', () => {
-		it('should parse comma-separated strings and arrays', () => {
+		it('should parse comma-separated scalar strings and trim arrays', () => {
 			expect(parseStringList('one, two,three')).toEqual(['one', 'two', 'three']);
-			expect(parseStringList(['one, two', 'three'])).toEqual(['one', 'two', 'three']);
+			expect(parseStringList(['one', ' two ', 'three'])).toEqual(['one', 'two', 'three']);
+		});
+
+		it('preserves commas inside array entries', () => {
+			expect(parseStringList(['ACME, Inc.', ' Legal '])).toEqual(['ACME, Inc.', 'Legal']);
 		});
 
 		it('should drop empty values', () => {
-			expect(parseStringList(['', 'one, , two', undefined])).toEqual(['one', 'two']);
+			expect(parseStringList(['', 'one', ' ', 'two', undefined])).toEqual(['one', 'two']);
 		});
 	});
 
@@ -186,6 +187,12 @@ describe('shared/utils', () => {
 		it('should reject invalid hex colors', () => {
 			expect(() => normalizeHexColor(ctx as any, 'red', 0)).toThrow(
 				'Tag color must be a 6-character hex value',
+			);
+		});
+
+		it('supports a field-specific validation label', () => {
+			expect(() => normalizeHexColor(ctx as any, 'red', 0, 'Primary Color')).toThrow(
+				'Primary Color must be a 6-character hex value',
 			);
 		});
 	});
@@ -297,18 +304,47 @@ describe('shared/utils', () => {
 		});
 	});
 
+	describe('validateDigitalCertificateSteps', () => {
+		const ctx = {
+			getNode: jest.fn().mockReturnValue({ name: 'TestNode' }),
+		};
+
+		it('allows a digital-certificate signer only when alone in its step', () => {
+			expect(() =>
+				validateDigitalCertificateSteps(
+					ctx as any,
+					[
+						{ verification_method: 'DigitalCertificate', step: 1 },
+						{ verification_method: 'Email', step: 2 },
+					],
+					0,
+				),
+			).not.toThrow();
+			expect(() =>
+				validateDigitalCertificateSteps(
+					ctx as any,
+					[
+						{ verification_method: 'DigitalCertificate', step: 1 },
+						{ verification_method: 'Email', step: 1 },
+					],
+					0,
+				),
+			).toThrow('must be alone in their signing step');
+		});
+	});
+
 	describe('assertEmail', () => {
 		it('should return true for valid emails', () => {
 			expect(assertEmail('test@example.com')).toBe(true);
-			expect(assertEmail('user.name@domain.org')).toBe(true);
-			expect(assertEmail('user+tag@domain.co.uk')).toBe(true);
+			expect(assertEmail('user.name@example.org')).toBe(true);
+			expect(assertEmail('user+tag@example.com')).toBe(true);
 		});
 
 		it('should return false for invalid emails', () => {
 			expect(assertEmail('notanemail')).toBe(false);
 			expect(assertEmail('missing@domain')).toBe(false);
 			expect(assertEmail('@nodomain.com')).toBe(false);
-			expect(assertEmail('spaces in@email.com')).toBe(false);
+			expect(assertEmail('spaces in@example.com')).toBe(false);
 			expect(assertEmail('')).toBe(false);
 		});
 	});

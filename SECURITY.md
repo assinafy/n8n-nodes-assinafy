@@ -15,4 +15,4 @@ Include the affected version, impact, reproduction steps, and the smallest sanit
 
 ## Supported versions
 
-Security fixes target the default branch and, after npmjs publication is bootstrapped, the newest published release. Upgrade to the newest available release before reporting a problem already fixed upstream.
+Security fixes target the default branch and the newest published release. Upgrade to the newest available release before reporting a problem already fixed upstream.

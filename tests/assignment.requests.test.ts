@@ -56,6 +56,61 @@ describe('assignment request construction', () => {
 		expect(req.body.signers).toEqual([{ verification_method: 'Email' }]);
 	});
 
+	it('estimates Digital Certificate verification cost', async () => {
+		const { ctx, requests } = makeCtx({
+			documentId: 'doc_1',
+			method: 'virtual',
+			signers: { signer: [{ verification_method: 'DigitalCertificate' }] },
+		});
+		await executeAssignment.call(ctx as any, 0, 'estimateCost');
+		expect(lastAuth(requests).body.signers).toEqual([
+			{ verification_method: 'DigitalCertificate' },
+		]);
+	});
+
+	it('creates a standalone Digital Certificate signing step', async () => {
+		const { ctx, requests } = makeCtx({
+			documentId: 'doc_1',
+			method: 'virtual',
+			signers: {
+				signer: [
+					{
+						id: 'sig_1',
+						verification_method: 'DigitalCertificate',
+						notification_methods: ['Email'],
+						step: 1,
+					},
+				],
+			},
+		});
+		await executeAssignment.call(ctx as any, 0, 'create');
+		expect(lastAuth(requests).body.signers).toEqual([
+			{
+				id: 'sig_1',
+				verification_method: 'DigitalCertificate',
+				notification_methods: ['Email'],
+				step: 1,
+			},
+		]);
+	});
+
+	it('rejects a Digital Certificate signer sharing a signing step', async () => {
+		const { ctx, requests } = makeCtx({
+			documentId: 'doc_1',
+			method: 'virtual',
+			signers: {
+				signer: [
+					{ id: 'sig_1', verification_method: 'DigitalCertificate', step: 1 },
+					{ id: 'sig_2', verification_method: 'Email', step: 1 },
+				],
+			},
+		});
+		await expect(executeAssignment.call(ctx as any, 0, 'create')).rejects.toThrow(
+			'must be alone in their signing step',
+		);
+		expect(requests).toHaveLength(0);
+	});
+
 	it('omits create-only signer IDs and steps from cost estimates', async () => {
 		const { ctx, requests } = makeCtx({
 			documentId: 'doc_1',
@@ -103,6 +158,18 @@ describe('assignment request construction', () => {
 		expect(req.method).toBe('PUT');
 		expect(req.url).toBe(`${BASE}/documents/doc_1/assignments/asg_1/reset-expiration`);
 		expect(req.body).toEqual({ expires_at: '2027-01-01T00:00:00Z' });
+	});
+
+	it('rejects a blank expiration date before making a request', async () => {
+		const { ctx, requests } = makeCtx({
+			documentId: 'doc_1',
+			assignmentId: 'asg_1',
+			expiresAt: '   ',
+		});
+		await expect(executeAssignment.call(ctx as any, 0, 'resetExpiration')).rejects.toThrow(
+			'Expires At is required',
+		);
+		expect(requests).toHaveLength(0);
 	});
 
 	it('resends a notification to a signer', async () => {
@@ -189,18 +256,48 @@ describe('assignment request construction', () => {
 		expect(req.body).toEqual([{ itemId: 'i1', fieldId: 'f1', pageId: 'p1', value: 'X' }]);
 	});
 
-	it('declines an assignment via reject (no auth)', async () => {
+	it('rejects an empty sign-items array before making a request', async () => {
 		const { ctx, requests } = makeCtx({
 			documentId: 'doc_1',
 			assignmentId: 'asg_1',
 			signerAccessCode: 'code123',
-			declineReason: 'No thanks',
+			signItems: '[]',
 		});
-		await executeAssignment.call(ctx as any, 0, 'decline');
+		await expect(executeAssignment.call(ctx as any, 0, 'sign')).rejects.toThrow(
+			'Items must be a non-empty JSON array',
+		);
+		expect(requests).toHaveLength(0);
+	});
+
+	it('declines an assignment via reject (no auth)', async () => {
+		const { ctx, requests } = makeCtx(
+			{
+				documentId: 'doc_1',
+				assignmentId: 'asg_1',
+				signerAccessCode: 'code123',
+				declineReason: 'No thanks',
+			},
+			{ response: [] },
+		);
+		const result = (await executeAssignment.call(ctx as any, 0, 'decline')) as any;
 		const req = lastPublic(requests);
 		expect(req.method).toBe('PUT');
 		expect(req.url).toBe(`${BASE}/documents/doc_1/assignments/asg_1/reject`);
 		expect(req.body).toEqual({ decline_reason: 'No thanks' });
+		expect(result.json).toEqual({ data: [] });
+	});
+
+	it('rejects a blank decline reason before making a request', async () => {
+		const { ctx, requests } = makeCtx({
+			documentId: 'doc_1',
+			assignmentId: 'asg_1',
+			signerAccessCode: 'code123',
+			declineReason: '   ',
+		});
+		await expect(executeAssignment.call(ctx as any, 0, 'decline')).rejects.toThrow(
+			'Decline Reason is required',
+		);
+		expect(requests).toHaveLength(0);
 	});
 
 	it.each([

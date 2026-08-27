@@ -5,7 +5,7 @@ name: Publish
 on:
   push:
     tags:
-      - '*.*.*'
+      - 'v*.*.*'
 
 concurrency:
   group: publish-${{ github.ref }}
@@ -17,7 +17,7 @@ permissions:
 jobs:
   package:
     name: Verify and package
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
 
     steps:
@@ -32,14 +32,15 @@ jobs:
           node-version: '24.x'
           package-manager-cache: false
 
-      - name: Use the locked npm version
-        run: npm install --global npm@11.16.0
-
       - name: Install locked dependencies
         run: npm ci
 
       - name: Verify tag matches package version
         run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Release tag must use stable semantic versioning (vMAJOR.MINOR.PATCH)"
+            exit 1
+          fi
           PACKAGE_VERSION="$(node -p "require('./package.json').version")"
           TAG_VERSION="${GITHUB_REF_NAME#v}"
           if [ "$PACKAGE_VERSION" != "$TAG_VERSION" ]; then
@@ -56,14 +57,14 @@ jobs:
       - name: Test with coverage gates
         run: npm run test:ci
 
+      - name: Audit development dependencies
+        run: npm run audit:dev
+
       - name: Audit production dependencies
         run: npm run audit:prod
 
       - name: Verify package contents
-        run: |
-          npm pack --dry-run --ignore-scripts --json > "$RUNNER_TEMP/package-contents.json"
-          node -e "const fs = require('node:fs'); const report = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'))[0]; const paths = report.files.map(({ path }) => path); const manifest = require('./package.json'); const required = [...manifest.n8n.credentials, ...manifest.n8n.nodes, 'docs/OPERATIONS.md', 'CHANGELOG.md', 'CONTRIBUTING.md', 'LICENSE.md', 'README.md', 'SECURITY.md']; const missing = required.filter((path) => !paths.includes(path)); const leakedGeneratedFiles = paths.filter((path) => path.endsWith('.tsbuildinfo') || path.startsWith('dist/coverage/')); if (missing.length || leakedGeneratedFiles.length) { throw new Error(JSON.stringify({ missing, leakedGeneratedFiles })); }" "$RUNNER_TEMP/package-contents.json"
-          node -e "const manifest = require('./package.json'); for (const modulePath of [...manifest.n8n.credentials, ...manifest.n8n.nodes]) { require('./' + modulePath); }"
+        run: npm run verify:package
 
       - name: Create immutable package tarball
         run: |
@@ -71,18 +72,56 @@ jobs:
           mv "$PACKAGE_TARBALL" assinafy-package.tgz
 
       - name: Upload package tarball
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: assinafy-package
           path: assinafy-package.tgz
           if-no-files-found: error
           retention-days: 1
 
+  live-sandbox:
+    name: Verify Assinafy sandbox
+    needs: package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: assinafy-sandbox
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js 24 LTS
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.x'
+          package-manager-cache: false
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run sandbox integration tests
+        run: npx jest tests/live.integration.test.ts --runInBand
+        env:
+          ASSINAFY_LIVE: '1'
+          ASSINAFY_LIVE_DESTRUCTIVE: '1'
+          ASSINAFY_LIVE_WORKSPACE_MUTATIONS: '0'
+          ASSINAFY_LIVE_CREDIT_MUTATIONS: '1'
+          ASSINAFY_API_KEY: ${{ secrets.ASSINAFY_API_KEY }}
+          ASSINAFY_ACCOUNT_ID: ${{ secrets.ASSINAFY_ACCOUNT_ID }}
+          ASSINAFY_TEST_EMAIL_PRIMARY: ${{ secrets.ASSINAFY_TEST_EMAIL_PRIMARY }}
+          ASSINAFY_TEST_EMAIL_SECONDARY: ${{ secrets.ASSINAFY_TEST_EMAIL_SECONDARY }}
+          ASSINAFY_BASE_URL: https://sandbox.assinafy.com.br/v1
+
   npmjs:
     name: Publish to npmjs
-    needs: package
-    runs-on: ubuntu-latest
+    needs: [package, live-sandbox]
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
+    environment: npm
     permissions:
       contents: read
       id-token: write
@@ -95,21 +134,20 @@ jobs:
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
 
-      - name: Use the locked npm version
-        run: npm install --global npm@11.16.0
-
       - name: Download package tarball
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: assinafy-package
 
       - name: Publish with provenance
         run: npm publish assinafy-package.tgz --ignore-scripts --access public --provenance --registry=https://registry.npmjs.org
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   github-packages:
     name: Mirror to GitHub Packages
-    needs: package
-    runs-on: ubuntu-latest
+    needs: [package, live-sandbox, npmjs]
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -124,11 +162,8 @@ jobs:
           scope: '@assinafy'
           package-manager-cache: false
 
-      - name: Use the locked npm version
-        run: npm install --global npm@11.16.0
-
       - name: Download package tarball
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: assinafy-package
 

@@ -66,7 +66,7 @@ describe('AssinafyApi Credentials', () => {
 	it('validates and normalizes the base URL before attaching the API key', async () => {
 		const authenticate = credentials.authenticate as AuthenticateFunction;
 		const result = await authenticate(
-			{ apiKey: 'test-key', baseUrl: 'https://custom.example.com/v1/' },
+			{ apiKey: ' test-key ', accountId: 'acc_123', baseUrl: 'https://custom.example.com/v1/' },
 			{ method: 'GET', url: '/accounts/acc_123', baseURL: 'https://custom.example.com/v1/' },
 		);
 
@@ -75,6 +75,33 @@ describe('AssinafyApi Credentials', () => {
 			Accept: 'application/json',
 			'X-Api-Key': 'test-key',
 		});
+	});
+
+	it('rejects a blank API key before attaching authentication', async () => {
+		const authenticate = credentials.authenticate as AuthenticateFunction;
+		const request: any = { method: 'GET', url: '/users/self' };
+
+		await expect(authenticate({ apiKey: '   ', accountId: 'acc_123' }, request)).rejects.toThrow(
+			'Assinafy API Key is required',
+		);
+		expect(request.headers).toBeUndefined();
+	});
+
+	it.each([
+		'',
+		' account ',
+		'account id',
+		'account/id',
+		'account?id',
+		'account#id',
+		'account%2Fid',
+	])('rejects an invalid account ID before attaching authentication: %s', async (accountId) => {
+		const authenticate = credentials.authenticate as AuthenticateFunction;
+		const request: any = { method: 'GET', url: '/accounts/invalid' };
+		await expect(authenticate({ apiKey: 'test-key', accountId }, request)).rejects.toThrow(
+			'Assinafy Account ID',
+		);
+		expect(request.headers).toBeUndefined();
 	});
 
 	it.each([
@@ -88,7 +115,13 @@ describe('AssinafyApi Credentials', () => {
 
 		await expect(
 			authenticate(
-				{ apiKey: 'test-key', environment: 'custom', customBaseUrl: baseUrl, baseUrl },
+				{
+					apiKey: 'test-key',
+					accountId: 'acc_123',
+					environment: 'custom',
+					customBaseUrl: baseUrl,
+					baseUrl,
+				},
 				request,
 			),
 		).rejects.toThrow(message);
@@ -98,7 +131,12 @@ describe('AssinafyApi Credentials', () => {
 	it('allows an HTTP loopback base URL for local development', async () => {
 		const authenticate = credentials.authenticate as AuthenticateFunction;
 		const result = await authenticate(
-			{ apiKey: 'test-key', environment: 'custom', customBaseUrl: 'http://127.0.0.1:5678/v1' },
+			{
+				apiKey: 'test-key',
+				accountId: 'acc_123',
+				environment: 'custom',
+				customBaseUrl: 'http://127.0.0.1:5678/v1',
+			},
 			{ method: 'GET', url: '/accounts/acc_123' },
 		);
 

@@ -11,7 +11,7 @@ describe('template request construction', () => {
 				filters: {
 					search: 'NDA',
 					status: 'ready',
-					tags: ['tag_1, tag_2'],
+					tags: ['tag_1', 'tag_2'],
 					sort: '-created_at',
 				},
 			},
@@ -91,5 +91,15 @@ describe('tag request construction', () => {
 		await executeTag.call(ctx, 0, 'update');
 
 		expect(lastAuth(requests).body).toEqual({ color: null });
+	});
+
+	it('rejects a blank tag name before making a request', async () => {
+		const { ctx, requests } = makeCtx({
+			tagId: 'tag_123',
+			updateFields: { name: '   ' },
+		});
+
+		await expect(executeTag.call(ctx, 0, 'update')).rejects.toThrow('Name cannot be blank');
+		expect(requests).toHaveLength(0);
 	});
 });

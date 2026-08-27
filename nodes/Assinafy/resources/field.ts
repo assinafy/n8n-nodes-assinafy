@@ -156,7 +156,8 @@ export const fieldDescription: INodeProperties[] = [
 		type: 'string',
 		typeOptions: { password: true },
 		default: '',
-		description: 'Required when validating as a signer instead of an authenticated user',
+		description:
+			'Optional signer access code forwarded with the authenticated validation request',
 		displayOptions: { show: showOnly(['validate', 'validateMultiple']) },
 	},
 
@@ -232,7 +233,7 @@ async function listFields(this: IExecuteFunctions, itemIndex: number): Promise<I
 	const accountId = await getAccountId(this);
 	const filters = this.getNodeParameter('filters', itemIndex, {}) as IDataObject;
 	const qs = cleanQs(filters);
-	const response = await assinafyApiRequest<IDataObject[] | { data?: IDataObject[] }>(this, {
+	const response = await assinafyApiRequest<IDataObject[]>(this, {
 		method: 'GET',
 		path: `/accounts/${accountId}/fields`,
 		qs,
@@ -305,7 +306,7 @@ async function validateMultiple(
 		method: 'POST',
 		path: `/accounts/${accountId}/fields/validate-multiple`,
 		qs: signerCode ? { 'signer-access-code': signerCode } : undefined,
-		body: items as unknown as IDataObject,
+		body: items as IDataObject[],
 	});
 	return asArray<IDataObject>(response);
 }
@@ -315,5 +316,5 @@ async function listFieldTypes(this: IExecuteFunctions): Promise<IDataObject[]> {
 		method: 'GET',
 		path: '/field-types',
 	});
-	return Array.isArray(response) ? response : [];
+	return asArray<IDataObject>(response);
 }

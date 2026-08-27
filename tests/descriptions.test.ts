@@ -10,6 +10,9 @@ import { signerDocumentDescription } from '../nodes/Assinafy/resources/signerDoc
 import { authDescription } from '../nodes/Assinafy/resources/auth';
 import { tagDescription } from '../nodes/Assinafy/resources/tag';
 import type { INodeProperties } from 'n8n-workflow';
+import manifest from '../package.json';
+import actionMetadata from '../nodes/Assinafy/Assinafy.node.json';
+import triggerMetadata from '../nodes/AssinafyTrigger/AssinafyTrigger.node.json';
 
 const getOperations = (description: INodeProperties[]): string[] => {
 	const operationProp = description.find((p: any) => p.name === 'operation');
@@ -18,6 +21,11 @@ const getOperations = (description: INodeProperties[]): string[] => {
 };
 
 describe('Resource Descriptions', () => {
+	it('keeps both node metadata versions aligned with the package', () => {
+		expect(actionMetadata.nodeVersion).toBe(manifest.version);
+		expect(triggerMetadata.nodeVersion).toBe(manifest.version);
+	});
+
 	describe('documentDescription', () => {
 		it('should have operation property as first option selector', () => {
 			const operationProp = documentDescription.find((p: any) => p.name === 'operation');
@@ -32,17 +40,30 @@ describe('Resource Descriptions', () => {
 
 		it('should include all expected document operations', () => {
 			const operations = getOperations(documentDescription);
-			expect(operations).toContain('upload');
-			expect(operations).toContain('list');
-			expect(operations).toContain('get');
-			expect(operations).toContain('delete');
-			expect(operations).toContain('download');
-			expect(operations).toContain('listTags');
-			expect(operations).toContain('replaceTags');
-			expect(operations).toContain('appendTags');
-			expect(operations).toContain('detachTag');
-			expect(operations).toContain('rename');
-			expect(operations).toContain('search');
+			expect(operations).toEqual([
+				'appendTags',
+				'createFromTemplate',
+				'delete',
+				'detachTag',
+				'download',
+				'downloadPage',
+				'downloadThumbnail',
+				'estimateCostFromTemplate',
+				'get',
+				'getActivities',
+				'getPublicInfo',
+				'getSigningProgress',
+				'list',
+				'listStatuses',
+				'listTags',
+				'rename',
+				'replaceTags',
+				'search',
+				'sendPublicToken',
+				'upload',
+				'verify',
+				'waitUntilReady',
+			]);
 		});
 	});
 
@@ -60,12 +81,20 @@ describe('Resource Descriptions', () => {
 
 		it('should include all expected signer operations', () => {
 			const operations = getOperations(signerDescription);
-			expect(operations).toContain('create');
-			expect(operations).toContain('list');
-			expect(operations).toContain('get');
-			expect(operations).toContain('update');
-			expect(operations).toContain('delete');
-			expect(operations).toContain('findByEmail');
+			expect(operations).toEqual([
+				'acceptTerms',
+				'confirmData',
+				'create',
+				'delete',
+				'downloadSignature',
+				'findByEmail',
+				'get',
+				'getSelf',
+				'list',
+				'update',
+				'uploadSignature',
+				'verifyCode',
+			]);
 		});
 	});
 
@@ -81,10 +110,20 @@ describe('Resource Descriptions', () => {
 			expect(operations.length).toBeGreaterThan(0);
 		});
 
-		it('should include create and estimateCost operations', () => {
+		it('should include all expected assignment operations', () => {
 			const operations = getOperations(assignmentDescription);
-			expect(operations).toContain('create');
-			expect(operations).toContain('estimateCost');
+			expect(operations).toEqual([
+				'create',
+				'decline',
+				'estimateCost',
+				'estimateResendCost',
+				'getSignPage',
+				'list',
+				'listWhatsapp',
+				'resendNotification',
+				'resetExpiration',
+				'sign',
+			]);
 		});
 	});
 
@@ -102,20 +141,22 @@ describe('Resource Descriptions', () => {
 
 		it('should include all expected workspace operations', () => {
 			const operations = getOperations(workspaceDescription);
-			for (const op of [
+			expect(operations).toEqual([
 				'create',
-				'list',
-				'get',
-				'update',
 				'delete',
-				'getCurrentUser',
-				'getTheme',
-				'uploadLogo',
-				'downloadLogo',
 				'deleteLogo',
-			]) {
-				expect(operations).toContain(op);
-			}
+				'downloadLogo',
+				'get',
+				'getAccountStats',
+				'getCurrentUser',
+				'getNotificationPreferences',
+				'getTheme',
+				'getUserStats',
+				'list',
+				'update',
+				'updateNotificationPreferences',
+				'uploadLogo',
+			]);
 		});
 	});
 
@@ -131,10 +172,16 @@ describe('Resource Descriptions', () => {
 			expect(operations.length).toBeGreaterThan(0);
 		});
 
-		it('should include register and list operations', () => {
+		it('should include all expected webhook operations', () => {
 			const operations = getOperations(webhookDescription);
-			expect(operations).toContain('register');
-			expect(operations).toContain('listDispatches');
+			expect(operations).toEqual([
+				'get',
+				'inactivate',
+				'listDispatches',
+				'listEventTypes',
+				'register',
+				'retryDispatch',
+			]);
 		});
 	});
 
@@ -152,43 +199,59 @@ describe('Resource Descriptions', () => {
 
 		it('should include list and get operations', () => {
 			const operations = getOperations(templateDescription);
-			expect(operations).toContain('list');
-			expect(operations).toContain('get');
+			expect(operations).toEqual(['get', 'list']);
+		});
+
+		it('wires the registered template list search into a resource locator', () => {
+			const locator = templateDescription.find((property: any) => property.name === 'templateId');
+			expect(locator?.type).toBe('resourceLocator');
+			expect(locator?.modes?.[0]?.typeOptions?.searchListMethod).toBe('getTemplates');
 		});
 	});
 
 	describe('tagDescription', () => {
 		it('should cover workspace tag operations', () => {
 			const operations = getOperations(tagDescription);
-			for (const op of ['create', 'list', 'update', 'delete']) {
-				expect(operations).toContain(op);
-			}
+			expect(operations).toEqual(['create', 'delete', 'list', 'update']);
 		});
 	});
 
 	describe('fieldDescription', () => {
 		it('should cover field CRUD + validate + listTypes operations', () => {
 			const operations = getOperations(fieldDescription);
-			for (const op of [
+			expect(operations).toEqual([
 				'create',
-				'list',
-				'get',
-				'update',
 				'delete',
+				'get',
+				'list',
+				'listTypes',
+				'update',
 				'validate',
 				'validateMultiple',
-				'listTypes',
-			]) {
-				expect(operations).toContain(op);
-			}
+			]);
 		});
 	});
 
 	describe('signerDocumentDescription', () => {
 		it('should cover signer-side document operations', () => {
 			const operations = getOperations(signerDocumentDescription);
-			for (const op of ['getCurrent', 'list', 'signMultiple', 'declineMultiple', 'download']) {
-				expect(operations).toContain(op);
+			expect(operations).toEqual([
+				'declineMultiple',
+				'download',
+				'getCurrent',
+				'list',
+				'search',
+				'signMultiple',
+			]);
+		});
+
+		it('scopes every access-code field to the signer-document resource', () => {
+			const fields = signerDocumentDescription.filter(
+				(property: any) => property.name === 'signerAccessCode',
+			);
+			expect(fields).toHaveLength(2);
+			for (const field of fields) {
+				expect((field.displayOptions?.show as any)?.resource).toEqual(['signerDocument']);
 			}
 		});
 	});
@@ -196,53 +259,17 @@ describe('Resource Descriptions', () => {
 	describe('authDescription', () => {
 		it('should cover login + API key + password endpoints', () => {
 			const operations = getOperations(authDescription);
-			for (const op of [
-				'login',
-				'socialLogin',
-				'createApiKey',
-				'getApiKey',
-				'deleteApiKey',
+			expect(operations).toEqual([
 				'changePassword',
+				'createApiKey',
+				'deleteApiKey',
+				'getApiKey',
+				'linkSocialLogin',
+				'login',
 				'requestPasswordReset',
 				'resetPassword',
-			]) {
-				expect(operations).toContain(op);
-			}
-		});
-	});
-
-	describe('newly added document operations', () => {
-		it('should cover getPublicInfo, sendPublicToken, listStatuses', () => {
-			const operations = getOperations(documentDescription);
-			expect(operations).toContain('getPublicInfo');
-			expect(operations).toContain('sendPublicToken');
-			expect(operations).toContain('listStatuses');
-		});
-	});
-
-	describe('newly added assignment operations', () => {
-		it('should cover sign, decline, getSignPage, listWhatsapp', () => {
-			const operations = getOperations(assignmentDescription);
-			expect(operations).toContain('sign');
-			expect(operations).toContain('decline');
-			expect(operations).toContain('getSignPage');
-			expect(operations).toContain('listWhatsapp');
-		});
-	});
-
-	describe('newly added signer operations', () => {
-		it('should cover the six signer-side ops', () => {
-			const operations = getOperations(signerDescription);
-			for (const op of [
-				'getSelf',
-				'acceptTerms',
-				'verifyCode',
-				'confirmData',
-				'uploadSignature',
-				'downloadSignature',
-			]) {
-				expect(operations).toContain(op);
-			}
+				'socialLogin',
+			]);
 		});
 	});
 });

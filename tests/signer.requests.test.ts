@@ -5,11 +5,11 @@ import { makeCtx, lastAuth, lastPublic } from './helpers';
 const BASE = 'https://api.assinafy.com.br/v1';
 
 describe('signer request construction', () => {
-	it('creates a signer (reuse disabled) with sanitized cpf', async () => {
+	it('creates a signer with the documented fields', async () => {
 		const { ctx, requests } = makeCtx({
 			fullName: 'Jane Doe',
 			email: 'jane@example.com',
-			additionalFields: { reuseIfExists: false, cpf: '123.456.789-00' },
+			additionalFields: { reuseIfExists: false, whatsapp_phone_number: '+5548999990000' },
 		});
 		await executeSigner.call(ctx as any, 0, 'create');
 		const req = lastAuth(requests);
@@ -18,26 +18,29 @@ describe('signer request construction', () => {
 		expect(req.body).toEqual({
 			full_name: 'Jane Doe',
 			email: 'jane@example.com',
-			cpf: '12345678900',
+			whatsapp_phone_number: '+5548999990000',
 		});
 	});
 
-	it('requires email or whatsapp to create a signer', async () => {
-		const { ctx } = makeCtx({ fullName: 'No Contact', email: '', additionalFields: {} });
-		await expect(executeSigner.call(ctx as any, 0, 'create')).rejects.toThrow(
-			'At least one of Email or WhatsApp',
-		);
-	});
-
-	it('rejects invalid signer metadata instead of silently replacing it', async () => {
+	it('creates a contactless signer when only the required full name is supplied', async () => {
 		const { ctx, requests } = makeCtx({
-			fullName: 'Jane Doe',
-			email: 'jane@example.com',
-			additionalFields: { reuseIfExists: false, metadata: '{invalid' },
+			fullName: ' No Contact ',
+			email: '',
+			additionalFields: {},
 		});
-		await expect(executeSigner.call(ctx as any, 0, 'create')).rejects.toThrow(
-			'Metadata must be valid JSON',
-		);
+		await executeSigner.call(ctx as any, 0, 'create');
+		expect(lastAuth(requests).body).toEqual({ full_name: 'No Contact' });
+	});
+
+	it.each([
+		[{ fullName: '   ', email: '', additionalFields: {} }, 'Full Name is required'],
+		[
+			{ fullName: 'Jane Doe', email: 'not-an-email', additionalFields: {} },
+			'Invalid email address',
+		],
+	])('rejects an invalid create payload before making a request', async (params, message) => {
+		const { ctx, requests } = makeCtx(params);
+		await expect(executeSigner.call(ctx as any, 0, 'create')).rejects.toThrow(message);
 		expect(requests).toHaveLength(0);
 	});
 
@@ -58,16 +61,47 @@ describe('signer request construction', () => {
 		expect(lastAuth(requests).url).toBe(`${BASE}/accounts/acc_123/signers/sig_1`);
 	});
 
-	it('updates a signer with sanitized cpf', async () => {
+	it('updates a signer with a sanitized government ID', async () => {
 		const { ctx, requests } = makeCtx({
 			signerId: 'sig_1',
-			updateFields: { full_name: 'New Name', cpf: '111.222.333-44' },
+			updateFields: { full_name: 'New Name', government_id: '111.222.333-44' },
 		});
 		await executeSigner.call(ctx as any, 0, 'update');
 		const req = lastAuth(requests);
 		expect(req.method).toBe('PUT');
 		expect(req.url).toBe(`${BASE}/accounts/acc_123/signers/sig_1`);
-		expect(req.body).toEqual({ full_name: 'New Name', cpf: '11122233344' });
+		expect(req.body).toEqual({ full_name: 'New Name', government_id: '11122233344' });
+	});
+
+	it('maps the removed cpf field from saved workflows to government_id', async () => {
+		const { ctx, requests } = makeCtx({
+			signerId: 'sig_1',
+			updateFields: { cpf: '111.222.333-44' },
+		});
+		await executeSigner.call(ctx as any, 0, 'update');
+		expect(lastAuth(requests).body).toEqual({ government_id: '11122233344' });
+	});
+
+	it.each([
+		[{ signerId: 'sig_1', updateFields: {} }, 'At least one update field is required'],
+		[{ signerId: 'sig_1', updateFields: { full_name: '   ' } }, 'Full Name cannot be blank'],
+		[{ signerId: 'sig_1', updateFields: { email: 'not-an-email' } }, 'Invalid email address'],
+	])('rejects an invalid update payload before making a request', async (params, message) => {
+		const { ctx, requests } = makeCtx(params);
+		await expect(executeSigner.call(ctx as any, 0, 'update')).rejects.toThrow(message);
+		expect(requests).toHaveLength(0);
+	});
+
+	it('lists signers with the documented search filter and page size', async () => {
+		const { ctx, requests } = makeCtx(
+			{ returnAll: false, limit: 25, filters: { search: 'Jane' } },
+			{ response: [] },
+		);
+		await executeSigner.call(ctx as any, 0, 'list');
+		const req = lastAuth(requests);
+		expect(req.method).toBe('GET');
+		expect(req.url).toBe(`${BASE}/accounts/acc_123/signers`);
+		expect(req.qs).toEqual({ search: 'Jane', 'per-page': 25 });
 	});
 
 	it('deletes a signer', async () => {
@@ -200,5 +234,14 @@ describe('signer request construction', () => {
 		expect(req.url).toBe(`${BASE}/signature/initial`);
 		expect(req.qs).toEqual({ 'signer-access-code': 'code123' });
 		expect(result.binary.data).toBeDefined();
+	});
+
+	it('uses a jpg filename for the image/jpg compatibility MIME type', async () => {
+		const { ctx } = makeCtx(
+			{ signerAccessCode: 'code123', signatureType: 'signature', binaryOutputProperty: 'data' },
+			{ binaryBuffer: Buffer.from('JPG'), headers: { 'content-type': 'image/jpg' } },
+		);
+		const result = (await executeSigner.call(ctx as any, 0, 'downloadSignature')) as any;
+		expect(result.json.fileName).toBe('signature.jpg');
 	});
 });

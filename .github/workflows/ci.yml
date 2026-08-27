@@ -15,15 +15,9 @@ permissions:
 
 jobs:
   verify:
-    name: Node.js ${{ matrix.node-version }}
-    runs-on: ubuntu-latest
+    name: Node.js 24 LTS
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
-
-    strategy:
-      fail-fast: false
-      matrix:
-        # Node 24 is the current LTS; Node 22 remains the supported runtime floor.
-        node-version: ['22.x', '24.x']
 
     steps:
       - name: Check out repository
@@ -31,14 +25,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Node.js ${{ matrix.node-version }}
+      - name: Set up Node.js 24 LTS
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: '24.x'
           cache: npm
-
-      - name: Use the locked npm version
-        run: npm install --global npm@11.16.0
 
       - name: Install locked dependencies
         run: npm ci
@@ -52,13 +43,11 @@ jobs:
       - name: Test with coverage gates
         run: npm run test:ci
 
+      - name: Audit development dependencies
+        run: npm run audit:dev
+
       - name: Audit production dependencies
-        if: matrix.node-version == '24.x'
         run: npm run audit:prod
 
       - name: Verify package contents
-        if: matrix.node-version == '24.x'
-        run: |
-          npm pack --dry-run --ignore-scripts --json > "$RUNNER_TEMP/package-contents.json"
-          node -e "const fs = require('node:fs'); const report = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'))[0]; const paths = report.files.map(({ path }) => path); const manifest = require('./package.json'); const required = [...manifest.n8n.credentials, ...manifest.n8n.nodes, 'docs/OPERATIONS.md', 'CHANGELOG.md', 'CONTRIBUTING.md', 'LICENSE.md', 'README.md', 'SECURITY.md']; const missing = required.filter((path) => !paths.includes(path)); const leakedGeneratedFiles = paths.filter((path) => path.endsWith('.tsbuildinfo') || path.startsWith('dist/coverage/')); if (missing.length || leakedGeneratedFiles.length) { throw new Error(JSON.stringify({ missing, leakedGeneratedFiles })); }" "$RUNNER_TEMP/package-contents.json"
-          node -e "const manifest = require('./package.json'); for (const modulePath of [...manifest.n8n.credentials, ...manifest.n8n.nodes]) { require('./' + modulePath); }"
+        run: npm run verify:package

@@ -106,11 +106,6 @@ export function makeCtx(params: Record<string, unknown>, opts: MockOptions = {})
 	return { ctx, requests, httpRequestWithAuthentication, httpRequest };
 }
 
-/** The most recent recorded request (any transport). */
-export function lastRequest(requests: RecordedRequest[]): RecordedRequest {
-	return requests[requests.length - 1];
-}
-
 /** The most recent authenticated request's options. */
 export function lastAuth(requests: RecordedRequest[]): any {
 	const authed = requests.filter((r) => r.auth);

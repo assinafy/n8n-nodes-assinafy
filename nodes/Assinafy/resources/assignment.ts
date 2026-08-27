@@ -13,10 +13,12 @@ import {
 	returnAllField,
 } from '../shared/descriptions';
 import {
+	asArray,
 	extractRequiredId,
 	parseJsonParam,
 	requireAccessCode,
 	showOnly as showOnlyFor,
+	validateDigitalCertificateSteps,
 	validateSigningSteps,
 	wrap,
 } from '../shared/utils';
@@ -148,6 +150,7 @@ export const assignmentDescription: INodeProperties[] = [
 						type: 'options',
 						default: 'Email',
 						options: [
+							{ name: 'Digital Certificate', value: 'DigitalCertificate' },
 							{ name: 'Email', value: 'Email' },
 							{ name: 'WhatsApp', value: 'Whatsapp' },
 						],
@@ -334,7 +337,7 @@ async function listAssignments(
 ): Promise<INodeExecutionData[]> {
 	// The running API requires this camelCase account context even though the
 	// published OpenAPI operation currently documents only page/per-page.
-	const accountId = await getAccountId(this);
+	const accountId = await getAccountId(this, false);
 	return executeListOperation(this, itemIndex, { path: '/assignments', qs: { accountId } });
 }
 
@@ -366,6 +369,7 @@ function buildAssignmentBody(
 			signerEntries.map((entry) => entry.step),
 			itemIndex,
 		);
+		validateDigitalCertificateSteps(this, signerEntries, itemIndex);
 	}
 	const signers: IDataObject[] = [];
 	for (const entry of signerEntries) {
@@ -439,8 +443,11 @@ async function estimateCost(this: IExecuteFunctions, itemIndex: number): Promise
 
 async function resetExpiration(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const documentId = extractDocumentId.call(this, itemIndex);
-	const assignmentId = this.getNodeParameter('assignmentId', itemIndex) as string;
-	const expiresAt = this.getNodeParameter('expiresAt', itemIndex) as string;
+	const assignmentId = extractRequiredId(this, 'assignmentId', 'Assignment ID', itemIndex);
+	const expiresAt = (this.getNodeParameter('expiresAt', itemIndex) as string).trim();
+	if (!expiresAt) {
+		throw new NodeOperationError(this.getNode(), 'Expires At is required', { itemIndex });
+	}
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'PUT',
 		path: `/documents/${documentId}/assignments/${assignmentId}/reset-expiration`,
@@ -453,8 +460,8 @@ async function resendNotification(
 	itemIndex: number,
 ): Promise<IDataObject> {
 	const documentId = extractDocumentId.call(this, itemIndex);
-	const assignmentId = this.getNodeParameter('assignmentId', itemIndex) as string;
-	const signerId = this.getNodeParameter('signerId', itemIndex) as string;
+	const assignmentId = extractRequiredId(this, 'assignmentId', 'Assignment ID', itemIndex);
+	const signerId = extractRequiredId(this, 'signerId', 'Signer ID', itemIndex);
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'PUT',
 		path: `/documents/${documentId}/assignments/${assignmentId}/signers/${signerId}/resend`,
@@ -466,8 +473,8 @@ async function estimateResendCost(
 	itemIndex: number,
 ): Promise<IDataObject> {
 	const documentId = extractDocumentId.call(this, itemIndex);
-	const assignmentId = this.getNodeParameter('assignmentId', itemIndex) as string;
-	const signerId = this.getNodeParameter('signerId', itemIndex) as string;
+	const assignmentId = extractRequiredId(this, 'assignmentId', 'Assignment ID', itemIndex);
+	const signerId = extractRequiredId(this, 'signerId', 'Signer ID', itemIndex);
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'POST',
 		path: `/documents/${documentId}/assignments/${assignmentId}/signers/${signerId}/estimate-resend-cost`,
@@ -483,12 +490,12 @@ async function listWhatsappNotifications(
 	itemIndex: number,
 ): Promise<IDataObject[]> {
 	const documentId = extractDocumentId.call(this, itemIndex);
-	const assignmentId = this.getNodeParameter('assignmentId', itemIndex) as string;
+	const assignmentId = extractRequiredId(this, 'assignmentId', 'Assignment ID', itemIndex);
 	const response = await assinafyApiRequest<IDataObject[]>(this, {
 		method: 'GET',
 		path: `/documents/${documentId}/assignments/${assignmentId}/whatsapp-notifications`,
 	});
-	return Array.isArray(response) ? response : [];
+	return asArray<IDataObject>(response);
 }
 
 async function getSignPage(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
@@ -506,7 +513,7 @@ async function getSignPage(this: IExecuteFunctions, itemIndex: number): Promise<
 
 async function signAssignment(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const documentId = extractDocumentId.call(this, itemIndex);
-	const assignmentId = this.getNodeParameter('assignmentId', itemIndex) as string;
+	const assignmentId = extractRequiredId(this, 'assignmentId', 'Assignment ID', itemIndex);
 	const code = requireAccessCode(this, itemIndex);
 	const raw = this.getNodeParameter('signItems', itemIndex, '[]') as unknown;
 	const items = parseJsonParam(this, raw, 'Items', itemIndex);
@@ -519,16 +526,19 @@ async function signAssignment(this: IExecuteFunctions, itemIndex: number): Promi
 		method: 'POST',
 		path: `/documents/${documentId}/assignments/${assignmentId}`,
 		qs: { 'signer-access-code': code },
-		body: items as unknown as IDataObject,
+		body: items as IDataObject[],
 		skipAuth: true,
 	});
 }
 
 async function declineAssignment(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const documentId = extractDocumentId.call(this, itemIndex);
-	const assignmentId = this.getNodeParameter('assignmentId', itemIndex) as string;
+	const assignmentId = extractRequiredId(this, 'assignmentId', 'Assignment ID', itemIndex);
 	const code = requireAccessCode(this, itemIndex);
-	const reason = this.getNodeParameter('declineReason', itemIndex) as string;
+	const reason = (this.getNodeParameter('declineReason', itemIndex) as string).trim();
+	if (!reason) {
+		throw new NodeOperationError(this.getNode(), 'Decline Reason is required', { itemIndex });
+	}
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'PUT',
 		path: `/documents/${documentId}/assignments/${assignmentId}/reject`,

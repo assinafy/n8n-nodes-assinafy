@@ -12,10 +12,10 @@ module.exports = {
 	// instrumentation changes do not make the gate brittle.
 	coverageThreshold: {
 		global: {
-			statements: 85,
-			branches: 65,
-			functions: 95,
-			lines: 85,
+			statements: 90,
+			branches: 75,
+			functions: 98,
+			lines: 92,
 		},
 	},
 	verbose: true,

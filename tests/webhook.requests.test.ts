@@ -8,8 +8,8 @@ const BASE = 'https://api.assinafy.com.br/v1';
 describe('webhook request construction', () => {
 	it('registers (PUT) a subscription, falling back to default events when empty', async () => {
 		const { ctx, requests } = makeCtx({
-			url: 'https://example.com/hook',
-			email: 'ops@example.com',
+			url: ' https://example.com/hook ',
+			email: ' ops@example.com ',
 			events: [],
 			isActive: true,
 		});
@@ -23,6 +23,50 @@ describe('webhook request construction', () => {
 			events: DEFAULT_WEBHOOK_EVENTS,
 			is_active: true,
 		});
+	});
+
+	it('accepts HTTP only for a loopback development webhook', async () => {
+		const { ctx, requests } = makeCtx({
+			url: 'http://127.0.0.1:5678/hook?source=n8n',
+			email: 'ops@example.com',
+			events: ['document_ready'],
+			isActive: true,
+		});
+		await executeWebhook.call(ctx as any, 0, 'register');
+		expect(lastAuth(requests).body.url).toBe('http://127.0.0.1:5678/hook?source=n8n');
+	});
+
+	it.each([
+		'/hook',
+		'not a URL',
+		'http://example.com/hook',
+		'https://user:password@example.com/hook',
+		'https://example.com/hook#fragment',
+	])(
+		'rejects an invalid absolute webhook URL: %s',
+		async (url) => {
+			const { ctx, requests } = makeCtx({
+				url,
+				email: 'ops@example.com',
+				events: [],
+			});
+			await expect(executeWebhook.call(ctx as any, 0, 'register')).rejects.toThrow(
+				'valid HTTPS URL',
+			);
+			expect(requests).toHaveLength(0);
+		},
+	);
+
+	it('rejects an invalid notification email', async () => {
+		const { ctx, requests } = makeCtx({
+			url: 'https://example.com/hook',
+			email: 'not-an-email',
+			events: [],
+		});
+		await expect(executeWebhook.call(ctx as any, 0, 'register')).rejects.toThrow(
+			'Invalid email address',
+		);
+		expect(requests).toHaveLength(0);
 	});
 
 	it('gets the subscription and normalizes the empty sentinel', async () => {

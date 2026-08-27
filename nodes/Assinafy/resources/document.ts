@@ -14,9 +14,12 @@ import {
 	searchField,
 	sortField,
 	tagResourceLocator,
+	templateResourceLocator,
 } from '../shared/descriptions';
 import {
+	asArray,
 	assertBinaryFormat,
+	assertEmail,
 	cleanQs,
 	extractRequiredId,
 	normalizeTagFilter,
@@ -24,6 +27,7 @@ import {
 	parseJsonParam,
 	parseStringList,
 	showOnly as showOnlyFor,
+	validateDigitalCertificateSteps,
 	validateSigningSteps,
 	wrap,
 } from '../shared/utils';
@@ -157,24 +161,6 @@ export const documentDescription: INodeProperties[] = [
 			'Optional name to send to Assinafy. Defaults to the binary file name, or `document.pdf` as a last resort.',
 		displayOptions: { show: showOnly(['upload']) },
 	},
-	{
-		displayName: 'Additional Fields',
-		name: 'additionalFields',
-		type: 'collection',
-		placeholder: 'Add Field',
-		default: {},
-		displayOptions: { show: showOnly(['upload']) },
-		options: [
-			{
-				displayName: 'Metadata (JSON)',
-				name: 'metadata',
-				type: 'json',
-				default: '{}',
-				description: 'Arbitrary metadata object sent alongside the file',
-			},
-		],
-	},
-
 	// --- list ---
 	{ ...returnAllField, displayOptions: { show: showOnly(['list']) } },
 	{
@@ -296,12 +282,7 @@ export const documentDescription: INodeProperties[] = [
 
 	// --- createFromTemplate / estimateCostFromTemplate ---
 	{
-		displayName: 'Template ID',
-		name: 'templateId',
-		type: 'string',
-		default: '',
-		required: true,
-		description: 'ID of the template to use (from Template > List)',
+		...templateResourceLocator,
 		displayOptions: { show: showOnly(['createFromTemplate', 'estimateCostFromTemplate']) },
 	},
 	{
@@ -313,7 +294,7 @@ export const documentDescription: INodeProperties[] = [
 		default: {},
 		required: true,
 		description:
-			'One entry per template role. Use Template &gt; Get to retrieve role IDs and signer IDs.',
+			'One entry per template role. Use Template &gt; Get for role IDs and the Signer resource for signer IDs.',
 		displayOptions: { show: showOnly(['createFromTemplate', 'estimateCostFromTemplate']) },
 		options: [
 			{
@@ -362,6 +343,7 @@ export const documentDescription: INodeProperties[] = [
 						type: 'options',
 						default: 'Email',
 						options: [
+							{ name: 'Digital Certificate', value: 'DigitalCertificate' },
 							{ name: 'Email', value: 'Email' },
 							{ name: 'WhatsApp', value: 'Whatsapp' },
 						],
@@ -487,10 +469,11 @@ export const documentDescription: INodeProperties[] = [
 		description: 'Which artifact file to download',
 		displayOptions: { show: showOnly(['download']) },
 		options: [
-			{ name: 'Original (Uploaded File)', value: 'original' },
-			{ name: 'Certificated (Signed PDF)', value: 'certificated' },
-			{ name: 'Certificate Page', value: 'certificate-page' },
 			{ name: 'Bundle (ZIP)', value: 'bundle' },
+			{ name: 'Certificate Page', value: 'certificate-page' },
+			{ name: 'Certificated (Signed PDF)', value: 'certificated' },
+			{ name: 'Original (Uploaded File)', value: 'original' },
+			{ name: 'PAdES (Digital Certificate PDF)', value: 'pades' },
 		],
 	},
 	{
@@ -602,10 +585,6 @@ async function uploadDocument(
 		'data',
 	) as string;
 	const fileNameParam = this.getNodeParameter('fileName', itemIndex, '') as string;
-	const additional = this.getNodeParameter('additionalFields', itemIndex, {}) as {
-		metadata?: string | IDataObject;
-	};
-
 	const binary = this.helpers.assertBinaryData(itemIndex, binaryPropertyName) as IBinaryData;
 	const buffer = await this.helpers.getBinaryDataBuffer(itemIndex, binaryPropertyName);
 	const fileName = fileNameParam || binary.fileName || 'document.pdf';
@@ -639,14 +618,6 @@ async function uploadDocument(
 	const form = new FormData();
 	const view = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
 	form.append('file', new Blob([view], { type: mimeType }), fileName);
-	form.append('name', fileName);
-	if (additional.metadata !== undefined && additional.metadata !== '') {
-		const metadataValue =
-			typeof additional.metadata === 'string'
-				? additional.metadata
-				: JSON.stringify(additional.metadata);
-		form.append('metadata', metadataValue);
-	}
 
 	const accountId = await getAccountId(this);
 	const response = await assinafyApiRequest<IDataObject>(this, {
@@ -722,7 +693,7 @@ async function downloadArtifact(
 	let mimeType = 'application/pdf';
 
 	if (kind === 'artifact') {
-		const artifact = this.getNodeParameter('artifact', itemIndex, 'certificated') as string;
+		const artifact = extractRequiredId(this, 'artifact', 'Artifact', itemIndex, 'certificated');
 		path = `/documents/${documentId}/download/${artifact}`;
 		suggestedFileName = `${documentId}-${artifact}.pdf`;
 		if (artifact === 'bundle') {
@@ -734,7 +705,7 @@ async function downloadArtifact(
 		suggestedFileName = `${documentId}-thumbnail.jpg`;
 		mimeType = 'image/jpeg';
 	} else {
-		const pageId = this.getNodeParameter('pageId', itemIndex) as string;
+		const pageId = extractRequiredId(this, 'pageId', 'Page ID', itemIndex);
 		path = `/documents/${documentId}/pages/${pageId}/download`;
 		suggestedFileName = `${documentId}-page-${pageId}.jpg`;
 		mimeType = 'image/jpeg';
@@ -776,21 +747,48 @@ async function getSigningProgress(
 		path: `/documents/${documentId}`,
 	});
 
-	const assignment = (details.assignment ?? {}) as IDataObject;
+	const status = details.status as string | undefined;
+	if (!details.assignment || typeof details.assignment !== 'object') {
+		return {
+			documentId,
+			status,
+			available: false,
+			signed: null,
+			total: null,
+			pending: null,
+			percentage: null,
+			isFullySigned: status === 'certificated',
+		};
+	}
+
+	const assignment = details.assignment as IDataObject;
 	const summary = (assignment.summary ?? {}) as IDataObject;
-	const total =
-		(summary.signer_count as number | undefined) ??
-		(assignment.signers as unknown[] | undefined)?.length ??
-		0;
-	const signed = (summary.completed_count as number | undefined) ?? 0;
+	const totalValue =
+		summary.signer_count ?? (Array.isArray(assignment.signers) ? assignment.signers.length : 0);
+	const signedValue = summary.completed_count ?? 0;
+	const total = Number(totalValue);
+	const signed = Number(signedValue);
+	const isValidCount = (value: unknown, count: number) =>
+		(typeof value === 'number' || (typeof value === 'string' && value.trim() !== '')) &&
+		Number.isInteger(count) &&
+		count >= 0;
+	if (!isValidCount(totalValue, total) || !isValidCount(signedValue, signed) || signed > total) {
+		throw new NodeOperationError(
+			this.getNode(),
+			'Document signing summary contains invalid counts',
+			{
+				itemIndex,
+			},
+		);
+	}
 	const pending = Math.max(total - signed, 0);
 	const percentage = total > 0 ? Math.round((signed / total) * 10000) / 100 : 0;
-	const status = details.status as string | undefined;
 	const isFullySigned = status === 'certificated' || (total > 0 && signed === total);
 
 	return {
 		documentId,
 		status,
+		available: true,
 		signed,
 		total,
 		pending,
@@ -801,13 +799,24 @@ async function getSigningProgress(
 
 async function waitUntilReady(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const documentId = extractDocumentId.call(this, itemIndex);
-	const maxWaitMs = this.getNodeParameter('maxWaitMs', itemIndex, 30000) as number;
-	const pollIntervalMs = this.getNodeParameter('pollIntervalMs', itemIndex, 2000) as number;
+	const maxWaitMs = Number(this.getNodeParameter('maxWaitMs', itemIndex, 30000));
+	const pollIntervalMs = Number(this.getNodeParameter('pollIntervalMs', itemIndex, 2000));
+	if (!Number.isFinite(maxWaitMs) || maxWaitMs <= 0) {
+		throw new NodeOperationError(this.getNode(), 'Max Wait must be a positive number', {
+			itemIndex,
+		});
+	}
+	if (!Number.isFinite(pollIntervalMs) || pollIntervalMs <= 0) {
+		throw new NodeOperationError(this.getNode(), 'Poll Interval must be a positive number', {
+			itemIndex,
+		});
+	}
 
 	const start = Date.now();
+	const deadline = start + maxWaitMs;
 	let attempts = 0;
 
-	while (Date.now() - start < maxWaitMs) {
+	while (Date.now() < deadline) {
 		attempts += 1;
 		const details = await assinafyApiRequest<IDataObject>(this, {
 			method: 'GET',
@@ -822,7 +831,8 @@ async function waitUntilReady(this: IExecuteFunctions, itemIndex: number): Promi
 				{ itemIndex },
 			);
 		}
-		await sleep(pollIntervalMs);
+		const remainingMs = deadline - Date.now();
+		if (remainingMs > 0) await sleep(Math.min(pollIntervalMs, remainingMs));
 	}
 
 	throw new NodeOperationError(
@@ -899,6 +909,11 @@ function readTemplateSigners(
 			signersRaw.map((signer) => signer.step as number | string | undefined),
 			itemIndex,
 		);
+		validateDigitalCertificateSteps(
+			this,
+			signersRaw as Array<{ step?: number | string; verification_method?: unknown }>,
+			itemIndex,
+		);
 	}
 	return signersRaw;
 }
@@ -908,10 +923,7 @@ async function createFromTemplate(
 	itemIndex: number,
 ): Promise<IDataObject> {
 	const accountId = await getAccountId(this);
-	const templateId = this.getNodeParameter('templateId', itemIndex) as string;
-	if (!templateId) {
-		throw new NodeOperationError(this.getNode(), 'Template ID is required', { itemIndex });
-	}
+	const templateId = extractRequiredId(this, 'templateId', 'Template ID', itemIndex);
 	const additional = this.getNodeParameter('additionalFields', itemIndex, {}) as IDataObject;
 	const signersRaw = readTemplateSigners.call(this, itemIndex, true);
 
@@ -944,10 +956,7 @@ async function estimateCostFromTemplate(
 	itemIndex: number,
 ): Promise<IDataObject> {
 	const accountId = await getAccountId(this);
-	const templateId = this.getNodeParameter('templateId', itemIndex) as string;
-	if (!templateId) {
-		throw new NodeOperationError(this.getNode(), 'Template ID is required', { itemIndex });
-	}
+	const templateId = extractRequiredId(this, 'templateId', 'Template ID', itemIndex);
 	const signersRaw = readTemplateSigners.call(this, itemIndex, false);
 
 	return assinafyApiRequest<IDataObject>(this, {
@@ -958,10 +967,7 @@ async function estimateCostFromTemplate(
 }
 
 async function verifyDocument(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
-	const hash = (this.getNodeParameter('signatureHash', itemIndex) as string).trim();
-	if (!hash) {
-		throw new NodeOperationError(this.getNode(), 'Signature Hash is required', { itemIndex });
-	}
+	const hash = extractRequiredId(this, 'signatureHash', 'Signature Hash', itemIndex);
 	// Public endpoint — no API key required (consistent with getPublicInfo/sendPublicToken).
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'GET',
@@ -971,10 +977,7 @@ async function verifyDocument(this: IExecuteFunctions, itemIndex: number): Promi
 }
 
 async function getPublicInfo(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
-	const id = (this.getNodeParameter('publicDocumentId', itemIndex) as string).trim();
-	if (!id) {
-		throw new NodeOperationError(this.getNode(), 'Document ID is required', { itemIndex });
-	}
+	const id = extractRequiredId(this, 'publicDocumentId', 'Document ID', itemIndex);
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'GET',
 		path: `/public/documents/${id}`,
@@ -983,14 +986,14 @@ async function getPublicInfo(this: IExecuteFunctions, itemIndex: number): Promis
 }
 
 async function sendPublicToken(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
-	const id = (this.getNodeParameter('publicDocumentId', itemIndex) as string).trim();
+	const id = extractRequiredId(this, 'publicDocumentId', 'Document ID', itemIndex);
 	const recipient = (this.getNodeParameter('recipient', itemIndex) as string).trim();
 	const channel = this.getNodeParameter('channel', itemIndex, 'email') as string;
-	if (!id) {
-		throw new NodeOperationError(this.getNode(), 'Document ID is required', { itemIndex });
-	}
 	if (!recipient) {
 		throw new NodeOperationError(this.getNode(), 'Recipient is required', { itemIndex });
+	}
+	if (channel === 'email' && !assertEmail(recipient)) {
+		throw new NodeOperationError(this.getNode(), 'Invalid recipient email address', { itemIndex });
 	}
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'PUT',
@@ -1005,7 +1008,7 @@ async function listStatuses(this: IExecuteFunctions): Promise<IDataObject[]> {
 		method: 'GET',
 		path: '/documents/statuses',
 	});
-	return Array.isArray(response) ? response : [];
+	return asArray<IDataObject>(response);
 }
 
 async function listDocumentTags(
@@ -1018,7 +1021,7 @@ async function listDocumentTags(
 		method: 'GET',
 		path: `/accounts/${accountId}/documents/${documentId}/tags`,
 	});
-	const tags = Array.isArray(response) ? response : [];
+	const tags = asArray<IDataObject>(response);
 	return tags.map((tag) => ({ json: tag }));
 }
 

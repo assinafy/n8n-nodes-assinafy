@@ -2,7 +2,7 @@
 
 Full request/response reference for every operation exposed by the **Assinafy** action node, including signer-side and authentication flows. Account-scoped paths use the **Account ID** from the credential (shown as `{accountId}`). List operations paginate via the `X-Pagination-*` response headers when **Return All** is enabled.
 
-> Contract baseline: [Assinafy v1 API docs](https://api.assinafy.com.br/v1/docs) and `GET /v1/docs/openapi.json`, captured 2026-08-08. The OpenAPI 3.0 document contains 66 paths and 87 operations; SHA-256: `c8cab76d2f658021ee2119bcbddbfe5db51f9024493fdc34ceeb1a520f3c9cc9`.
+Reference: [Assinafy v1 API documentation](https://api.assinafy.com.br/v1/docs) and [OpenAPI JSON](https://api.assinafy.com.br/v1/docs/openapi.json).
 
 ## How to read payloads
 
@@ -16,7 +16,36 @@ Unless a section says otherwise, the HTTP response is a JSON envelope:
 }
 ```
 
-The node unwraps `data`, so each **Example response** below is the n8n JSON output, not the outer transport envelope. A list payload is emitted as one n8n item per resource unless the section documents a synthesized wrapper. Empty mutation responses may be converted to an explicit confirmation such as `{ "deleted": true }`.
+The node unwraps `data`, so each **Example response** below is the n8n JSON output, not the outer transport envelope. List operations emit one n8n item per resource unless the section documents a synthesized wrapper. A mutation that returns an array emits one item shaped as `{ "data": [...] }`. Empty delete responses may be converted to an explicit confirmation such as `{ "deleted": true }`.
+
+Errors keep the API's standard shape and are surfaced by n8n as node errors:
+
+```json
+{
+	"status": 400,
+	"message": "Bad request.",
+	"data": null
+}
+```
+
+The API error families are validation, unauthorized, not found, and server errors. Account deletion can additionally return the complete blocker payload below. `PendingDocuments` appears only together with `ActivePaidSubscription`, never alone.
+
+```json
+{
+	"status": 400,
+	"message": "Cannot delete while restrictions are active.",
+	"data": null,
+	"restrictions": [
+		{
+			"code": "ActivePaidSubscription",
+			"message": "Account has an active paid subscription.",
+			"account_ids": ["<workspace-id>"]
+		}
+	]
+}
+```
+
+The shared transport retries safe `GET` requests after HTTP 429 at most three times, honoring `Retry-After` when present and otherwise using bounded exponential backoff. Mutation requests are never replayed automatically.
 
 Binary endpoints do not use the JSON envelope in the node output. Their bytes are written to the configured n8n binary property and the JSON side contains only file metadata. Multipart endpoints describe their form parts rather than pretending they have a JSON request body.
 
@@ -24,41 +53,73 @@ The action-node credential is optional for public routes, signer-access-code flo
 
 Examples use synthetic placeholders only:
 
-- `<account-id>`, `<workspace-id>`, `<document-id>`, `<signer-id>`, and similar values are identifiers.
+- `<account-id>`, `<workspace-id>`, `<document-id>`, `<signer-id>`, `<government-id>`, `<telephone>`, and similar values are identifiers.
 - `<signer-access-code>`, `<verification-code>`, `<access-token>`, `<api-key>`, password, reset-token, and provider-token placeholders represent secrets that must never be logged or committed.
 - All example email addresses use the reserved `example.com` domain.
 
 ## Shared schema catalog
 
-Sections below show complete operation-specific bodies and representative full resource responses. Repeated nested objects use these common shapes:
+Sections below show each operation-specific request and a representative response. To avoid repeating large objects in every example, this catalog is the complete reusable success-payload reference. `T[]` means an array, `/ null` marks a nullable value, and all timestamps are ISO 8601 strings unless noted. The node preserves forward-compatible fields added by the API.
 
-- **Document:** `resource`, `id`, `account_id`, `template_id`, `name`, `status`, `artifacts`, `is_closed`, `signing_url`, `decline_reason`, `declined_by`, `tags[]`, `assignment`, `pages[]`, `created_at`, `updated_at`.
-- **Signer:** `resource` when supplied by the route, `id`, `full_name`, `email`, `whatsapp_phone_number`, `has_accepted_terms`, plus operation-specific verification/notification fields.
-- **Assignment:** `resource`, `id`, `sender_email`, `method`, `expires_at`, `message`, `signers[]`, `copy_receivers[]`, `items[]`, `summary`, and `signing_urls[]`.
-- **Workspace/account:** `id`, `name`, `notification_sender_type` when returned, `primary_color`, `secondary_color`, and `created_at`.
-- **Statistics row:** `period`, `documents_uploaded`, `documents_sent`, `signature_requests`, `signature_requests_email`, `signature_requests_whatsapp`, `signature_requests_viewed`, `signature_requests_completed`, and `documents_certified`.
+| Schema                      | Complete unwrapped payload                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ApiKey`                    | `api_key:string / null`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `AuthUser`                  | `id:string`, `name:string`, `email:string`, `telephone:string / null`, `government_id:string / null`, `is_email_verified:boolean`, `has_accepted_terms:boolean`, `created_at:string`, `to_be_deleted_at:string / null`                                                                                                                                                                                                                                                                                                                                                                         |
+| `AuthAccount`               | `id:string`, `name:string`, `roles:string[]`, `is_delete_allowed:boolean`, `created_at:string`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `AuthSession`               | `access_token:string`, `user:AuthUser`, `accounts:AuthAccount[]`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `Account`                   | `resource:string`, `id:string`, `name:string`, `primary_color:string / null`, `secondary_color:string / null`, `notification_sender_type:string`, `roles:string[]`, `is_delete_allowed:boolean`, `created_at:string`                                                                                                                                                                                                                                                                                                                                                                           |
+| `AccountTheme`              | `account_name:string`, `primary_color:string`, `secondary_color:string / null`, `logo:string / null`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `NotificationPreferences`   | Nine booleans: `DocumentCompleted`, `SignerDeclined`, `DocumentCancelled`, `DocumentAboutToExpire`, `DocumentExpired`, `DocumentExpirationReset`, `DocumentProcessingFailed`, `TemplateProcessingFailed`, `SignerWhatsappFailed`                                                                                                                                                                                                                                                                                                                                                               |
+| `Signer`                    | `resource:string`, `id:string`, `full_name:string`, `email:string / null`, `whatsapp_phone_number:string / null`, `has_accepted_terms:boolean`                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `SignerSelf`                | All `Signer` fields plus `has_signature:boolean`, `has_initial:boolean`, `is_signature_reusable:boolean`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `AssignmentSigner`          | All `Signer` fields plus `verification_method:string / null`, `notification_methods:string[] / null`, `step:integer / null`, `notified:boolean / null`, `completed:boolean / null`, `notification_history:NotificationHistoryEntry[] / null`                                                                                                                                                                                                                                                                                                                                                   |
+| `NotificationHistoryEntry`  | `event:string`, `status:string`, `error_code:string / null`, `error_message:string / null`, `sent_at:string / null`, `failed_at:string / null`                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `DocumentPage`              | `id:string`, `number:integer`, `height:integer`, `width:integer`, `download_url:string`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `DisplaySettings`           | `left:number`, `top:number`, `width:number`, `height:number`, `fontFamily:string`, `fontSize:number`, `backgroundColor:string`                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `AssignmentItem`            | `id:string`, `page:DocumentPage / null`, `signer:object`, `field:object / null`, `display_settings:DisplaySettings or scalar value`, `value:any / null`, `completed:boolean`                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `AssignmentSummary`         | `signer_count:integer`, `completed_count:integer`, `signers:object[]`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `SigningUrl`                | `signer_id:string`, `url:string`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `Assignment`                | `resource:string`, `id:string`, `sender_email:string`, `method:string`, `expires_at:string / null`, `message:string / null`, `signers:AssignmentSigner[]`, `copy_receivers:object[]`, `items:AssignmentItem[]`, `summary:AssignmentSummary`, `signing_urls:SigningUrl[]`                                                                                                                                                                                                                                                                                                                       |
+| `Document`                  | `resource:string`, `id:string`, `account_id:string`, `template_id:string / null`, `name:string`, `status:string`, `artifacts:object`, `is_closed:boolean`, `signing_url:string`, `decline_reason:string / null`, `declined_by:Signer / null`, `tags:{id,name}[]`, `assignment:Assignment / null`, `pages:DocumentPage[]`, `created_at:string`, `updated_at:string`                                                                                                                                                                                                                             |
+| `DocumentStatus`            | `code:string`, `deletable:boolean`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `DocumentVerification`      | `hash:string`, `id:string / null`, `status:string / null`, `page_count:string / null`, `signer_count:string / null`, `completed_count:integer / null`, `completed_at:string / null`, `verified_at:string`, `is_valid:boolean`, `message:string`                                                                                                                                                                                                                                                                                                                                                |
+| `DocumentActivity`          | `id:integer`, `event:string`, `message:string`, `payload:object / null`, `origin:{ip,user-agent} / null`, `created_at:string`                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `DocumentStatsRow`          | `period:string`, `documents_uploaded:integer`, `documents_sent:integer`, `signature_requests:integer`, `signature_requests_notification_email:integer`, `signature_requests_notification_whatsapp:integer`, `signature_requests_notification_bypass:integer`, `signature_requests_verification_email:integer`, `signature_requests_verification_whatsapp:integer`, `signature_requests_verification_bypass:integer`, `signature_requests_verification_digital_certificate:integer`, `signature_requests_viewed:integer`, `signature_requests_completed:integer`, `documents_certified:integer` |
+| `CostEstimateBreakdownItem` | `code:string`, `name:string`, `cost:number`, `quantity:integer`, `unit_cost:number`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `CostEstimate`              | `documents:integer`, `credits:number`, `needs_extra_document:boolean`, `extra_document_cost:number`, `total_credits:number`, `breakdown:CostEstimateBreakdownItem[]`, `document_balance:number`, `credit_balance:number`, `has_sufficient_resources:boolean`, `blocking_reason:string / null`, `message:string / null`                                                                                                                                                                                                                                                                         |
+| `Field`                     | `resource:string`, `id:string`, `name:string`, `type:string`, `regex:string / null`, `is_pre_defined:boolean`, `is_active:boolean`, `is_required:boolean`, `is_standard:boolean`, `is_read_only:boolean`, `is_visible:boolean`                                                                                                                                                                                                                                                                                                                                                                 |
+| `FieldType`                 | `type:string`, `name:string`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `FieldValidation`           | `type:string`, `success:boolean`, `error_message:string`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `FieldValidationResult`     | `field_id:string`, `type:string`, `success:boolean`, `error_message:string`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `Tag`                       | `resource:string`, `id:string`, `name:string`, `color:string / null`, `created_at:string`, `updated_at:string`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `TemplateFieldPlacement`    | `id:string`, `field_id:string`, `role_id:string`, `label:string`, `display_settings:object`, `created_at:string`, `updated_at:string`                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `TemplatePage`              | `id:string`, `number:integer`, `height:integer`, `width:integer`, `download_url:string`, `fields:TemplateFieldPlacement[]`                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `TemplateRole`              | `id:string`, `name:string`, `assignment_type:string`, `created_at:string`, `updated_at:string`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `Template`                  | `resource:string`, `id:string`, `name:string`, `document_name:string / null`, `message:string / null`, `status:string`, `pages:TemplatePage[]`, `roles:TemplateRole[]`, `tags:{id,name}[]`, `default_document_tags:{id,name}[]`, `created_at:string`, `updated_at:string`                                                                                                                                                                                                                                                                                                                      |
+| `WebhookSubscription`       | `events:string[]`, `is_active:boolean`, `url:string / null`, `email:string / null`, `updated_at:string / null`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `WebhookDispatch`           | `resource:string`, `id:string`, `event:string`, `activity_id:integer`, `endpoint:string / null`, `payload:object / null`, `delivered:boolean`, `http_status:integer / null`, `response_body:string / null`, `error:string / null`, `created_at:string`, `updated_at:string`                                                                                                                                                                                                                                                                                                                    |
+| `WebhookEventType`          | `id:string`, `description:string`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `WhatsappNotification`      | `sent_at:integer` (Unix seconds), `header:string`, `body:string`, `buttons:{text}[]`, `phone_number:string`, `signer_id:string`                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
-The API may add response fields without a breaking contract change. The node deliberately preserves unknown fields.
-
-## Verification status and known contract divergences
-
-The source and request-shape tests cover every published OpenAPI operation. Sandbox checks were also performed where they were safe and independently observable, but this document does **not** claim that every operation completed successfully end to end. Password/reset-token flows require user credentials or inbox access; successful signer-side signing requires a real signer access code; destructive account/key operations are not run against a primary account.
-
-Known 2026-08-08 differences are preserved either because changing them would break working sandbox behavior or because the published contract is ahead of the tested sandbox deployment:
-
-| Area                    | Published OpenAPI                             | Observed sandbox / node behavior                                                                                                                                             |
-| ----------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Assignment List         | Documents only `page` and `per-page`          | Sandbox requires camel-case `accountId`; the node supplies it from the credential.                                                                                           |
-| Public Send Token       | Optional `{ "email": "..." }`                 | Sandbox requires `{ "recipient": "...", "channel": "email" \| "whatsapp" }`; the recipient must already be assigned to the document.                                         |
-| Document tags           | Describes tag IDs                             | Sandbox accepts tag **names** and creates missing tags; Replace/Append therefore send names.                                                                                 |
-| Template Get            | Route absent from OpenAPI snapshot            | `GET /accounts/{accountId}/templates/{templateId}` returned 200 in sandbox and remains available as a live-compatibility operation.                                          |
-| Notification Sender     | Account Create/Update accept `User`/`Account` | Sandbox returned 400 (`notification_sender_type` is not allowed). The node retains the published field for deployments where it is available; omit it on the tested sandbox. |
-| Account/User Statistics | Both routes published                         | The tested sandbox deployment returned route-level 404 for both routes. The node exposes the contract while deployments catch up.                                            |
-| Signature upload        | OpenAPI documents PNG                         | Sandbox compatibility also accepts JPEG; the node allows non-empty `image/png` and `image/jpeg` and documents JPEG as legacy compatibility.                                  |
-| Confirm signer data     | `full_name`, `email`, `government_id`         | The node sends those fields and retains `whatsapp_phone_number` / `has_accepted_terms` as labelled legacy runtime-compatible fields.                                         |
-| Webhook event catalog   | 18 events, including three template events    | The tested sandbox `event-types` route returned 15 events. The node retains all published values; account deployments may differ.                                            |
+## Cross-operation behavior
 
 Signer terms acceptance and OTP verification send `signer-access-code` in the query string. The OTP itself remains in the JSON body as `verification-code`. Field validation always retains the configured account authentication and can additionally send `signer-access-code`; it does not silently drop the API credential.
+
+### Verification, notification, and digital-certificate rules
+
+Assignment and template signer rows use `verification_method` (`Email`, `Whatsapp`, or `DigitalCertificate`) and `notification_methods` (`Email` or `Whatsapp`). If both are omitted, both default to `Email`. Assignment Create accepts any combination of Email and WhatsApp notification channels. Create From Template accepts exactly one notification channel per signer and infers the matching verification or notification method when only one is supplied. Cost-estimate operations can price either or both notification channels.
+
+| Verification         | Requirements                                                                                                                  | Per-signer signature cost |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------- |
+| `Email`              | Signer has an email address.                                                                                                  | 0 credits                 |
+| `Whatsapp`           | Signer has `whatsapp_phone_number`; paid subscription.                                                                        | 0 credits                 |
+| `DigitalCertificate` | Digital Certificate feature (Standard/Pro), signer CPF/CNPJ in `government_id`, and no other signer in the same signing step. | 2 credits                 |
+
+Email notifications cost 0 credits. WhatsApp notifications require a paid subscription and cost 0.45 credits per notification.
+
+For `DigitalCertificate`, a CPF requires that person's e-CPF or an e-CNPJ naming that person as legal representative. A CNPJ requires an e-CNPJ for that company from any representative. Signing is completed through Assinafy's ICP-Brasil A1/A3 browser flow, not the ordinary signer **Sign** operation, and produces the optional `pades` artifact. The cost-estimate response reports the signature charge with breakdown code `SignatureDigitalCertificate`; an extra document costs 1 credit when the plan allowance is exhausted.
+
+Create From Template validates its single-notification-channel rule before sending. Assignment Create forwards every selected notification channel.
 
 ## Resources
 
@@ -87,17 +148,14 @@ Uploads a new PDF from an incoming binary item and creates a document in the wor
 
 - Binary Property — string — required — name of the binary property holding the PDF (default `data`).
 - File Name — string — optional — name sent to Assinafy; defaults to the binary file name, or `document.pdf`. Must end in `.pdf`.
-- Additional Fields > Metadata (JSON) — json — optional — arbitrary metadata object sent alongside the file.
 
-The node enforces PDF-only, non-empty, and the 25MB upload limit before sending. It checks the PDF file signature as well as any specific declared MIME type; a missing or generic `application/octet-stream` MIME type is accepted only when the bytes identify an allowed PDF. Sent as `multipart/form-data` with `file` (the PDF blob) and `name`. Note: `metadata` is appended to the form but is not persisted/returned by the API (silent no-op).
+The node enforces PDF-only, non-empty, and the 25MB upload limit before sending. The API additionally limits a document to 2,000 pages. The node checks the PDF file signature as well as any specific declared MIME type; a missing or generic `application/octet-stream` MIME type is accepted only when the bytes identify an allowed PDF. The request contains one `file` part whose multipart filename is the configured File Name.
 
 **Example request:**
 
 ```
 multipart/form-data:
   file: <binary PDF>   (filename = File Name)
-  name: contract.pdf
-  metadata: {"clientRef":"ABC-123"}   (optional; silently dropped by the API)
 ```
 
 **Example response:**
@@ -199,6 +257,8 @@ Fetches a single document by ID, including expanded `assignment` and `pages`.
 
 - Document ID — resourceLocator — required — the document to fetch.
 
+`decline_reason` is returned only when the credential belongs to the document creator.
+
 **Example response:**
 
 ```json
@@ -257,7 +317,7 @@ Changes a document's display name.
 - Document ID — resourceLocator — required — the document to rename.
 - New Name — string — required — the new display name.
 
-> The document must have finished processing (status `metadata_ready` or later) and not yet be in signing. If you rename immediately after upload, run **Wait Until Ready** first.
+> Rename is allowed only while status is `uploaded` or `metadata_ready` and before an assignment exists. The API accepts at most 255 characters, removes diacritics, and replaces unsupported characters with dashes. If you rename immediately after upload, run **Wait Until Ready** first.
 
 **Example request:**
 
@@ -292,6 +352,8 @@ Deletes a document by ID. The SDK returns a synthesized confirmation rather than
 
 **Endpoint:** `DELETE /documents/{documentId}`
 
+**Request body:** none.
+
 **Node parameters:**
 
 - Document ID — resourceLocator — required — the document to delete.
@@ -316,6 +378,15 @@ Searches workspace documents via the dedicated lightweight search endpoint. Unli
 - Limit — number — max records when Return All is off (default 50).
 - Search Filters > Search — string — partial match on the document name.
 - Search Filters > Status — string — filter by status code (e.g. `metadata_ready`, `pending_signature`).
+
+**Example request (query):**
+
+```json
+{
+	"search": "contract",
+	"status": "metadata_ready"
+}
+```
 
 **Example response (one item per document):**
 
@@ -344,17 +415,17 @@ Searches workspace documents via the dedicated lightweight search endpoint. Unli
 
 #### Download a document artifact (PDF or ZIP)
 
-Downloads a document artifact (original, certificated/signed PDF, certificate page, or ZIP bundle) into a binary property.
+Downloads a document artifact (`original`, certificated/signed PDF, certificate page, PAdES PDF, or ZIP bundle) into a binary property.
 
 **Endpoint:** `GET /documents/{documentId}/download/{artifact}`
 
 **Node parameters:**
 
 - Document ID — resourceLocator — required — the document.
-- Artifact — options — required — one of `original`, `certificated`, `certificate-page`, `bundle` (default `certificated`).
+- Artifact — options — required — one of `original`, `certificated`, `certificate-page`, `pades`, or `bundle` (default `certificated`). `pades` contains the signers' ICP-Brasil signatures plus the platform certification box and is available only when the document had digital-certificate signers.
 - Put Output In Field — string — optional — output binary property name (default `data`).
 
-**Example response:** Output is a binary item (no JSON payload other than metadata). The binary is the raw `application/pdf` file (or `application/zip` when Artifact is `bundle`), with a suggested filename of `{documentId}-{artifact}.pdf` (or `{documentId}-bundle.zip`). The mime type is taken from the response `Content-Type` header. Accompanying JSON: `{ "documentId", "fileName", "mimeType", "size" }`.
+**Example response:** Output is a binary item (no JSON payload other than metadata). The binary is the raw `application/pdf` file (or `application/zip` when Artifact is `bundle`), with a suggested filename of `{documentId}-{artifact}.pdf` (or `{documentId}-bundle.zip`). The mime type is taken from the response `Content-Type` header. A bundle contains `original`, `certificated`, and `certificate-page`, plus `pades` when present. Accompanying JSON: `{ "documentId", "fileName", "mimeType", "size" }`.
 
 #### Download the document thumbnail
 
@@ -427,6 +498,7 @@ Convenience wrapper: it fetches the document and synthesizes a signing-progress 
 {
 	"documentId": "1016d5795af62e28c2161efcb7a6",
 	"status": "pending_signature",
+	"available": true,
 	"signed": 1,
 	"total": 2,
 	"pending": 1,
@@ -434,6 +506,8 @@ Convenience wrapper: it fetches the document and synthesizes a signing-progress 
 	"isFullySigned": false
 }
 ```
+
+If the document has no assignment object, `available` is `false`; `signed`, `total`, `pending`, and `percentage` are `null`. `isFullySigned` remains `true` when the document status is `certificated`.
 
 #### Poll the document until it reaches a ready status
 
@@ -457,20 +531,20 @@ Creates a document from a template, mapping one signer entry per template role.
 
 **Node parameters:**
 
-- Template ID — string — required — the template to use.
+- Template ID — resourceLocator — required — the template to use, selected from a searchable list or entered by ID.
 - Signers — fixedCollection (multiple) — required — one entry per template role, each with:
   - Role ID — string — required — template role ID.
   - Signer ID — string — required for Create — existing signer ID. The shared UI also serves Estimate Cost, where it may be omitted; Create validates every row and fails before sending if an ID is missing.
-  - Verification Method — options — optional — `Email` or `Whatsapp` (default `Email`).
+  - Verification Method — options — optional — `Email`, `Whatsapp`, or `DigitalCertificate` (default `Email`).
   - Notification Methods — multiOptions — optional — choose one of `Email` or `Whatsapp` (default `Email`). The Create contract permits only one method per signer; selecting both fails before a request is sent.
   - Step — number — optional — signing order; 0 = notify all at once, otherwise a contiguous sequence starting at 1.
 - Additional Fields > Document Name — string — optional — overrides the template's default name.
 - Additional Fields > Editor Fields (JSON) — json — optional — array of `{ "field_id", "value" }`.
 - Additional Fields > Expires At — dateTime — optional — ISO 8601 assignment expiration.
 - Additional Fields > Message — string — optional — message for the signing invitation.
-- Additional Fields > Tag Names — string (multiple) — optional — tag names to attach (missing tags auto-created).
+- Additional Fields > Tag Names — string (multiple) — optional — tag names to attach (missing tags auto-created). Each value is kept as one tag even when it contains a comma; a scalar comma-delimited expression is split.
 
-The node validates signing steps client-side. `step` is only sent when > 0; `verification_method` and `notification_methods` are only sent when present.
+The node validates signing steps client-side. `step` is only sent when > 0; `verification_method` and `notification_methods` are only sent when present. A `DigitalCertificate` signer must meet the [shared digital-certificate requirements](#verification-notification-and-digital-certificate-rules), including being alone in its signing step.
 
 **Example request:**
 
@@ -550,10 +624,10 @@ Estimates the credit/document cost of a template-based document without creating
 
 **Node parameters:**
 
-- Template ID — string — required — the template to use.
-- Signers — fixedCollection (multiple) — required — same row shape as Create From Template. Only `role_id`, `verification_method`, and `notification_methods` matter for cost; the estimate may include one or both notification methods. The node accepts the shared UI's `id` and `step` values but deliberately omits them from the request.
+- Template ID — resourceLocator — required — the template to use, selected from a searchable list or entered by ID.
+- Signers — fixedCollection (multiple) — required — same row shape as Create From Template. Only `role_id`, `verification_method` (`Email`, `Whatsapp`, or `DigitalCertificate`), and `notification_methods` (`Email` or `Whatsapp`) matter for cost; the estimate may include one or both notification methods. The node accepts the shared UI's `id` and `step` values but deliberately omits them from the request.
 
-The node requires at least one row and a `role_id` for each row. It sends only `signers`, strips create-only signer IDs and signing steps, and does not validate those ignored create-only values or send additional document fields.
+The node requires at least one row and a `role_id` for each row. It sends only `signers`, strips create-only signer IDs and signing steps, and does not validate those ignored create-only values or send additional document fields. A `DigitalCertificate` estimate adds 2 credits per signer, plus 0 credits for Email or 0.45 credits for WhatsApp; the signature line uses breakdown code `SignatureDigitalCertificate`.
 
 **Example request:**
 
@@ -632,11 +706,12 @@ Fetches basic public document details (no authentication required). Public endpo
 
 - Document ID — string — required — public document ID.
 
+The node returns the unwrapped document information without reshaping it. The payload includes document identification and may include the complete [`Document`](#shared-schema-catalog) fields.
+
 **Example response:**
 
 ```json
 {
-	"resource": "document",
 	"id": "doc1",
 	"name": "1.pdf",
 	"page_count": "1",
@@ -648,7 +723,7 @@ Fetches basic public document details (no authentication required). Public endpo
 
 Sends a 6-digit signing access token to a recipient via email or WhatsApp. Public endpoint — no API key is sent.
 
-> Runtime compatibility: the OpenAPI request schema shows an optional `email` field, but the tested sandbox requires both `recipient` and `channel`, and the recipient must be assigned to the document. The node intentionally follows the working runtime request shown below.
+The recipient must already be assigned to the document. The node sends both `recipient` and `channel`.
 
 **Endpoint:** `PUT /public/documents/{publicDocumentId}/send-token`
 
@@ -697,7 +772,13 @@ Lists every supported document status code and whether a document in that status
 		{ "code": "uploaded", "deletable": false },
 		{ "code": "metadata_processing", "deletable": false },
 		{ "code": "metadata_ready", "deletable": true },
-		{ "code": "certificating", "deletable": false }
+		{ "code": "expired", "deletable": true },
+		{ "code": "certificating", "deletable": false },
+		{ "code": "certificated", "deletable": false },
+		{ "code": "rejected_by_signer", "deletable": true },
+		{ "code": "pending_signature", "deletable": true },
+		{ "code": "rejected_by_user", "deletable": true },
+		{ "code": "failed", "deletable": true }
 	]
 }
 ```
@@ -719,7 +800,7 @@ Lists the tags currently attached to a document. Returns one output item per tag
 	{
 		"id": "fa8c09f3e709a8a1c82d69b1454",
 		"name": "Contracts",
-		"color": "#FF0000",
+		"color": "ff0000",
 		"created_at": "2026-05-14T12:00:00Z",
 		"updated_at": "2026-05-14T12:00:00Z"
 	}
@@ -730,14 +811,12 @@ Lists the tags currently attached to a document. Returns one output item per tag
 
 Replaces the document's entire tag set with the provided list. Unknown tag names are auto-created; an empty list detaches all tags.
 
-> Runtime compatibility: OpenAPI describes identifiers for this body, while the tested sandbox accepts tag names and creates missing tags. The node preserves the working name-based shape.
-
 **Endpoint:** `PUT /accounts/{accountId}/documents/{documentId}/tags`
 
 **Node parameters:**
 
 - Document ID — resourceLocator — required — the document.
-- Tag Names — string (multiple) — optional — tag names to set; leaving this empty removes all tags.
+- Tag Names — string (multiple) — optional — tag names to set; leaving this empty removes all tags. Array entries are preserved whole, so `Example, Inc.` remains one tag; only a scalar comma-delimited expression is split.
 
 **Example request:**
 
@@ -748,24 +827,30 @@ Replaces the document's entire tag set with the provided list. Unknown tag names
 **Example response:**
 
 ```json
-[
-	{ "id": "fa8c...", "name": "2026-Q1", "color": null, "created_at": "...", "updated_at": "..." },
-	{ "id": "ab12...", "name": "Contracts", "color": null, "created_at": "...", "updated_at": "..." }
-]
+{
+	"data": [
+		{ "id": "fa8c...", "name": "2026-Q1", "color": null, "created_at": "...", "updated_at": "..." },
+		{
+			"id": "ab12...",
+			"name": "Contracts",
+			"color": null,
+			"created_at": "...",
+			"updated_at": "..."
+		}
+	]
+}
 ```
 
 #### Append tags to a document
 
 Attaches additional tags without removing existing ones (idempotent; unknown names auto-created). At least one tag name is required.
 
-> Runtime compatibility: as with Replace Tags, the node sends names because that is the sandbox-confirmed behavior despite the published ID-oriented schema.
-
 **Endpoint:** `POST /accounts/{accountId}/documents/{documentId}/tags`
 
 **Node parameters:**
 
 - Document ID — resourceLocator — required — the document.
-- Tag Names — string (multiple) — required — tag names to attach (at least one).
+- Tag Names — string (multiple) — required — tag names to attach (at least one). Array entries are preserved whole, including embedded commas; only a scalar comma-delimited expression is split.
 
 **Example request:**
 
@@ -776,22 +861,24 @@ Attaches additional tags without removing existing ones (idempotent; unknown nam
 **Example response:**
 
 ```json
-[
-	{
-		"id": "ab12c09f3e709a8a1c82d69b145",
-		"name": "Contracts",
-		"color": "#FF0000",
-		"created_at": "2026-05-14T12:00:00Z",
-		"updated_at": "2026-05-14T12:00:00Z"
-	},
-	{
-		"id": "fa8c09f3e709a8a1c82d69b1454",
-		"name": "Urgent",
-		"color": null,
-		"created_at": "2026-05-14T13:00:00Z",
-		"updated_at": "2026-05-14T13:00:00Z"
-	}
-]
+{
+	"data": [
+		{
+			"id": "ab12c09f3e709a8a1c82d69b145",
+			"name": "Contracts",
+			"color": "ff0000",
+			"created_at": "2026-05-14T12:00:00Z",
+			"updated_at": "2026-05-14T12:00:00Z"
+		},
+		{
+			"id": "fa8c09f3e709a8a1c82d69b1454",
+			"name": "Urgent",
+			"color": null,
+			"created_at": "2026-05-14T13:00:00Z",
+			"updated_at": "2026-05-14T13:00:00Z"
+		}
+	]
+}
 ```
 
 #### Detach one tag from a document
@@ -799,6 +886,8 @@ Attaches additional tags without removing existing ones (idempotent; unknown nam
 Detaches a single tag from a document (the tag itself is not deleted; detaching an unattached tag is a no-op). The SDK returns a synthesized confirmation.
 
 **Endpoint:** `DELETE /accounts/{accountId}/documents/{documentId}/tags/{tagId}`
+
+**Request body:** none.
 
 **Node parameters:**
 
@@ -821,27 +910,25 @@ Detaches a single tag from a document (the tag itself is not deleted; detaching 
 
 #### Create a signer
 
-Creates a signer in the account. By default, if an email is supplied and a signer with that email already exists, the existing signer is returned instead of creating a duplicate.
+Creates a signer in the account. Only `full_name` is required; email and WhatsApp are optional and can be added later before requesting a remote signature. By default, if an email is supplied and a signer with that email already exists, the existing signer is returned instead of creating a duplicate.
 
 **Endpoint:** `POST /accounts/{accountId}/signers`
 
 **Node parameters:**
 
 - Full Name — string — required — signer's full name.
-- Email — string — optional — signer email. Optional only when a WhatsApp number is given; at least one of Email or WhatsApp Phone Number is required.
+- Email — string — optional — signer email.
 - Additional Fields — collection — optional:
-  - CPF — string — Brazilian tax ID; non-digit characters are stripped before sending. Note: the API silently drops `cpf` (it is never persisted or returned).
-  - Metadata (JSON) — json — arbitrary metadata object.
   - Reuse If Exists — boolean (default `true`) — when true and an email is provided, looks up an existing signer with that email and returns it instead of creating a duplicate.
   - WhatsApp Phone Number — string — E.164 format (e.g. `+5548999990000`).
+
+Signer Create sends only `full_name`, `email`, and `whatsapp_phone_number`. CPF/CNPJ is set later through Signer Update as `government_id`; create-time `cpf` and `metadata` keys are not sent.
 
 **Example request:**
 
 ```json
 {
-	"full_name": "Example Signer",
-	"email": "john@example.com",
-	"whatsapp_phone_number": "+5548999990000"
+	"full_name": "Example Signer"
 }
 ```
 
@@ -852,7 +939,7 @@ Creates a signer in the account. By default, if an email is supplied and a signe
 	"resource": "signer",
 	"id": "1031...",
 	"full_name": "Example Signer",
-	"email": "signer@example.com",
+	"email": null,
 	"whatsapp_phone_number": null,
 	"has_accepted_terms": false
 }
@@ -860,7 +947,7 @@ Creates a signer in the account. By default, if an email is supplied and a signe
 
 #### List signers
 
-Lists signers in the account, with optional search/sort filters. Supports return-all or a capped limit and is paginated via `X-Pagination-*` headers.
+Lists signers in the account. Supports return-all or a capped limit and is paginated via `X-Pagination-*` headers. The node forwards `search` and an optional `sort` query value.
 
 **Endpoint:** `GET /accounts/{accountId}/signers`
 
@@ -876,10 +963,11 @@ Lists signers in the account, with optional search/sort filters. Supports return
 
 ```json
 {
-	"search": "bill",
-	"sort": "full_name"
+	"search": "example"
 }
 ```
+
+`sort` is forwarded only when configured.
 
 **Example response:**
 
@@ -927,7 +1015,7 @@ Retrieves a single signer by ID.
 
 #### Update a signer
 
-Updates a signer's information. At least one update field must be provided. Note: `email`/`whatsapp_phone_number` cannot be changed while the signer has verified, in-flight (non-certificated) documents using that channel — the API returns 400.
+Updates a signer's information. At least one update field must be provided. `email`/`whatsapp_phone_number` cannot be changed while the signer has verified, in-flight (non-certificated) documents using that channel — the API returns 400 naming the affected documents. Changing an unverified channel while requests are in flight rotates its access/verification codes, invalidating old links and OTPs; use **Resend Notification** to deliver the new code. Certificated documents do not block a change, and `full_name` can always be updated.
 
 **Endpoint:** `PUT /accounts/{accountId}/signers/{signerId}`
 
@@ -935,9 +1023,9 @@ Updates a signer's information. At least one update field must be provided. Note
 
 - Signer — resourceLocator — required — the signer to update.
 - Update Fields — collection — optional (at least one required):
-  - CPF — string — Brazilian tax ID; non-digit characters are stripped. Note: the API silently drops `cpf`.
   - Email — string — new email address.
   - Full Name — string (`full_name`) — new full name.
+  - Government ID — string (`government_id`) — signer's CPF or CNPJ; punctuation is stripped and digits are sent.
   - WhatsApp Phone Number — string (`whatsapp_phone_number`) — E.164 format.
 
 **Example request:**
@@ -946,6 +1034,7 @@ Updates a signer's information. At least one update field must be provided. Note
 {
 	"full_name": "Example Signer",
 	"email": "john.dove@example.com",
+	"government_id": "<cpf-or-cnpj>",
 	"whatsapp_phone_number": "+5548999990000"
 }
 ```
@@ -968,6 +1057,8 @@ Updates a signer's information. At least one update field must be provided. Note
 Deletes a signer. The SDK returns a synthesized confirmation object (the API itself returns an empty array).
 
 **Endpoint:** `DELETE /accounts/{accountId}/signers/{signerId}`
+
+**Request body:** none.
 
 **Node parameters:**
 
@@ -1052,7 +1143,8 @@ Signer-side flow: the signer obtains their own record using the per-signer acces
 	"whatsapp_phone_number": "+5548999990000",
 	"has_accepted_terms": false,
 	"has_signature": false,
-	"has_initial": false
+	"has_initial": false,
+	"is_signature_reusable": false
 }
 ```
 
@@ -1114,7 +1206,7 @@ Signer-side flow: verifies the OTP delivered to the signer (via email or WhatsAp
 
 #### Signer confirms identity data before signing
 
-Signer-side flow: confirms the signer's identity data for a specific document before signing. The published fields are full name, email, and government ID. The access code is sent as a query parameter and only selected fields are included in the JSON body. WhatsApp number and accepting terms remain as explicitly labelled legacy runtime-compatible fields; prefer **Accept Terms** for terms acceptance.
+Signer-side flow: confirms the signer's identity data for a specific document before signing. The node can send full name, email, government ID, WhatsApp number, and `has_accepted_terms: true`. Digital-certificate signers must accept terms before opening the sign page. The access code is sent as a query parameter and only selected fields are included in the JSON body. The dedicated **Accept Terms** operation is also available.
 
 **Endpoint:** `PUT /documents/{documentId}/signers/confirm-data`
 
@@ -1126,8 +1218,8 @@ Signer-side flow: confirms the signer's identity data for a specific document be
   - Full Name — string — optional — sent as `full_name`.
   - Email — string — optional — sent as `email`; must match an existing email if already set.
   - Government ID — string — optional — sent as `government_id`.
-  - WhatsApp Phone Number — string — optional legacy compatibility field — sent as `whatsapp_phone_number` in E.164 format.
-  - Accept Terms — boolean — optional legacy compatibility field — sends `has_accepted_terms: true` only when enabled.
+  - WhatsApp Phone Number — string — optional — sent as `whatsapp_phone_number` in E.164 format.
+  - Accept Terms — boolean — optional — sends `has_accepted_terms: true` only when enabled.
 
 **Example request:**
 
@@ -1137,7 +1229,7 @@ Signer-side flow: confirms the signer's identity data for a specific document be
 	"body": {
 		"full_name": "Example Signer",
 		"email": "signer@example.com",
-		"government_id": "00000000000"
+		"government_id": "<government-id>"
 	}
 }
 ```
@@ -1145,12 +1237,19 @@ Signer-side flow: confirms the signer's identity data for a specific document be
 **Example response:**
 
 ```json
-{}
+{
+	"resource": "signer",
+	"id": "<signer-id>",
+	"full_name": "Example Signer",
+	"email": "signer@example.com",
+	"whatsapp_phone_number": "+5548999990000",
+	"has_accepted_terms": false
+}
 ```
 
 #### Upload a signer signature or initial image
 
-Signer-side flow: uploads the signer's signature or initials image. The image binary is sent as the raw request body. OpenAPI documents PNG; the tested sandbox runtime also accepts JPEG, which the node preserves as legacy compatibility. Empty files and contradictory or unsupported specific MIME types are rejected. A missing or generic `application/octet-stream` MIME type is accepted only when PNG/JPEG magic bytes identify an allowed image. The access code, signature `type`, and optional `reuse` preference are query parameters.
+Signer-side flow: uploads the signer's signature or initials image as the raw request body. The node accepts a non-empty PNG or JPEG and rejects contradictory or unsupported MIME types. A missing or generic `application/octet-stream` MIME type is accepted only when PNG/JPEG magic bytes identify an allowed image. The access code, signature `type`, and optional `reuse` preference are query parameters.
 
 **Endpoint:** `POST /signature`
 
@@ -1174,7 +1273,7 @@ Signer-side flow: uploads the signer's signature or initials image. The image bi
 **Example response:**
 
 ```json
-[]
+{ "data": [] }
 ```
 
 #### Download a signer signature or initial image
@@ -1235,7 +1334,7 @@ Returns the assignments visible in the credential's default workspace.
 }
 ```
 
-`accountId` is supplied automatically from the credential. It is not listed on this operation in the 2026-08-08 OpenAPI snapshot, but the sandbox rejects the request without it. The transport adds `page` and `per-page` for pagination.
+`accountId` is supplied automatically from the credential. The transport adds `page` and `per-page` for pagination.
 
 **Example response:**
 
@@ -1269,14 +1368,16 @@ Creates a signature request on a document. Use `virtual` to collect signatures r
 - Method — options (`virtual` | `collect`) — required — assignment method (default `virtual`).
 - Signers — fixedCollection (multiple) — required — at least one signer; each must supply a Signer ID for create.
   - Signer ID — string — required (for create).
-  - Verification Method — options (`Email` | `Whatsapp`) — optional (default `Email`).
-  - Notification Methods — multiOptions (`Email` | `Whatsapp`) — optional (default `Email`).
+  - Verification Method — options (`Email` | `Whatsapp` | `DigitalCertificate`) — optional (default `Email`).
+  - Notification Methods — multiOptions (`Email` | `Whatsapp`) — optional (default `Email`); select either or both channels.
   - Step — number (≥0) — optional — signing order; set every signer to a contiguous sequence starting at 1, or leave all at 0 to notify everyone at once.
 - Additional Fields — collection — optional:
   - Message — string — optional — invite message.
   - Expires At — dateTime — optional — ISO8601 expiration.
   - Copy Receivers — string (multiple) — optional — signer IDs that receive a copy without signing.
-- Entries (JSON) — json — required only when Method is `collect` — array of `{ page_id, fields: [{ signer_id, field_id, display_settings }] }`.
+- Entries (JSON) — json — required only when Method is `collect` — array of `{ page_id, fields: [{ signer_id, field_id, display_settings }] }`. Each `display_settings` requires numeric `left`, `top`, `width`, `height`, and `fontSize`; `fontFamily` and `backgroundColor` are optional.
+
+The API infers omitted verification/notification methods as described in the [shared rules](#verification-notification-and-digital-certificate-rules). `DigitalCertificate` additionally requires the account feature, the signer's CPF/CNPJ in `government_id`, and a signing step with no other signer. It costs 2 credits per signer on top of Email (0) or WhatsApp (0.45) notification credits.
 
 **Example request:**
 
@@ -1303,6 +1404,8 @@ Creates a signature request on a document. Use `virtual` to collect signatures r
 					"display_settings": {
 						"top": 282,
 						"left": 69,
+						"width": 421,
+						"height": 45.86,
 						"fontSize": 18,
 						"fontFamily": "Arial",
 						"backgroundColor": "rgb(185, 218, 255)"
@@ -1359,6 +1462,8 @@ Creates a signature request on a document. Use `virtual` to collect signatures r
 			"display_settings": {
 				"top": 282,
 				"left": 69,
+				"width": 421,
+				"height": 45.86,
 				"fontSize": 18,
 				"fontFamily": "Arial",
 				"backgroundColor": "rgb(185, 218, 255)"
@@ -1390,14 +1495,18 @@ Estimates the credit/document cost of an assignment without creating it, returni
 
 - Document — resource locator — required.
 - Method — options (`virtual` | `collect`) — required (default `virtual`).
-- Signers — fixedCollection (multiple) — required (at least one). Signer ID may be left empty here to estimate without a specific signer; an empty signer defaults to Email.
+- Signers — fixedCollection (multiple) — required for `virtual`; optional for `collect`. Signer ID may be left empty here to estimate without a specific signer; an empty signer defaults to Email.
   - Signer ID — string — optional.
-  - Verification Method — options (`Email` | `Whatsapp`) — optional.
+  - Verification Method — options (`Email` | `Whatsapp` | `DigitalCertificate`) — optional.
   - Notification Methods — multiOptions (`Email` | `Whatsapp`) — optional.
   - Step — number — optional (ignored for cost).
 - Entries (JSON) — json — required only when Method is `collect`.
 
 > Note: The Additional Fields (message / expires_at / copy_receivers) are not sent on this operation — they only show for Create.
+
+Pricing is 1 credit for an extra document when the plan allowance is exhausted, 0 credits per Email notification, 0.45 credits per WhatsApp notification, and 2 credits per `DigitalCertificate` signer in addition to the notification. Digital-certificate charges appear under breakdown code `SignatureDigitalCertificate`.
+
+`blocking_reason` is `PendingPayment`, `InsufficientDocuments`, `InsufficientCredits`, or `null`.
 
 **Example request:**
 
@@ -1416,11 +1525,19 @@ Estimates the credit/document cost of an assignment without creating it, returni
 ```json
 {
 	"documents": 1,
-	"credits": 0,
+	"credits": 0.9,
 	"needs_extra_document": false,
 	"extra_document_cost": 0,
-	"total_credits": 0,
-	"breakdown": [],
+	"total_credits": 0.9,
+	"breakdown": [
+		{
+			"code": "NotificationWhatsapp",
+			"name": "Whatsapp Notification",
+			"cost": 0.9,
+			"quantity": 2,
+			"unit_cost": 0.45
+		}
+	],
 	"document_balance": 68,
 	"credit_balance": 0,
 	"has_sufficient_resources": true,
@@ -1447,25 +1564,38 @@ Estimates the credit cost of resending a notification to one signer without rese
 
 ```json
 {
-	"total": 0,
+	"documents": 0,
+	"credits": 0,
+	"needs_extra_document": false,
+	"extra_document_cost": 0,
+	"total_credits": 0,
 	"breakdown": [
-		{ "code": "NotificationEmailResend", "name": "Email Notification Resend", "cost": 0 }
+		{
+			"code": "NotificationEmailResend",
+			"name": "Email Notification Resend",
+			"cost": 0,
+			"quantity": 1,
+			"unit_cost": 0
+		}
 	],
+	"document_balance": 68,
 	"credit_balance": 0,
-	"has_sufficient_credits": true
+	"has_sufficient_resources": true,
+	"blocking_reason": null,
+	"message": null
 }
 ```
 
 #### Signer reads document data for the signing flow
 
-Signer-side read: retrieves the document and embedded assignment details using only a per-signer access code (no account auth). The SDK calls this with `skipAuth`.
+Signer-side read: retrieves the document and embedded assignment details using only a per-signer access code (no account auth). The SDK calls this with `skipAuth`. For `DigitalCertificate`, first confirm the signer data and accept terms through **Confirm Data** with `has_accepted_terms: true`, or call **Accept Terms** separately; otherwise this route returns 400. Its own `has_accepted_terms` query parameter is processed too late to open that DC gate.
 
 **Endpoint:** `GET /sign`
 
 **Node parameters:**
 
 - Signer Access Code — string (password) — required — per-signer code from the email/WhatsApp link.
-- Accept Terms While Loading — boolean — optional (default `false`) — when enabled, adds `has_accepted_terms=true`; when disabled the parameter is omitted so the signer state is not changed.
+- Accept Terms While Loading — boolean — optional (default `false`) — when enabled, adds `has_accepted_terms=true`; when disabled the parameter is omitted so the signer state is not changed. This does not satisfy the precondition for a `DigitalCertificate` signer; accept terms before this request.
 
 **Example request (query):**
 
@@ -1483,10 +1613,10 @@ Signer-side read: retrieves the document and embedded assignment details using o
 	"id": "615213edf8a58f132e1b2384",
 	"account_id": "<account-id>",
 	"name": "sample-contract-one-page.pdf",
-	"status": "pending",
+	"status": "pending_signature",
 	"assignment": {
 		"id": "615606ef81d199996981dbce",
-		"expiration": "2021-09-30",
+		"expires_at": "2026-09-30T23:59:59Z",
 		"method": "collect",
 		"signers": [
 			{
@@ -1550,8 +1680,8 @@ Signer-side read: retrieves the document and embedded assignment details using o
 			"download_url": "https://api.assinafy.com.br/v1/documents/615213edf8a58f132e1b2384/pages/615213ed81b071f4293b2fc2/download"
 		}
 	],
-	"created_at": 1632769005,
-	"updated_at": 1632769005,
+	"created_at": "2026-08-20T12:00:00Z",
+	"updated_at": "2026-08-20T12:00:00Z",
 	"current_signer": {
 		"id": "<signer-id>",
 		"full_name": "Example Signer",
@@ -1593,7 +1723,7 @@ Lists the WhatsApp notification messages sent for an assignment, including the r
 }
 ```
 
-> Note: In the sandbox this list comes back empty (`{ "notifications": [] }`) when no WhatsApp notifications have been sent.
+When no WhatsApp notifications have been sent, the node returns `{ "notifications": [] }`.
 
 #### Resend the signing notification to a signer
 
@@ -1619,7 +1749,7 @@ Resends the signing-request notification (link) to one signer, using the notific
 }
 ```
 
-> Note: WhatsApp resends cost 0.2 credits (Email is free). Resending to a signer in a not-yet-activated step is rejected with a `400`.
+> Note: Notification pricing can change, so call **Estimate Resend Cost** immediately before resending instead of hard-coding a credit value. Resending to a signer in a not-yet-activated step is rejected with a `400`.
 
 #### Update the expiration date of an assignment
 
@@ -1737,7 +1867,7 @@ Signer-side sign: submits values for the signer's collect-method input items, au
 {}
 ```
 
-> Note: For virtual assignments the signer must first confirm their data (`PUT /documents/{documentId}/signers/confirm-data`) or signing fails with `400` ("Signer data must be confirmed before signing."). May also return `409` while the document is not yet ready to sign.
+> Note: For virtual assignments the signer must first confirm their data (`PUT /documents/{documentId}/signers/confirm-data`) or signing fails with `400` ("Signer data must be confirmed before signing."). May also return `409` while the document is not yet ready to sign. A `DigitalCertificate` signer cannot use this operation and must finish through Assinafy's ICP-Brasil browser signing flow.
 
 #### Signer declines to sign the document
 
@@ -1764,7 +1894,7 @@ Signer-side decline (reject): the signer declines the assignment with a reason, 
 **Example response:**
 
 ```json
-[]
+{ "data": [] }
 ```
 
 > Note: A working **cancel** operation does not exist in this API (all candidate paths return 404), so it is intentionally not exposed by this node.
@@ -1775,7 +1905,7 @@ Signer-side decline (reject): the signer declines the assignment with a reason, 
 
 #### List workspace templates
 
-Lists templates in the workspace, with optional filtering by name, status, and tags. Supports pagination (return all or limited) via the shared list handler.
+Lists templates in the workspace and supports pagination (return all or limited) via the shared list handler. The node exposes `search`, `status`, `tags`, and `sort` query controls.
 
 **Endpoint:** `GET /accounts/{accountId}/templates`
 
@@ -1786,21 +1916,20 @@ Lists templates in the workspace, with optional filtering by name, status, and t
 - Filters — collection — optional, containing:
   - Search — string — optional — partial match on the template name.
   - Status — options — optional — one of `failed`, `processing`, `ready`, `uploaded`, `uploading`, or Any (empty = no filter).
-  - Tag IDs — string (multiple values) — optional — tag IDs joined into a comma-separated `tags` query param; Assinafy returns only templates that have all listed tags (AND semantics).
-  - Sort — string — optional — sort by `name` or `updated_at`.
+  - Tag IDs — string (multiple values) — optional — tag IDs joined into a comma-separated `tags` query param.
+  - Sort — string — optional — for example `name` or `updated_at`.
 
 **Example request:**
 
 ```json
 {
 	"query": {
-		"search": "contract",
-		"status": "ready",
-		"tags": "fa8c09f3e709a8a1c82d69b1454,fa8c09f3e709a8a1c82d69b1999",
-		"sort": "updated_at"
+		"search": "contract"
 	}
 }
 ```
+
+When selected, `status`, comma-joined `tags`, and `sort` are forwarded as query parameters.
 
 **Example response:**
 
@@ -1848,7 +1977,7 @@ Retrieves a single template by ID, including its pages, roles, field placements,
 
 **Node parameters:**
 
-- Template ID — string — required — ID of the template to retrieve.
+- Template ID — resourceLocator — required — template selected from a searchable list or entered by ID.
 
 **Example response:**
 
@@ -1910,7 +2039,7 @@ Creates a new workspace-scoped tag that can later be attached to documents and t
 
 **Node parameters:**
 
-- Name — string — required — Tag display name, max 64 characters; Assinafy trims and collapses whitespace. Returns 409 if a tag with the same name (case-insensitive) already exists.
+- Name — string — required — Tag display name, max 64 characters; Assinafy trims and collapses whitespace. Commas are allowed and have no special meaning in this single-name body. Returns 409 if a tag with the same name (case-insensitive) already exists.
 - Color — color (hex) — optional — 6-character hex color, with or without the leading `#`. Normalized by the SDK; omitted from the request body when empty.
 
 **Example request:**
@@ -1980,7 +2109,7 @@ Updates a tag's name and/or color. Existing document and template attachments ar
 
 - Tag — resourceLocator — required — The tag to update, selected from a searchable list (`getTags`) or by ID.
 - Update Fields — collection — optional — Contains:
-  - Name — string — optional — New display name (trimmed). Omit to leave unchanged.
+  - Name — string — optional — New display name (trimmed). Commas are allowed. Omit to leave unchanged.
   - Color — color (hex) — optional — New 6-character hex color, with or without the leading `#`.
   - Clear Color — boolean — optional — When true, clears the existing color (sends `color: null`).
 
@@ -2100,6 +2229,8 @@ Deletes a field definition. A field definition already used in a document cannot
 
 **Endpoint:** `DELETE /accounts/{accountId}/fields/{fieldId}`
 
+**Request body:** none.
+
 **Node parameters:**
 
 - Field ID — string — required — ID of the field definition to delete.
@@ -2163,7 +2294,7 @@ Lists the field definitions in the workspace. The SDK returns them wrapped under
 }
 ```
 
-(Sent as query string; empty/false values are stripped before sending.)
+(Sent as query string; empty values are stripped, while explicit `false` values are forwarded.)
 
 **Example response:**
 
@@ -2201,6 +2332,8 @@ Lists the field definitions in the workspace. The SDK returns them wrapped under
 #### List allowed input types
 
 Lists the input type codes available for field definitions. This is a non-account-scoped endpoint. The SDK returns the list wrapped under a `types` key.
+
+Validation rules include: `cpf` expects 11 digits; `cnpj` accepts 14 characters, with A–Z allowed in positions 1–12 and numeric check digits in positions 13–14. Punctuation is ignored during validation.
 
 **Endpoint:** `GET /field-types`
 
@@ -2348,7 +2481,7 @@ Registers or replaces the account's webhook subscription. Assinafy supports only
 
 **Node parameters:**
 
-- URL — string — required — endpoint that will receive event POSTs (e.g. `https://example.com/hooks/assinafy`).
+- URL — string — required — absolute HTTPS endpoint that will receive event POSTs (e.g. `https://example.com/hooks/assinafy`). HTTP is accepted only for `localhost`, `127.0.0.1`, or `::1`. The node rejects relative URLs, embedded user information, and fragments.
 - Notification Email — string — required — address contacted if webhook deliveries start failing.
 - Events — multiOptions — optional — event types to subscribe to. If left empty, the SDK falls back to the default set (`document_ready`, `document_prepared`, `signer_signed_document`, `signer_rejected_document`, `document_processing_failed`).
 - Is Active — boolean — optional — whether delivery is active (default `true`).
@@ -2496,23 +2629,37 @@ Empty filter values are stripped; `from`/`to` are dropped when zero before being
 		"activity_id": 456,
 		"endpoint": "https://example.com/webhook",
 		"payload": {
-			"event": "document_ready",
 			"id": 456,
-			"object": { "id": "abc123", "name": "contract.pdf", "type": "document" },
-			"subject": { "id": "<user-id>", "name": "Example User", "type": "user" },
+			"event": "document_ready",
+			"message": "The document is ready.",
+			"payload": null,
+			"origin": null,
+			"created_at": 1787227200,
+			"subject": {
+				"resource": "account",
+				"id": "<account-id>",
+				"name": "Example Workspace",
+				"type": "Account"
+			},
+			"object": {
+				"resource": "document",
+				"id": "abc123",
+				"name": "contract.pdf",
+				"type": "Document"
+			},
 			"account_id": "<account-id>"
 		},
 		"delivered": true,
 		"http_status": 200,
 		"response_body": "OK",
 		"error": null,
-		"created_at": 1705312200,
-		"updated_at": 1705312200
+		"created_at": "2026-08-20T12:30:00Z",
+		"updated_at": "2026-08-20T12:30:00Z"
 	}
 ]
 ```
 
-(In the sandbox with no delivery history this returns an empty array `[]`.)
+When no delivery history exists, this operation returns no output items.
 
 #### Retry Dispatch
 
@@ -2536,28 +2683,151 @@ Retries delivery of a specific webhook dispatch entry without waiting for automa
 	"activity_id": 456,
 	"endpoint": "https://example.com/webhook",
 	"payload": {
-		"event": "document_ready",
 		"id": 456,
-		"object": { "id": "abc123", "name": "contract.pdf", "type": "document" },
-		"subject": { "id": "<user-id>", "name": "Example User", "type": "user" },
+		"event": "document_ready",
+		"message": "The document is ready.",
+		"payload": null,
+		"origin": null,
+		"created_at": 1787227200,
+		"subject": {
+			"resource": "account",
+			"id": "<account-id>",
+			"name": "Example Workspace",
+			"type": "Account"
+		},
+		"object": {
+			"resource": "document",
+			"id": "abc123",
+			"name": "contract.pdf",
+			"type": "Document"
+		},
 		"account_id": "<account-id>"
 	},
 	"delivered": true,
 	"http_status": 200,
 	"response_body": "OK",
 	"error": null,
-	"created_at": 1705312200,
-	"updated_at": 1705312200
+	"created_at": "2026-08-20T12:30:00Z",
+	"updated_at": "2026-08-20T12:30:00Z"
 }
 ```
 
 Note: a retry fails with `404` if the entry does not belong to the account, or `400` if the subscription is inactive or the event type is not subscribed.
 
+### Webhook delivery payloads
+
+Assinafy sends each subscribed event to the registered URL with this delivery contract:
+
+| Property              | Contract                                                                                                                                                  |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Method and media type | `POST` with `Content-Type: application/json` and `Connection: close`                                                                                      |
+| Success               | Any `2xx` response                                                                                                                                        |
+| Attempts              | At most two per event: the initial attempt plus one retry                                                                                                 |
+| Retry delay           | 3 seconds                                                                                                                                                 |
+| Circuit breaker       | After 10 consecutive failed events, normal delivery pauses and about 5% of events are probed until one succeeds. **Retry Dispatch** can force redelivery. |
+| Response capture      | The first 2,000 characters of the endpoint response body are stored in dispatch history.                                                                  |
+
+Non-`2xx` responses, connection failures, and timeouts count as failed deliveries. Use the top-level integer `id` as a deduplication key because an event can be delivered more than once.
+
+Every webhook body has this complete common envelope; only `payload`, `subject`, and `object` vary by event:
+
+```json
+{
+	"id": 456,
+	"event": "document_uploaded",
+	"message": "A user uploaded a document.",
+	"payload": null,
+	"origin": {
+		"ip": "203.0.113.10",
+		"user-agent": "Assinafy"
+	},
+	"created_at": 1787227200,
+	"subject": {
+		"id": "<user-id>",
+		"name": "Example User",
+		"email": "user@example.com",
+		"telephone": null,
+		"government_id": null,
+		"is_email_verified": true,
+		"has_accepted_terms": true,
+		"created_at": "2026-08-01T12:00:00Z",
+		"to_be_deleted_at": null,
+		"type": "User"
+	},
+	"object": {
+		"resource": "document",
+		"id": "<document-id>",
+		"account_id": "<account-id>",
+		"template_id": null,
+		"name": "contract.pdf",
+		"status": "uploaded",
+		"artifacts": {},
+		"is_closed": false,
+		"signing_url": "https://app.assinafy.com.br/sign/<document-id>",
+		"decline_reason": null,
+		"declined_by": null,
+		"tags": [],
+		"assignment": null,
+		"pages": [],
+		"created_at": "2026-08-20T12:00:00Z",
+		"updated_at": "2026-08-20T12:00:00Z",
+		"type": "Document"
+	},
+	"account_id": "<account-id>"
+}
+```
+
+`message`, `payload`, and `origin` may be `null`. `created_at` is Unix seconds, unlike the ISO 8601 timestamps on REST resources. `subject` and `object` are polymorphic: `type` is `User`, `Signer`, `Account`, `Document`, or `Template`; their remaining fields are the matching REST schema in the [shared catalog](#shared-schema-catalog). The object includes expanded relationships such as a document's assignment and pages, while the subject carries base fields. An Account's internal `integration` property is always removed. System processing events use the Account as subject.
+
+The event-specific contract is:
+
+| Event                        | Subject | Object   | `payload` keys                                                                                          |
+| ---------------------------- | ------- | -------- | ------------------------------------------------------------------------------------------------------- |
+| `document_uploaded`          | User    | Document | none                                                                                                    |
+| `document_metadata_ready`    | User    | Document | none                                                                                                    |
+| `document_prepared`          | User    | Document | none                                                                                                    |
+| `assignment_created`         | User    | Document | `user_name`, `user_email`, `user_telephone`                                                             |
+| `document_ready`             | Account | Document | none                                                                                                    |
+| `document_processing_failed` | Account | Document | `error_message`                                                                                         |
+| `signature_requested`        | User    | Document | `signer_email`, `signer_full_name`, or `signer_whatsapp_phone_number`, depending on notification method |
+| `signer_created`             | User    | Signer   | `signer_full_name`                                                                                      |
+| `signer_email_verified`      | Signer  | Document | `signer_email`                                                                                          |
+| `signer_whatsapp_verified`   | Signer  | Document | `signer_whatsapp_phone_number`                                                                          |
+| `signer_data_confirmed`      | Signer  | Document | `signer_email`                                                                                          |
+| `signer_viewed_document`     | Signer  | Document | `signer_full_name`                                                                                      |
+| `signer_signed_document`     | Signer  | Document | `signer_full_name`                                                                                      |
+| `signer_rejected_document`   | Signer  | Document | `signer_full_name`                                                                                      |
+| `user_rejected_document`     | User    | Document | `user_name`                                                                                             |
+| `template_created`           | User    | Template | none                                                                                                    |
+| `template_processed`         | User    | Template | none                                                                                                    |
+| `template_processing_failed` | Account | Template | `error_message`                                                                                         |
+
+`assignment_created` and `document_metadata_ready` have no guaranteed ordering: virtual assignments may emit `assignment_created` first. Treat unknown fields and events as forward-compatible additions.
+
+The **Assinafy Trigger** registers an HTTPS delivery URL carrying a mandatory `assinafy-token` query parameter. HTTP is accepted only for loopback development hosts. The token is derived from the credential Webhook Secret, or from the API key when the Webhook Secret is empty; users do not enter it manually. Incoming requests without the matching token are rejected before workflow output is created.
+
+On workflow deactivation, the trigger reads the current subscription and requests inactivation only after its secured URL, notification email, active state, and event set match. Assinafy's inactivate endpoint is unconditional, so do not replace the account subscription concurrently with workflow deactivation.
+
+After token authentication, the trigger emits one n8n item and does not reshape the delivery body. This compact output example abbreviates `body`; its complete schema is the envelope above:
+
+```json
+{
+	"event": "signer_signed_document",
+	"headers": {
+		"content-type": "application/json",
+		"x-assinafy-signature": "[REDACTED]"
+	},
+	"body": { "event": "signer_signed_document", "payload": { "signer_full_name": "Example Signer" } }
+}
+```
+
+The trigger resolves `event` from `body.event` (or `body.type`), redacts authentication, cookie, token, secret, API-key, and signature headers, and preserves the parsed `body`. Optional HMAC-SHA256 verification requires the credential Webhook Secret and validates `X-Assinafy-Signature` against the raw request body. It fails closed when the header, raw body, or matching secret is unavailable.
+
 ---
 
 ### Signer Document (signer-side)
 
-Signer-facing operations authorized by a per-signer access code (from the email/WhatsApp link) instead of API credentials. All requests are sent unauthenticated (`skipAuth`) and pass the code as the `signer-access-code` query parameter. The **Signer Access Code** field is required for every operation.
+Signer-link operations never send the workspace API key (`skipAuth`). Get Current, List, Search, Sign Multiple, and Decline Multiple require the per-signer access code from the email/WhatsApp link as the `signer-access-code` query parameter. Download is public; its optional access code is omitted when blank.
 
 #### Signer reads the document tied to the active access code
 
@@ -2631,7 +2901,7 @@ Retrieves the single document bound to the signer's access code (page content om
 
 #### Signer lists their visible documents
 
-Lists the documents visible to the signer, with optional status/method/search/sort filters. Returns one n8n item per document.
+Lists the documents visible to the signer and returns one n8n item per document. The node supports pagination and forwards optional `status`, `method`, `search`, and `sort` query controls.
 
 **Endpoint:** `GET /signers/{signerId}/documents`
 
@@ -2639,7 +2909,9 @@ Lists the documents visible to the signer, with optional status/method/search/so
 
 - Signer Access Code — string (password) — required — per-signer access code.
 - Signer ID — string — required — the signer ID.
-- Filters — collection — optional — empty values are stripped before sending:
+- Return All — boolean — optional — fetch every response page.
+- Limit — number — optional (shown when Return All is off) — maximum documents to return.
+- Filters — collection — optional; empty values are stripped before sending:
   - Status — string — optional — document status code to filter by (e.g. `pending_signature`).
   - Method — options (Any / `virtual` / `collect`) — optional — signature method filter.
   - Search — string — optional — partial match on `document.name`, `signer.full_name`, `signer.email`.
@@ -2650,8 +2922,8 @@ Lists the documents visible to the signer, with optional status/method/search/so
 ```json
 {
 	"signer-access-code": "<signer-access-code>",
-	"status": "pending_signature",
-	"method": "virtual"
+	"page": 1,
+	"per-page": 50
 }
 ```
 
@@ -2788,10 +3060,10 @@ Signs several documents in one call. Each document must be prepared for the `vir
 
 Query: `?signer-access-code=<signer-access-code>`
 
-**Example response:** (unwrapped `data`)
+**Example response:**
 
 ```json
-[]
+{ "data": [] }
 ```
 
 #### Signer declines multiple documents at once
@@ -2817,27 +3089,27 @@ Declines several documents in one call with a shared reason. This is a code-only
 
 Query: `?signer-access-code=<signer-access-code>`
 
-**Example response:** (unwrapped `data`)
+**Example response:**
 
 ```json
-[]
+{ "data": [] }
 ```
 
 #### Signer downloads a document artifact
 
-Downloads one artifact of a signer's document as a binary file.
+Downloads one artifact of a signer's document as a binary file. This public route has no required security parameter.
 
 **Endpoint:** `GET /signers/{signerId}/documents/{documentId}/download/{artifact}`
 
 **Node parameters:**
 
-- Signer Access Code — string (password) — required — per-signer access code.
+- Signer Access Code — string (password) — optional — sent as `signer-access-code` only when supplied.
 - Signer ID — string — required — the signer ID.
 - Document ID — string — required — the document ID.
-- Artifact — options — optional — defaults to `certificated`. One of `original` (Original / Uploaded File), `certificated` (Certificated / Signed PDF), `certificate-page` (Certificate Page), `bundle` (Bundle / ZIP).
+- Artifact — options — optional — defaults to `certificated`. One of `original` (Original / Uploaded File), `certificated` (Certificated / Signed PDF), `certificate-page` (Certificate Page), `pades` (Digital Certificate PDF), or `bundle` (Bundle / ZIP). `pades` contains the signers' ICP-Brasil signatures plus the platform certification box and exists only for documents with digital-certificate signers.
 - Put Output In Field — string — optional — name of the binary output property (defaults to `data`).
 
-**Example request:** (query only)
+**Example request:** no query is required. An access code may be supplied:
 
 ```json
 {
@@ -2845,7 +3117,7 @@ Downloads one artifact of a signer's document as a binary file.
 }
 ```
 
-**Example response:** binary output (no JSON payload). The artifact bytes are placed in the configured binary property (default `data`). The MIME type is taken from the response `Content-Type` (falling back to `application/pdf`), and the file is named `{documentId}-{artifact}.zip` for the `bundle` artifact or `{documentId}-{artifact}.pdf` otherwise. The item's `json` carries metadata only:
+**Example response:** binary output (no JSON payload). The artifact bytes are placed in the configured binary property (default `data`). The MIME type is taken from the response `Content-Type`; the fallback is `application/zip` for `bundle` and `application/pdf` otherwise. A bundle contains `original`, `certificated`, and `certificate-page`, plus `pades` when present. The file is named `{documentId}-{artifact}.zip` for `bundle` or `{documentId}-{artifact}.pdf` otherwise. The item's `json` carries metadata only:
 
 ```json
 {
@@ -2893,8 +3165,8 @@ Exchanges an email and password for a JWT access token, returning the user profi
 		"id": "bgjazeo5r9v2lq7l36dx48np",
 		"name": "Example User",
 		"email": "john.smith@example.com",
-		"telephone": "17989206641",
-		"government_id": "15774136604",
+		"telephone": "<telephone>",
+		"government_id": "<government-id>",
 		"is_email_verified": false,
 		"has_accepted_terms": true,
 		"created_at": "2023-03-03T11:51:34Z",
@@ -2943,8 +3215,8 @@ Trades a social provider access/ID token (currently Google only) for an Assinafy
 		"id": "bgjazeo5r9v2lq7l36dx48np",
 		"name": "Example User",
 		"email": "john.smith@example.com",
-		"telephone": "17989206641",
-		"government_id": "15774136604",
+		"telephone": "<telephone>",
+		"government_id": "<government-id>",
 		"is_email_verified": false,
 		"has_accepted_terms": true,
 		"created_at": "2023-03-03T11:51:34Z",
@@ -2989,7 +3261,7 @@ Links a social identity provider to an already authenticated Assinafy user. Goog
 {}
 ```
 
-The OpenAPI operation declares the standard envelope but does not define fields inside `data`; the node returns that value unchanged. An invalid or expired provider token returns an authentication error, and a route-existence check with an intentionally invalid token is not an end-to-end success test.
+The node returns the unwrapped `data` value unchanged. An invalid or expired provider token returns an authentication error.
 
 #### Create API Key
 
@@ -3041,6 +3313,8 @@ Retrieves a masked view of the current API key. For security the full key is nev
 Revokes the current API key using an optional Bearer access token or the configured API key. This can invalidate the credential running other workflows. The node returns a synthesized confirmation object for the API's empty response.
 
 **Endpoint:** `DELETE /users/api-keys`
+
+**Request body:** none.
 
 **Node parameters:**
 
@@ -3151,8 +3425,6 @@ A workspace maps to an Assinafy "account". These operations manage the workspace
 
 Creates a new workspace (account).
 
-> Deployment note: `notification_sender_type` is present in the 2026-08-08 OpenAPI contract, but the tested sandbox returned HTTP 400 saying the attribute is not allowed. Omit Notification Sender on that sandbox deployment; the node retains it for contract-compatible deployments.
-
 **Endpoint:** `POST /accounts`
 
 **Node parameters:**
@@ -3174,13 +3446,12 @@ Creates a new workspace (account).
 }
 ```
 
-**Example response (colors persist):**
+**Example response:**
 
 ```json
 {
 	"id": "<workspace-id>",
 	"name": "sdk-example-workspace",
-	"notification_sender_type": "Account",
 	"primary_color": "1a73e8",
 	"secondary_color": "ff8800",
 	"created_at": "2026-07-20T19:00:30Z"
@@ -3266,8 +3537,6 @@ Lists the workspaces (accounts) accessible to the API key. Supports pagination v
 
 Updates an existing workspace. At least one update field is required — the node throws `At least one update field is required` if none are supplied.
 
-> Deployment note: the tested sandbox rejects the OpenAPI-documented `notification_sender_type` field. Name and the previously verified color fields remain available; use Notification Sender only on a deployment that supports the published contract.
-
 **Endpoint:** `PUT /accounts/{workspaceId}`
 
 **Node parameters:**
@@ -3285,7 +3554,7 @@ Updates an existing workspace. At least one update field is required — the nod
 {
 	"name": "Renamed Example Workspace",
 	"notification_sender_type": "User",
-	"primary_color": "#1a73e8"
+	"primary_color": "1a73e8"
 }
 ```
 
@@ -3295,7 +3564,6 @@ Updates an existing workspace. At least one update field is required — the nod
 {
 	"id": "<workspace-id>",
 	"name": "Renamed Example Workspace",
-	"notification_sender_type": "User",
 	"primary_color": "1a73e8",
 	"secondary_color": "ff8800",
 	"created_at": "2026-05-12T18:05:11Z"
@@ -3304,7 +3572,7 @@ Updates an existing workspace. At least one update field is required — the nod
 
 #### Get Account Statistics
 
-Returns document-status statistics for one workspace. The node emits one n8n item per statistics row.
+Returns document-funnel statistics for one workspace. The node emits one n8n item per statistics row.
 
 **Endpoint:** `GET /accounts/{workspaceId}/stats`
 
@@ -3332,8 +3600,13 @@ Returns document-status statistics for one workspace. The node emits one n8n ite
 		"documents_uploaded": 2,
 		"documents_sent": 2,
 		"signature_requests": 3,
-		"signature_requests_email": 2,
-		"signature_requests_whatsapp": 1,
+		"signature_requests_notification_email": 2,
+		"signature_requests_notification_whatsapp": 1,
+		"signature_requests_notification_bypass": 0,
+		"signature_requests_verification_email": 2,
+		"signature_requests_verification_whatsapp": 1,
+		"signature_requests_verification_bypass": 0,
+		"signature_requests_verification_digital_certificate": 0,
 		"signature_requests_viewed": 2,
 		"signature_requests_completed": 1,
 		"documents_certified": 1
@@ -3341,11 +3614,11 @@ Returns document-status statistics for one workspace. The node emits one n8n ite
 ]
 ```
 
-The node passes through the complete row returned by the server, including additional status counters. The published route was not deployed in the sandbox tested on 2026-08-08 (route-level 404), so the example is the contract shape rather than a claimed successful sandbox response.
+Monthly rows cover the last 12 months and daily rows cover every day of the requested month; both are zero-filled and ordered most recent first. Notification counters split requests by delivery channel, so a request sent through more than one channel counts once in each channel and those counters can total more than `signature_requests`. Verification counters split requests by their single verification method and therefore total exactly `signature_requests`.
 
 #### Get User Statistics
 
-Returns aggregate document-status statistics across workspaces accessible to the current user. The node emits one n8n item per row.
+Returns aggregate document-funnel statistics across workspaces accessible to the current user. The node emits one n8n item per row.
 
 **Endpoint:** `GET /users/self/stats`
 
@@ -3369,8 +3642,13 @@ Returns aggregate document-status statistics across workspaces accessible to the
 		"documents_uploaded": 20,
 		"documents_sent": 18,
 		"signature_requests": 24,
-		"signature_requests_email": 20,
-		"signature_requests_whatsapp": 4,
+		"signature_requests_notification_email": 20,
+		"signature_requests_notification_whatsapp": 4,
+		"signature_requests_notification_bypass": 0,
+		"signature_requests_verification_email": 18,
+		"signature_requests_verification_whatsapp": 2,
+		"signature_requests_verification_bypass": 0,
+		"signature_requests_verification_digital_certificate": 4,
 		"signature_requests_viewed": 17,
 		"signature_requests_completed": 15,
 		"documents_certified": 12
@@ -3378,11 +3656,81 @@ Returns aggregate document-status statistics across workspaces accessible to the
 ]
 ```
 
-As with account statistics, the node preserves every returned key. This published route also returned a route-level 404 in the sandbox deployment tested on 2026-08-08.
+As with account statistics, the series is zero-filled and ordered most recent first. Notification counters can overlap when a request uses multiple delivery channels; verification counters form a non-overlapping breakdown by verification method.
+
+#### Get Notification Preferences
+
+Returns the authenticated user's owner-facing document email preferences. Account and security messages such as password resets, workspace invitations, and account deletion are not configurable through this route.
+
+**Endpoint:** `GET /users/self/notification-preferences`
+
+**Node parameters:** none.
+
+**Example response:**
+
+```json
+{
+	"DocumentCompleted": true,
+	"SignerDeclined": true,
+	"DocumentCancelled": true,
+	"DocumentAboutToExpire": true,
+	"DocumentExpired": true,
+	"DocumentExpirationReset": true,
+	"DocumentProcessingFailed": true,
+	"TemplateProcessingFailed": true,
+	"SignerWhatsappFailed": true
+}
+```
+
+All nine keys are always returned; `true` means that email is enabled.
+
+#### Update Notification Preferences
+
+Merges one or more owner-facing email preferences into the authenticated user's current map. Omitted keys keep their existing values, and the API returns all nine preferences. Setting a key to `false` disables that email for this user across every account they belong to. The node rejects an empty collection or a non-boolean expression value before sending the request.
+
+**Endpoint:** `PUT /users/self/notification-preferences`
+
+**Node parameters:**
+
+- Preferences — collection — required (at least one) — any partial selection of:
+  - Document About to Expire (`DocumentAboutToExpire`) — boolean.
+  - Document Cancelled (`DocumentCancelled`) — boolean.
+  - Document Completed (`DocumentCompleted`) — boolean.
+  - Document Expiration Reset (`DocumentExpirationReset`) — boolean.
+  - Document Expired (`DocumentExpired`) — boolean.
+  - Document Processing Failed (`DocumentProcessingFailed`) — boolean.
+  - Signer Declined (`SignerDeclined`) — boolean.
+  - Signer WhatsApp Failed (`SignerWhatsappFailed`) — boolean.
+  - Template Processing Failed (`TemplateProcessingFailed`) — boolean.
+
+**Example request:**
+
+```json
+{
+	"DocumentCompleted": false,
+	"SignerDeclined": true
+}
+```
+
+**Example response:**
+
+```json
+{
+	"DocumentCompleted": false,
+	"SignerDeclined": true,
+	"DocumentCancelled": true,
+	"DocumentAboutToExpire": true,
+	"DocumentExpired": true,
+	"DocumentExpirationReset": true,
+	"DocumentProcessingFailed": true,
+	"TemplateProcessingFailed": true,
+	"SignerWhatsappFailed": true
+}
+```
 
 #### Get Current User
 
-Returns the authenticated user (the owner of the API key) together with every workspace they can access. Not account-scoped.
+Returns the authenticated user (the owner of the API key) as the direct `AuthUser` object shown below. This operation is not account-scoped.
 
 **Endpoint:** `GET /users/self`
 
@@ -3392,29 +3740,19 @@ Returns the authenticated user (the owner of the API key) together with every wo
 
 ```json
 {
-	"user": {
-		"id": "md3j6p9w8b7y6qvqaoy5er42",
-		"name": "Example User",
-		"email": "user@example.com",
-		"telephone": null,
-		"government_id": "",
-		"is_email_verified": true,
-		"has_accepted_terms": true,
-		"is_password_set": true,
-		"created_at": "2026-05-12T18:05:11Z",
-		"to_be_deleted_at": null
-	},
-	"accounts": [
-		{
-			"id": "<workspace-id>",
-			"name": "Example Workspace",
-			"roles": ["owner"],
-			"is_delete_allowed": true,
-			"created_at": "2026-05-12T18:05:11Z"
-		}
-	]
+	"id": "<user-id>",
+	"name": "Example User",
+	"email": "user@example.com",
+	"telephone": null,
+	"government_id": null,
+	"is_email_verified": true,
+	"has_accepted_terms": true,
+	"created_at": "2026-05-12T18:05:11Z",
+	"to_be_deleted_at": null
 }
 ```
+
+The node unwraps the standard `{ status, message, data }` envelope and otherwise leaves `data` unchanged.
 
 #### Get Theme
 
@@ -3478,12 +3816,12 @@ Downloads the current workspace logo as a binary image on the output item. Retur
 {
 	"json": {
 		"workspaceId": "<workspace-id>",
-		"fileName": "workspace-logo.png",
+		"fileName": "<workspace-id>-logo.png",
 		"mimeType": "image/png",
 		"size": 69
 	},
 	"binary": {
-		"data": { "fileName": "workspace-logo.png", "mimeType": "image/png", "data": "<base64>" }
+		"data": { "fileName": "<workspace-id>-logo.png", "mimeType": "image/png", "data": "<base64>" }
 	}
 }
 ```
@@ -3493,6 +3831,8 @@ Downloads the current workspace logo as a binary image on the output item. Retur
 Removes the workspace logo.
 
 **Endpoint:** `DELETE /accounts/{workspaceId}/logo`
+
+**Request body:** none.
 
 **Node parameters:**
 

@@ -21,7 +21,13 @@ export function cleanQs(filters: IDataObject, dropZero: string[] = []): IDataObj
 }
 
 export function wrap(data: unknown): INodeExecutionData {
-	return { json: (data ?? {}) as IDataObject };
+	if (data === null || data === undefined) return { json: {} };
+	return {
+		json:
+			typeof data === 'object' && !Array.isArray(data)
+				? (data as IDataObject)
+				: { data: data as IDataObject[keyof IDataObject] },
+	};
 }
 
 /** Convert an n8n full binary response into a non-empty Buffer and MIME type. */
@@ -114,15 +120,10 @@ function formatList(formats: BinaryFormat[]): string {
 	return labels.length === 1 ? labels[0] : `${labels.slice(0, -1).join(', ')} or ${labels.at(-1)}`;
 }
 
-/**
- * Normalize a list endpoint's response into a plain array. `assinafyApiRequest`
- * already unwraps the `{status,message,data}` envelope, so a list call returns
- * the array directly; this guards the rare doubly-wrapped shape in one place.
- */
+/** Require the documented array payload from a list endpoint. */
 export function asArray<T = IDataObject>(response: unknown): T[] {
 	if (Array.isArray(response)) return response as T[];
-	const data = (response as { data?: T[] } | null)?.data;
-	return Array.isArray(data) ? data : [];
+	throw new TypeError('Assinafy API returned an invalid list response (expected an array)');
 }
 
 /**
@@ -140,7 +141,7 @@ export function requireAccessCode(ctx: IExecuteFunctions, itemIndex: number): st
 /**
  * Parse an n8n `json`-typed parameter that may arrive as a string or an already
  * parsed value. Throws a NodeOperationError naming the field when the string is
- * not valid JSON (unlike safeJsonParse, which swallows errors).
+ * not valid JSON.
  */
 export function parseJsonParam(
 	ctx: IExecuteFunctions,
@@ -181,32 +182,20 @@ export const showOnly = (resource: string) => (operation: string[]) => ({
 	operation,
 });
 
-export function safeJsonParse(value: string | IDataObject): IDataObject {
-	if (typeof value === 'object' && value !== null) return value;
-	try {
-		const parsed = JSON.parse(value);
-		return typeof parsed === 'object' && parsed !== null ? (parsed as IDataObject) : {};
-	} catch {
-		return {};
-	}
-}
-
 export function sanitizeCpf(value: string): string {
 	return value.replace(/\D/g, '');
 }
 
 export function parseStringList(value: unknown): string[] {
-	const values = Array.isArray(value) ? value : [value];
-	return values
-		.flatMap((entry) => String(entry ?? '').split(','))
-		.map((entry) => entry.trim())
-		.filter(Boolean);
+	const values = Array.isArray(value) ? value : String(value ?? '').split(',');
+	return values.map((entry) => String(entry ?? '').trim()).filter(Boolean);
 }
 
 export function normalizeHexColor(
 	ctx: IExecuteFunctions,
 	value: unknown,
 	itemIndex: number,
+	label = 'Tag color',
 ): string | undefined {
 	const color = String(value ?? '')
 		.trim()
@@ -215,7 +204,7 @@ export function normalizeHexColor(
 	if (!/^[0-9a-fA-F]{6}$/.test(color)) {
 		throw new NodeOperationError(
 			ctx.getNode(),
-			'Tag color must be a 6-character hex value, with or without #',
+			`${label} must be a 6-character hex value, with or without #`,
 			{ itemIndex },
 		);
 	}
@@ -256,6 +245,25 @@ export function validateSigningSteps(
 	}
 }
 
+/** Digital-certificate signers cannot share a signing step with another signer. */
+export function validateDigitalCertificateSteps(
+	ctx: IExecuteFunctions,
+	signers: Array<{ step?: number | string; verification_method?: unknown }>,
+	itemIndex: number,
+): void {
+	for (const signer of signers) {
+		if (signer.verification_method !== 'DigitalCertificate') continue;
+		const step = Number(signer.step ?? 0);
+		if (signers.filter((candidate) => Number(candidate.step ?? 0) === step).length > 1) {
+			throw new NodeOperationError(
+				ctx.getNode(),
+				'Digital Certificate signers must be alone in their signing step',
+				{ itemIndex },
+			);
+		}
+	}
+}
+
 export function assertEmail(email: string): boolean {
 	return EMAIL_RE.test(email);
 }
@@ -269,10 +277,13 @@ export function extractRequiredId(
 	paramName: string,
 	label: string,
 	itemIndex: number,
+	defaultValue = '',
 ): string {
-	const id = ctx.getNodeParameter(paramName, itemIndex, '', { extractValue: true }) as string;
+	const id = String(
+		ctx.getNodeParameter(paramName, itemIndex, defaultValue, { extractValue: true }) ?? '',
+	).trim();
 	if (!id) {
 		throw new NodeOperationError(ctx.getNode(), `${label} is required`, { itemIndex });
 	}
-	return id;
+	return encodeURIComponent(id);
 }

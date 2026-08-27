@@ -35,10 +35,10 @@ describe('listSearch pickers', () => {
 	it('getSigners maps full_name and email into the label', async () => {
 		const { ctx } = makeCtx(
 			{},
-			{ response: [{ id: 's1', full_name: 'Jane', email: 'jane@x.com' }] },
+			{ response: [{ id: 's1', full_name: 'Jane', email: 'jane@example.com' }] },
 		);
 		const result = await getSigners.call(ctx as any);
-		expect(result.results).toEqual([{ name: 'Jane <jane@x.com>', value: 's1' }]);
+		expect(result.results).toEqual([{ name: 'Jane <jane@example.com>', value: 's1' }]);
 	});
 
 	it('getTags maps name and color', async () => {

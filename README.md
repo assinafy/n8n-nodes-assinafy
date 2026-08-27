@@ -1,16 +1,16 @@
 # @assinafy/n8n-nodes-assinafy
 
-Community n8n nodes for [Assinafy](https://assinafy.com.br), the Brazilian electronic-signature platform. This package maps all 87 operations in the public [Assinafy REST API](https://api.assinafy.com.br/v1/docs) v1 contract to first-class n8n nodes, with a small number of clearly identified convenience and live-API compatibility operations.
+Community n8n nodes for [Assinafy](https://assinafy.com.br), the Brazilian electronic-signature platform. The package is centered on document upload, signer creation, assignments, signing status, certified-artifact downloads, templates, tags, and webhooks. Related account and authentication operations remain available when a workflow needs them.
 
 This package ships:
 
-- **Assinafy** — an action node exposing every documented endpoint in the v1 API. Resources: `assignment`, `auth`, `document`, `field` (field definition), `signer`, `signerDocument` (signer-side flows), `tag`, `template`, `webhook`, `workspace`.
-- **Assinafy Trigger** — a webhook trigger that subscribes your workflow to Assinafy events and can verify an HMAC-SHA256 signature when the opt-in check is enabled.
+- **Assinafy** — an action node for `assignment`, `auth`, `document`, `field`, `signer`, `signerDocument`, `tag`, `template`, `webhook`, and `workspace` resources.
+- **Assinafy Trigger** — a webhook trigger with mandatory credential-derived URL authentication and optional HMAC-SHA256 payload verification.
 - **Assinafy API** — a shared credential (X-Api-Key + account ID, with production/sandbox/custom base URLs).
 
 ## Installation
 
-Public releases target **npmjs.com** as the primary registry under `@assinafy/n8n-nodes-assinafy`. Once a release is present there, no registry token or custom `.npmrc` is needed to install it. The first npmjs publication and n8n catalog submission are external release steps, not guarantees made by this repository.
+Public releases use **npmjs.com** under `@assinafy/n8n-nodes-assinafy`; installation does not require a custom registry or `.npmrc`.
 
 ### Self-hosted n8n
 
@@ -28,7 +28,7 @@ GitHub Packages may be used as an optional release mirror. Installing from that 
 
 Publication to npmjs is required for n8n's verified community-node submission process. Availability in n8n Cloud still depends on n8n review and catalog approval; npm publication alone does not imply Cloud availability.
 
-The package declares `n8n-workflow` as a peer dependency so the installed n8n instance supplies the compatible runtime. Building and testing this repository requires **Node.js 22.22 or newer**; CI and release jobs use the current LTS line, Node.js 24.
+The package declares `n8n-workflow` as a peer dependency so the installed n8n instance supplies the runtime. Building, testing, and running this release requires the current LTS line, **Node.js 24**.
 
 ## Credentials
 
@@ -40,45 +40,45 @@ Create an **Assinafy API** credential for account-scoped and API-key operations:
 | Custom Base URL | ✓ for `Custom`  | Must be absolute HTTPS and end in `/v1`, with no user info, query, or fragment. HTTP is allowed only for loopback development hosts.                      |
 | API Key         | ✓ in credential | Generated from the Assinafy dashboard. Sent as the `X-Api-Key` request header.                                                                            |
 | Account ID      | ✓ in credential | Default workspace (account) ID. Used by every account-scoped endpoint.                                                                                    |
-| Webhook Secret  | —               | Shared secret for the Assinafy Trigger node to verify HMAC-SHA256 signatures.                                                                             |
+| Webhook Secret  | —               | Secret used for Trigger URL authentication and optional HMAC-SHA256 payload verification. When empty, URL authentication is derived from the API key.     |
 
 The credential test calls `GET /accounts/{accountId}` to confirm the key and account are valid. Custom URLs are validated and normalized before either the Test request or any authenticated request can attach the API key. The **Assinafy** action credential is optional only for public, signer-access-code, and explicitly Bearer-authenticated operations. Without a selected credential those calls use the production base URL; if a selected credential cannot be loaded, the call fails instead of silently falling back to production. Select a Sandbox credential even for an unauthenticated call when you need the sandbox host. The **Assinafy Trigger** always requires a credential because subscription lifecycle calls are account-scoped.
 
 ## Supported operations
 
 > **Full reference with request/response payloads:** see
-> [`docs/OPERATIONS.md`](docs/OPERATIONS.md) for every operation's node parameters,
+> [`docs/OPERATIONS.md`](docs/OPERATIONS.md) for each operation's node parameters,
 > example request body/query, and example response (`{status,message,data}` envelope,
 > unwrapped by the node). The tables below are a quick endpoint index.
 
 ### Resource: Document
 
-| Operation                   | Endpoint                                                                                             |
-| --------------------------- | ---------------------------------------------------------------------------------------------------- |
-| Upload                      | `POST /accounts/{accountId}/documents` (multipart)                                                   |
-| List                        | `GET /accounts/{accountId}/documents`                                                                |
-| Search                      | `GET /accounts/{accountId}/documents/search` — lightweight name/status search                        |
-| Get                         | `GET /documents/{id}`                                                                                |
-| Rename                      | `PATCH /documents/{id}`                                                                              |
-| Delete                      | `DELETE /documents/{id}`                                                                             |
-| Download Artifact           | `GET /documents/{id}/download/{artifact}` — `original`, `certificated`, `certificate-page`, `bundle` |
-| Download Thumbnail          | `GET /documents/{id}/thumbnail`                                                                      |
-| Download Page               | `GET /documents/{id}/pages/{pageId}/download`                                                        |
-| Get Activities              | `GET /documents/{id}/activities`                                                                     |
-| Get Signing Progress        | derived from `GET /documents/{id}`                                                                   |
-| Wait Until Ready            | polls `GET /documents/{id}` until status is `metadata_ready`, `pending_signature`, or `certificated` |
-| Create From Template        | `POST /accounts/{accountId}/templates/{templateId}/documents`                                        |
-| Estimate Cost From Template | `POST /accounts/{accountId}/templates/{templateId}/documents/estimate-cost`                          |
-| Verify                      | `GET /documents/{hash}/verify` — public; verifies a certificated document by its signature hash      |
-| Get Public Info             | `GET /public/documents/{id}` — unauthenticated, returns name, page count, creator                    |
-| Send Public Token           | `PUT /public/documents/{id}/send-token` — emails/whatsapps the 6-digit access token                  |
-| List Statuses               | `GET /documents/statuses` — enumerates document status codes and deletability                        |
-| List Tags                   | `GET /accounts/{accountId}/documents/{documentId}/tags`                                              |
-| Replace Tags                | `PUT /accounts/{accountId}/documents/{documentId}/tags`                                              |
-| Append Tags                 | `POST /accounts/{accountId}/documents/{documentId}/tags`                                             |
-| Detach Tag                  | `DELETE /accounts/{accountId}/documents/{documentId}/tags/{tagId}`                                   |
+| Operation                   | Endpoint                                                                                                      |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Upload                      | `POST /accounts/{accountId}/documents` (multipart)                                                            |
+| List                        | `GET /accounts/{accountId}/documents`                                                                         |
+| Search                      | `GET /accounts/{accountId}/documents/search` — lightweight name/status search                                 |
+| Get                         | `GET /documents/{id}`                                                                                         |
+| Rename                      | `PATCH /documents/{id}`                                                                                       |
+| Delete                      | `DELETE /documents/{id}`                                                                                      |
+| Download Artifact           | `GET /documents/{id}/download/{artifact}` — `original`, `certificated`, `certificate-page`, `pades`, `bundle` |
+| Download Thumbnail          | `GET /documents/{id}/thumbnail`                                                                               |
+| Download Page               | `GET /documents/{id}/pages/{pageId}/download`                                                                 |
+| Get Activities              | `GET /documents/{id}/activities`                                                                              |
+| Get Signing Progress        | derived from `GET /documents/{id}`                                                                            |
+| Wait Until Ready            | polls `GET /documents/{id}` until status is `metadata_ready`, `pending_signature`, or `certificated`          |
+| Create From Template        | `POST /accounts/{accountId}/templates/{templateId}/documents`                                                 |
+| Estimate Cost From Template | `POST /accounts/{accountId}/templates/{templateId}/documents/estimate-cost`                                   |
+| Verify                      | `GET /documents/{hash}/verify` — public; verifies a certificated document by its signature hash               |
+| Get Public Info             | `GET /public/documents/{id}` — public                                                                         |
+| Send Public Token           | `PUT /public/documents/{id}/send-token` — emails/whatsapps the 6-digit access token                           |
+| List Statuses               | `GET /documents/statuses` — enumerates document status codes and deletability                                 |
+| List Tags                   | `GET /accounts/{accountId}/documents/{documentId}/tags`                                                       |
+| Replace Tags                | `PUT /accounts/{accountId}/documents/{documentId}/tags`                                                       |
+| Append Tags                 | `POST /accounts/{accountId}/documents/{documentId}/tags`                                                      |
+| Detach Tag                  | `DELETE /accounts/{accountId}/documents/{documentId}/tags/{tagId}`                                            |
 
-Uploads accept a binary property from the previous node (must be a non-empty PDF up to 25 MB). Downloaded artifacts are attached back to the output item as binary data. The List operation supports filtering by `status`, `method` (`virtual` / `collect`), tag IDs, and a `search` term. Create From Template supports signer roles, sequential `step` ordering, editor field values, and document tag names.
+Uploads accept a binary property from the previous node (must be a non-empty PDF up to 25 MB and no more than 2,000 pages). Downloaded artifacts are attached back to the output item as binary data. The `pades` PDF contains the signers' ICP-Brasil signatures plus the platform certification box and exists only for documents with digital-certificate signers; `bundle` is a ZIP containing the three standard PDF artifacts and `pades` when available. The List operation supports filtering by `status`, `method` (`virtual` / `collect`), tag IDs, and a `search` term. Create From Template supports signer roles, sequential `step` ordering, editor field values, and document tag names.
 
 ### Resource: Signer
 
@@ -97,6 +97,8 @@ Uploads accept a binary property from the previous node (must be a non-empty PDF
 | Upload Signature (Signer Side)   | `POST /signature?signer-access-code=…&type=signature\|initial`          |
 | Download Signature (Signer Side) | `GET /signature/{type}?signer-access-code=…`                            |
 
+Signer creation follows the published request body: only **Full Name** is required; email and WhatsApp are optional and may be added later before a remote signature request. Signer Update exposes `government_id` for a CPF or CNPJ and normalizes it to digits. Changing an unverified email/WhatsApp channel with requests in flight rotates its links and OTPs; a verified in-flight channel cannot be changed until its documents are certificated. Signer Create does not send the unsupported `cpf` or `metadata` keys.
+
 ### Resource: Assignment
 
 | Operation                   | Endpoint                                                                                          |
@@ -112,7 +114,7 @@ Uploads accept a binary property from the previous node (must be a non-empty PDF
 | Decline (Signer Side)       | `PUT /documents/{documentId}/assignments/{assignmentId}/reject?signer-access-code=…`              |
 | List                        | `GET /assignments?accountId={accountId}`                                                          |
 
-The `method` can be `virtual` (remote signature via email or WhatsApp) or `collect` (field-placed signatures on the document). Each signer entry accepts optional `verification_method` (`Email` / `Whatsapp`), `notification_methods`, and sequential-signing `step`. For `collect`, the node exposes the SDK-compatible `entries` JSON payload. `copy_receivers` are signer IDs, not email addresses.
+The `method` can be `virtual` (remote signature via email or WhatsApp) or `collect` (field-placed signatures on the document). Each signer entry accepts optional `verification_method` (`Email`, `Whatsapp`, or `DigitalCertificate`), one or more `notification_methods`, and sequential-signing `step`. Match the notification channel to the available signer contact data; omitted verification and notification methods default to `Email`. `DigitalCertificate` requires the account feature, a signer CPF/CNPJ in `government_id`, and a signing step containing no other signer; it costs 2 credits per signer in addition to notification cost and produces the optional `pades` artifact. For `collect`, provide `entries` as JSON. `copy_receivers` are signer IDs, not email addresses.
 
 ### Resource: Template
 
@@ -121,7 +123,7 @@ The `method` can be `virtual` (remote signature via email or WhatsApp) or `colle
 | List      | `GET /accounts/{accountId}/templates` — filters: `search`, `status`, tag IDs, `sort` |
 | Get       | `GET /accounts/{accountId}/templates/{templateId}`                                   |
 
-Templates are read-only resources created through the Assinafy web app. Use **List** and **Get** to retrieve roles and field placements needed for Create From Template documents. The Get route works in the live API but is not present in the 2026-08-08 OpenAPI snapshot; it is retained as an explicitly documented compatibility operation.
+Templates are read-only resources created through the Assinafy web app. Use **List** and **Get** to retrieve roles and field placements needed for Create From Template documents.
 
 ### Resource: Tag
 
@@ -132,7 +134,7 @@ Templates are read-only resources created through the Assinafy web app. Use **Li
 | Update    | `PUT /accounts/{accountId}/tags/{tagId}`                            |
 | Delete    | `DELETE /accounts/{accountId}/tags/{tagId}` — optional `force=true` |
 
-Tags are workspace-scoped labels. They can be managed directly through the Tag resource and attached to documents through the Document tag operations. Tag color values are validated as 6-character hex strings before being sent.
+Tags are workspace-scoped labels. They can be managed directly through the Tag resource and attached to documents through the Document tag operations. Tag color values are validated as 6-character hex strings before being sent. Multiple-value tag arrays preserve each entry as one tag, including embedded commas (for example, `Example, Inc.`); only a scalar comma-delimited value is split.
 
 ### Resource: Field Definition
 
@@ -149,16 +151,18 @@ Tags are workspace-scoped labels. They can be managed directly through the Tag r
 
 ### Resource: Signer Document (Signer Side)
 
-These endpoints authorize via the per-signer `signer-access-code` query parameter rather than the workspace API key. Useful for surfacing what an end signer can see/do from inside a workflow.
+These signer-link endpoints do not use the workspace API key. Get Current, List, Search, Sign Multiple, and Decline Multiple require the per-signer `signer-access-code` query parameter. Download is public; its access-code field is optional and is sent only when supplied.
 
-| Operation        | Endpoint                                                                                  |
-| ---------------- | ----------------------------------------------------------------------------------------- |
-| Get Current      | `GET /signers/{signerId}/document?signer-access-code=…`                                   |
-| List             | `GET /signers/{signerId}/documents?signer-access-code=…`                                  |
-| Search           | `GET /signers/{signerId}/documents/search?signer-access-code=…&search=…`                  |
-| Sign Multiple    | `PUT /signers/documents/sign-multiple?signer-access-code=…`                               |
-| Decline Multiple | `PUT /signers/documents/decline-multiple?signer-access-code=…`                            |
-| Download         | `GET /signers/{signerId}/documents/{documentId}/download/{artifact}?signer-access-code=…` |
+| Operation        | Endpoint                                                                                            |
+| ---------------- | --------------------------------------------------------------------------------------------------- |
+| Get Current      | `GET /signers/{signerId}/document?signer-access-code=…`                                             |
+| List             | `GET /signers/{signerId}/documents?signer-access-code=…`                                            |
+| Search           | `GET /signers/{signerId}/documents/search?signer-access-code=…&search=…`                            |
+| Sign Multiple    | `PUT /signers/documents/sign-multiple?signer-access-code=…`                                         |
+| Decline Multiple | `PUT /signers/documents/decline-multiple?signer-access-code=…`                                      |
+| Download         | `GET /signers/{signerId}/documents/{documentId}/download/{artifact}` — public; optional access code |
+
+Signer-side Download supports the same `original`, `certificated`, `certificate-page`, `pades`, and `bundle` artifacts as the authenticated document download. List supports pagination plus `status`, `method`, `search`, and `sort` filters.
 
 ### Resource: Authentication
 
@@ -178,20 +182,24 @@ User-account flows. Login operations return an access token used as `Authorizati
 
 ### Resource: Workspace
 
-| Operation              | Endpoint                                        |
-| ---------------------- | ----------------------------------------------- |
-| Create                 | `POST /accounts`                                |
-| List                   | `GET /accounts`                                 |
-| Get                    | `GET /accounts/{workspaceId}`                   |
-| Update                 | `PUT /accounts/{workspaceId}`                   |
-| Delete                 | `DELETE /accounts/{workspaceId}`                |
-| Get Current User       | `GET /users/self`                               |
-| Get Account Statistics | `GET /accounts/{workspaceId}/stats`             |
-| Get User Statistics    | `GET /users/self/stats`                         |
-| Get Theme              | `GET /accounts/{workspaceId}/theme`             |
-| Upload Logo            | `POST /accounts/{workspaceId}/logo` (multipart) |
-| Download Logo          | `GET /accounts/{workspaceId}/logo`              |
-| Delete Logo            | `DELETE /accounts/{workspaceId}/logo`           |
+| Operation                       | Endpoint                                        |
+| ------------------------------- | ----------------------------------------------- |
+| Create                          | `POST /accounts`                                |
+| List                            | `GET /accounts`                                 |
+| Get                             | `GET /accounts/{workspaceId}`                   |
+| Update                          | `PUT /accounts/{workspaceId}`                   |
+| Delete                          | `DELETE /accounts/{workspaceId}`                |
+| Get Current User                | `GET /users/self`                               |
+| Get Account Statistics          | `GET /accounts/{workspaceId}/stats`             |
+| Get User Statistics             | `GET /users/self/stats`                         |
+| Get Theme                       | `GET /accounts/{workspaceId}/theme`             |
+| Get Notification Preferences    | `GET /users/self/notification-preferences`      |
+| Update Notification Preferences | `PUT /users/self/notification-preferences`      |
+| Upload Logo                     | `POST /accounts/{workspaceId}/logo` (multipart) |
+| Download Logo                   | `GET /accounts/{workspaceId}/logo`              |
+| Delete Logo                     | `DELETE /accounts/{workspaceId}/logo`           |
+
+`GET /users/self` returns the authenticated user data from Assinafy after the standard response envelope is removed.
 
 ### Resource: Webhook
 
@@ -204,26 +212,66 @@ User-account flows. Login operations return an access token used as `Authorizati
 | List Dispatches         | `GET /accounts/{accountId}/webhooks`                     |
 | Retry Dispatch          | `POST /accounts/{accountId}/webhooks/{dispatchId}/retry` |
 
+See the [webhook delivery payload reference](docs/OPERATIONS.md#webhook-delivery-payloads) for the complete POST envelope, all 18 event-specific payload variants, success/retry/circuit-breaker behavior, and the trigger's n8n output shape.
+
 ## Assinafy Trigger
 
-The trigger node registers (or replaces) the workspace-wide webhook subscription when the workflow is activated. On deactivation it first reads the current subscription and calls the documented `PUT /accounts/{accountId}/webhooks/inactivate` endpoint only when URL, email, and events still match this trigger, so an independently replaced subscription is left intact. On each incoming delivery it emits `{ event, headers, body }` as a single n8n item with authentication/cookie/signature headers redacted.
+The trigger node registers or replaces the workspace-wide webhook subscription when the workflow is activated. The delivery URL must use HTTPS; HTTP is accepted only for `localhost`, `127.0.0.1`, or `::1` development URLs. The node adds an `assinafy-token` query parameter derived with HMAC-SHA256 from the credential's Webhook Secret, or from its API key when no secret is configured. Every delivery must present that token and is rejected on a missing or mismatched value. Reactivate the workflow after rotating either credential value so Assinafy receives the new URL.
 
-**Signature verification is opt-in.** The Assinafy public API docs do not currently document a delivery signature, so `Verify Signature` is **off by default**. If your workspace is configured to sign deliveries, set the credential **Webhook Secret** and enable `Verify Signature`: the node then requires the `X-Assinafy-Signature` header, computes the HMAC-SHA256 digest over the **raw** request body, and rejects the delivery on mismatch (or when the raw body is unavailable — it fails closed).
+On deactivation, the node reads the current subscription and calls `PUT /accounts/{accountId}/webhooks/inactivate` only after its secured URL, email, and event set match. Assinafy's inactivate endpoint is unconditional, so do not replace the account subscription concurrently with workflow deactivation. Each accepted delivery emits `{ event, headers, body }` as one n8n item; authentication, cookie, API-key, token, secret, and signature headers are redacted.
+
+**Payload-signature verification is an additional opt-in check.** If your workspace signs deliveries, set **Webhook Secret** and enable **Verify Signature**. The node then requires `X-Assinafy-Signature`, computes HMAC-SHA256 over the raw request body, and fails closed when the signature or raw bytes are unavailable.
 
 > [!IMPORTANT]
-> The Assinafy API supports a **single** webhook subscription per workspace. Activating this trigger replaces any existing subscription; deactivation inactivates only a still-matching subscription. If you need to fan out events to multiple destinations, point the trigger at an n8n workflow that rebroadcasts to downstream systems.
+> The Assinafy API supports a **single** webhook subscription per workspace. Activating this trigger replaces any existing subscription. Coordinate activation and deactivation changes for that account, and fan out inside one n8n workflow when multiple destinations need the same events.
 
 The full event list (source of truth: `nodes/Assinafy/resources/webhookEvents.ts`, shown in the node's **Events** dropdown):
 `assignment_created`, `document_metadata_ready`, `document_prepared`, `document_processing_failed`, `document_ready`, `document_uploaded`, `signature_requested`, `signer_created`, `signer_data_confirmed`, `signer_email_verified`, `signer_rejected_document`, `signer_signed_document`, `signer_viewed_document`, `signer_whatsapp_verified`, `template_created`, `template_processed`, `template_processing_failed`, `user_rejected_document`. When no events are selected, the trigger subscribes to a sensible default set (`document_ready`, `document_prepared`, `signer_signed_document`, `signer_rejected_document`, `document_processing_failed`).
 
-## Example workflow
+## Document workflow
 
-1. **HTTP Request / Read File** — load a PDF into a binary property.
-2. **Assinafy** (Document · Upload) — upload the PDF.
-3. **Assinafy** (Document · Wait Until Ready) — wait until metadata is ready.
-4. **Assinafy** (Signer · Create) — add one signer per contact.
-5. **Assinafy** (Assignment · Create) — create a `virtual` assignment linking the document and signers.
-6. **Assinafy Trigger** — listen for `signer_signed_document` and `document_ready` to branch into downstream automations.
+Sending and receiving are separate n8n workflows because a trigger starts a workflow and has no input connection:
+
+```text
+Send:     PDF → Upload → Wait Until Ready → Create Signer(s) → Estimate Cost → Create Assignment
+Receive:  Assinafy Trigger → deduplicate event → route by event → Download Certified PDF / handle failure
+```
+
+### Workflow A: upload and request signatures
+
+1. Start with a Manual Trigger, Webhook, form, storage node, or another source that provides a PDF as binary data. The default binary property is `data`.
+2. Add **Assinafy → Document → Upload**, select the binary property, and name the node `Upload document`. Its output is the document object; the reusable ID expression is `={{ $('Upload document').first().json.id }}`.
+3. Add **Assinafy → Document → Wait Until Ready**. Set **Document ID** to the upload expression. Continue only after the status is `metadata_ready`, `pending_signature`, or `certificated`; `failed`, rejection, expiration, and timeout states raise an error.
+4. Add **Assinafy → Signer → Create** for each recipient. Only Full Name is mandatory, but a virtual email or WhatsApp assignment needs the matching contact field. Name the nodes, for example, `Create signer 1` and `Create signer 2`.
+5. Optionally add **Assignment → Estimate Cost** before sending. Use the uploaded document ID and the same signer configuration intended for Create.
+6. Add **Assignment → Create**:
+   - **Document ID:** `={{ $('Upload document').first().json.id }}`
+   - **Method:** `virtual` for remote signing or `collect` for positioned fields
+   - **Signer 1 ID:** `={{ $('Create signer 1').first().json.id }}`
+   - **Signer 2 ID:** `={{ $('Create signer 2').first().json.id }}`
+   - Set each signer's verification method, notification method, and `step`. Equal steps run in parallel; increasing steps enforce sequence.
+   - Add `expires_at`, `message`, or `copy_receivers` only when needed. Attach tags with **Document → Append Tags** or **Replace Tags**.
+7. Persist the returned assignment ID together with the document ID in your application or data store. Do not use automatic workflow retries around Create Assignment unless your workflow first checks whether the assignment already exists; mutating API requests are not replayed by the node.
+
+For a dynamic recipient array, use n8n's Split Out/Loop Over Items to create signers, Aggregate their returned IDs, and build the Assignment signer collection from that aggregate. Keep the document ID from `Upload document` through a named-node expression instead of relying on the current item after the signer loop.
+
+### Workflow B: receive completion and download the artifact
+
+1. Create a separate workflow beginning with **Assinafy Trigger**. Select `document_ready`, `signer_rejected_document`, and `document_processing_failed`; add `signer_signed_document` if intermediate signer progress is useful.
+2. Store `$json.body.id` as an idempotency key before side effects. Assinafy can redeliver an event.
+3. Add a Switch node on `={{ $json.event }}`.
+4. For `document_ready`, use `={{ $json.body.object.id }}` as **Document ID** in **Document → Get**. Continue to **Document → Download Artifact** with `certificated` only when the returned status is `certificated` and `artifacts.certificated` exists. Otherwise, use an IF node and a short Wait node to loop back to Get with a bounded retry count or workflow timeout; stop immediately on a failed, rejected, or expired status. The PDF is returned in the configured binary property (`data` by default) with JSON metadata containing `documentId`, filename, MIME type, and size.
+5. For rejection or processing failure, route `$json.body.object.id`, `$json.body.message`, and `$json.body.payload` to your notification or incident workflow.
+
+The Trigger owns the account's single Assinafy subscription. Use one trigger workflow per account and fan out inside n8n when multiple downstream processes need the same events.
+
+### Data and error conventions
+
+- Assinafy's `{ status, message, data }` response envelope is removed before output.
+- List operations emit one n8n item per resource. Array-valued mutation responses emit one item shaped as `{ "data": [...] }`.
+- Binary downloads emit one item with JSON metadata and the file in the selected binary property.
+- **Get Signing Progress** sets `available: false` and returns null counts when the document response does not include assignment details; it never reports a synthetic `0/0` as known progress.
+- Read-only GET requests retry bounded HTTP 429 responses. Mutations are sent once so an ambiguous response cannot duplicate a document, signer, assignment, notification, or webhook action.
 
 ## Development
 
@@ -234,16 +282,20 @@ npm run lint      # n8n-node lint
 npm run build     # compiles TypeScript into dist/
 npm test          # unit and request-shape tests
 npm run test:ci   # tests with enforced coverage thresholds
+npm run audit:dev # development-tooling vulnerability gate
 npm run audit:prod # production-dependency vulnerability check
+npm run verify:package # verify the publish allowlist and load compiled node modules
 ```
 
-The codebase contains one credential, one action node with ten resources, and one trigger. The shared transport handles authenticated and public/signer-access-code requests, response-envelope unwrapping, pagination, and retryable rate limits. List-search methods back the resource-locator pickers for documents, signers, tags, and templates.
+The codebase contains one credential, one action node with ten resources, and one trigger. The shared transport handles authenticated and public/signer-access-code requests, response-envelope unwrapping, pagination, and GET rate-limit retries. List-search methods back the resource-locator pickers for documents, signers, tags, and templates.
 
-The optional sandbox suite is intentionally separate from the default test run. It requires explicit sandbox credentials, rejects production hosts, creates disposable records, and cannot complete inbox-dependent login/reset or signer-code flows without credentials/codes supplied by the operator. A route-level or request-shape check is not reported as a successful end-to-end operation. See [the operation reference](docs/OPERATIONS.md#verification-status-and-known-contract-divergences) for the verified limitations.
+The sandbox suite requires explicit credentials, rejects production hosts, and cleans up disposable records. Mutations, account-credit consumption, and workspace/logo/subscription changes each have separate opt-in gates. See [CONTRIBUTING.md](CONTRIBUTING.md) for the commands and environment variables.
 
 ## Releasing
 
-`npm run release` lints, builds, and prompts for a version bump. A version tag builds one immutable tarball, publishes it to npmjs with provenance, and mirrors the same bytes to GitHub Packages (see `.github/workflows/publish.yml`). npmjs trusted-publisher and GitHub Packages permissions must be configured in the external registries before the first release.
+`npm run release` lints, builds, and prompts for a version bump. A stable `vMAJOR.MINOR.PATCH` tag builds one immutable tarball, runs the protected Assinafy document/signing sandbox gate (including credit-consuming assignment delivery), publishes the tarball to npmjs with provenance, and then mirrors the same bytes to GitHub Packages (see `.github/workflows/publish.yml`).
+
+For the first npmjs release, store a one-time granular `NPM_TOKEN` in the protected `npm` GitHub environment and publish only through the workflow. Then configure npm trusted publishing for repository `assinafy/n8n-nodes-assinafy`, workflow `publish.yml`, and environment `npm`; revoke and remove the bootstrap token. Later releases authenticate with GitHub OIDC and keep provenance enabled.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the verification and sandbox-test workflow. Report vulnerabilities according to [SECURITY.md](SECURITY.md); never put API keys, signer codes, personal data, or document contents in a public issue.
 

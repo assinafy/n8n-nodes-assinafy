@@ -67,7 +67,7 @@ export const signerDocumentDescription: INodeProperties[] = [
 		displayOptions: { show: { ...showOnly(['list']), returnAll: [false] } },
 	},
 
-	// shared access code
+	// signer-link operations
 	{
 		displayName: 'Signer Access Code',
 		name: 'signerAccessCode',
@@ -76,6 +76,18 @@ export const signerDocumentDescription: INodeProperties[] = [
 		default: '',
 		required: true,
 		description: 'Per-signer access code (from the email/WhatsApp link)',
+		displayOptions: {
+			show: showOnly(['getCurrent', 'list', 'search', 'signMultiple', 'declineMultiple']),
+		},
+	},
+	{
+		displayName: 'Signer Access Code',
+		name: 'signerAccessCode',
+		type: 'string',
+		typeOptions: { password: true },
+		default: '',
+		description: 'Optional signer access code sent with the public artifact request',
+		displayOptions: { show: showOnly(['download']) },
 	},
 
 	// shared signer id (except for sign/decline multiple which use a code-only path)
@@ -158,10 +170,11 @@ export const signerDocumentDescription: INodeProperties[] = [
 		default: 'certificated',
 		displayOptions: { show: showOnly(['download']) },
 		options: [
-			{ name: 'Original (Uploaded File)', value: 'original' },
-			{ name: 'Certificated (Signed PDF)', value: 'certificated' },
-			{ name: 'Certificate Page', value: 'certificate-page' },
 			{ name: 'Bundle (ZIP)', value: 'bundle' },
+			{ name: 'Certificate Page', value: 'certificate-page' },
+			{ name: 'Certificated (Signed PDF)', value: 'certificated' },
+			{ name: 'Original (Uploaded File)', value: 'original' },
+			{ name: 'PAdES (Digital Certificate PDF)', value: 'pades' },
 		],
 	},
 	{
@@ -204,7 +217,7 @@ async function searchDocuments(this: IExecuteFunctions, itemIndex: number): Prom
 	const code = requireAccessCode(this, itemIndex);
 	const signerId = extractRequiredId(this, 'signerId', 'Signer ID', itemIndex);
 	const search = (this.getNodeParameter('search', itemIndex, '') as string).trim();
-	const response = await assinafyApiRequest<IDataObject[] | { data?: IDataObject[] }>(this, {
+	const response = await assinafyApiRequest<IDataObject[]>(this, {
 		method: 'GET',
 		path: `/signers/${signerId}/documents/search`,
 		qs: { 'signer-access-code': code, ...(search ? { search } : {}) },
@@ -260,12 +273,15 @@ async function signMultiple(this: IExecuteFunctions, itemIndex: number): Promise
 async function declineMultiple(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const code = requireAccessCode(this, itemIndex);
 	const csv = this.getNodeParameter('documentIds', itemIndex) as string;
-	const reason = this.getNodeParameter('declineReason', itemIndex) as string;
+	const reason = String(this.getNodeParameter('declineReason', itemIndex) ?? '').trim();
 	const ids = parseStringList(csv);
 	if (ids.length === 0) {
 		throw new NodeOperationError(this.getNode(), 'At least one document ID is required', {
 			itemIndex,
 		});
+	}
+	if (!reason) {
+		throw new NodeOperationError(this.getNode(), 'Decline Reason is required', { itemIndex });
 	}
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'PUT',
@@ -277,22 +293,22 @@ async function declineMultiple(this: IExecuteFunctions, itemIndex: number): Prom
 }
 
 async function download(this: IExecuteFunctions, itemIndex: number): Promise<INodeExecutionData> {
-	const code = requireAccessCode(this, itemIndex);
+	const code = (this.getNodeParameter('signerAccessCode', itemIndex, '') as string).trim();
 	const signerId = extractRequiredId(this, 'signerId', 'Signer ID', itemIndex);
 	const documentId = extractRequiredId(this, 'documentId', 'Document ID', itemIndex);
-	const artifact = this.getNodeParameter('artifact', itemIndex, 'certificated') as string;
+	const artifact = extractRequiredId(this, 'artifact', 'Artifact', itemIndex, 'certificated');
 	const outputProperty = this.getNodeParameter('binaryOutputProperty', itemIndex, 'data') as string;
 	const response = (await assinafyApiRequest<unknown>(this, {
 		method: 'GET',
 		path: `/signers/${signerId}/documents/${documentId}/download/${artifact}`,
-		qs: { 'signer-access-code': code },
+		qs: code ? { 'signer-access-code': code } : undefined,
 		returnBinary: true,
 		skipAuth: true,
 	})) as { body?: Buffer | ArrayBuffer; headers?: IDataObject };
 	const { buffer, mimeType: mime } = parseBinaryResponse(
 		this,
 		response,
-		'application/pdf',
+		artifact === 'bundle' ? 'application/zip' : 'application/pdf',
 		'Signer document download',
 		itemIndex,
 	);

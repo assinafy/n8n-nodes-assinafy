@@ -4,6 +4,18 @@ import { AssinafyTrigger } from '../nodes/AssinafyTrigger/AssinafyTrigger.node';
 import { DEFAULT_WEBHOOK_EVENTS } from '../nodes/Assinafy/resources/webhookEvents';
 
 const SECRET = 'shh-secret';
+const API_KEY = 'api-key';
+const WEBHOOK_HMAC_MESSAGE = 'assinafy-n8n-webhook-v1';
+
+function webhookToken(secret: string): string {
+	return createHmac('sha256', secret).update(WEBHOOK_HMAC_MESSAGE).digest('hex');
+}
+
+function securedUrl(url = 'https://n8n.example.com/webhook/abc'): string {
+	const parsed = new URL(url);
+	parsed.searchParams.set('assinafy-token', webhookToken(API_KEY));
+	return parsed.toString();
+}
 
 function sign(body: unknown): string {
 	return createHmac('sha256', SECRET)
@@ -18,10 +30,15 @@ function webhookCtx(opts: {
 	headers?: Record<string, string | string[]>;
 	rawBody?: Buffer | string;
 	secret?: string;
+	token?: string;
 }) {
 	const raw = opts.rawBody ?? Buffer.from(JSON.stringify(opts.body), 'utf8');
+	const secret = 'secret' in opts ? opts.secret : SECRET;
 	return {
 		getRequestObject: () => ({ rawBody: raw }),
+		getQueryData: () => ({
+			'assinafy-token': opts.token ?? webhookToken(secret || API_KEY),
+		}),
 		getHeaderData: () => ({
 			...(opts.headers ?? {}),
 			...(opts.signature ? { 'x-assinafy-signature': opts.signature } : {}),
@@ -29,7 +46,7 @@ function webhookCtx(opts: {
 		getBodyData: () => opts.body,
 		getNodeParameter: (name: string, def?: unknown) =>
 			name === 'verifySignature' ? opts.verify : def,
-		getCredentials: async () => ({ webhookSecret: 'secret' in opts ? opts.secret : SECRET }),
+		getCredentials: async () => ({ apiKey: API_KEY, webhookSecret: secret }),
 		getNode: () => ({ name: 'AssinafyTrigger' }),
 	} as any;
 }
@@ -47,6 +64,12 @@ describe('AssinafyTrigger webhook()', () => {
 		expect(result.workflowData![0][0].json.headers).toEqual({ 'x-request-id': 'req_123' });
 	});
 
+	it.each(['', 'invalid-token'])('rejects a missing or invalid URL token: %s', async (token) => {
+		await expect(node.webhook.call(webhookCtx({ verify: false, body, token }))).rejects.toThrow(
+			'Invalid Assinafy webhook token',
+		);
+	});
+
 	it('redacts authentication, cookie, API-key and signature headers from workflow output', async () => {
 		const result = await node.webhook.call(
 			webhookCtx({
@@ -58,6 +81,8 @@ describe('AssinafyTrigger webhook()', () => {
 					Cookie: 'session=secret',
 					'Set-Cookie': ['session=secret', 'csrf=secret'],
 					'X-Api-Key': 'api-key',
+					'X-Forwarded-Authorization': 'Bearer forwarded-secret',
+					'X-Client-Jwt-Assertion': 'jwt-secret',
 					'X-Webhook-Secret': 'webhook-secret',
 					'x-request-id': 'req_123',
 				},
@@ -69,6 +94,8 @@ describe('AssinafyTrigger webhook()', () => {
 			Cookie: '[REDACTED]',
 			'Set-Cookie': '[REDACTED]',
 			'X-Api-Key': '[REDACTED]',
+			'X-Client-Jwt-Assertion': '[REDACTED]',
+			'X-Forwarded-Authorization': '[REDACTED]',
 			'X-Webhook-Secret': '[REDACTED]',
 			'x-assinafy-signature': '[REDACTED]',
 			'x-request-id': 'req_123',
@@ -112,13 +139,18 @@ describe('AssinafyTrigger webhook()', () => {
 describe('AssinafyTrigger lifecycle', () => {
 	const node = new AssinafyTrigger();
 
-	function hookCtx(existing: unknown, calls: any[]) {
+	function hookCtx(
+		existing: unknown,
+		calls: any[],
+		overrides: { webhookUrl?: string; email?: string } = {},
+	) {
 		return {
-			getNodeWebhookUrl: () => 'https://n8n.example.com/webhook/abc',
+			getNodeWebhookUrl: () => overrides.webhookUrl ?? 'https://n8n.example.com/webhook/abc',
 			getNodeParameter: (name: string, def?: unknown) =>
-				name === 'email' ? 'ops@example.com' : name === 'events' ? [] : def,
+				name === 'email' ? (overrides.email ?? 'ops@example.com') : name === 'events' ? [] : def,
 			getCredentials: async () => ({
 				accountId: 'acc_123',
+				apiKey: API_KEY,
 				baseUrl: 'https://api.assinafy.com.br/v1',
 			}),
 			getNode: () => ({ name: 'AssinafyTrigger' }),
@@ -136,12 +168,46 @@ describe('AssinafyTrigger lifecycle', () => {
 
 	it('create() registers the subscription via PUT', async () => {
 		const calls: any[] = [];
-		const ok = await node.webhookMethods.default.create.call(hookCtx(null, calls));
+		const ok = await node.webhookMethods.default.create.call(
+			hookCtx(null, calls, {
+				webhookUrl: ' https://n8n.example.com/webhook/abc ',
+				email: ' ops@example.com ',
+			}),
+		);
 		expect(ok).toBe(true);
 		const put = calls.find((c) => c.method === 'PUT');
 		expect(put.url).toBe('https://api.assinafy.com.br/v1/accounts/acc_123/webhooks/subscriptions');
-		expect(put.body.url).toBe('https://n8n.example.com/webhook/abc');
+		expect(put.body.url).toBe(securedUrl());
+		expect(put.body.email).toBe('ops@example.com');
 		expect(put.body.is_active).toBe(true);
+	});
+
+	it.each([
+		'/webhook/abc',
+		'http://n8n.example.com/webhook/abc',
+		'https://user:password@n8n.example.com/webhook/abc',
+	])('create() rejects an invalid webhook URL: %s', async (webhookUrl) => {
+		const calls: any[] = [];
+		await expect(
+			node.webhookMethods.default.create.call(hookCtx(null, calls, { webhookUrl })),
+		).rejects.toThrow('valid HTTPS URL');
+		expect(calls).toHaveLength(0);
+	});
+
+	it('create() accepts HTTP for a loopback development webhook URL', async () => {
+		const calls: any[] = [];
+		await node.webhookMethods.default.create.call(
+			hookCtx(null, calls, { webhookUrl: 'http://127.0.0.1:5678/webhook/abc' }),
+		);
+		expect(calls[0].body.url).toBe(securedUrl('http://127.0.0.1:5678/webhook/abc'));
+	});
+
+	it('create() rejects an invalid notification email', async () => {
+		const calls: any[] = [];
+		await expect(
+			node.webhookMethods.default.create.call(hookCtx(null, calls, { email: 'not-an-email' })),
+		).rejects.toThrow('Invalid email address');
+		expect(calls).toHaveLength(0);
 	});
 
 	it('delete() inactivates the subscription', async () => {
@@ -149,7 +215,7 @@ describe('AssinafyTrigger lifecycle', () => {
 		const ok = await node.webhookMethods.default.delete.call(
 			hookCtx(
 				{
-					url: 'https://n8n.example.com/webhook/abc',
+					url: securedUrl(),
 					email: 'ops@example.com',
 					events: DEFAULT_WEBHOOK_EVENTS,
 					is_active: true,
@@ -169,7 +235,7 @@ describe('AssinafyTrigger lifecycle', () => {
 		const ok = await node.webhookMethods.default.delete.call(
 			hookCtx(
 				{
-					url: 'https://n8n.example.com/webhook/abc',
+					url: securedUrl(),
 					email: 'ops@example.com',
 					events: ['document_ready'],
 					is_active: true,
@@ -180,6 +246,14 @@ describe('AssinafyTrigger lifecycle', () => {
 		expect(ok).toBe(true);
 		expect(calls).toHaveLength(1);
 		expect(calls[0].method).toBe('GET');
+	});
+
+	it('delete() rejects invalid local configuration before making an API request', async () => {
+		const calls: any[] = [];
+		await expect(
+			node.webhookMethods.default.delete.call(hookCtx(null, calls, { webhookUrl: '/webhook/abc' })),
+		).rejects.toThrow('valid HTTPS URL');
+		expect(calls).toHaveLength(0);
 	});
 
 	it('checkExists() is false when no subscription is registered', async () => {

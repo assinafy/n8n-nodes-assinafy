@@ -7,16 +7,30 @@ import type {
 } from 'n8n-workflow';
 import { NodeOperationError } from 'n8n-workflow';
 import { assinafyApiRequest, executeListOperation } from '../shared/transport';
-import { limitField, returnAllField } from '../shared/descriptions';
+import { limitField, returnAllField, workspaceIdField } from '../shared/descriptions';
 import {
 	asArray,
 	assertBinaryFormat,
+	cleanQs,
+	extractRequiredId,
+	normalizeHexColor,
 	parseBinaryResponse,
 	showOnly as showOnlyFor,
 	wrap,
 } from '../shared/utils';
 
 const showOnly = showOnlyFor('workspace');
+const NOTIFICATION_PREFERENCE_KEYS = new Set([
+	'DocumentAboutToExpire',
+	'DocumentCancelled',
+	'DocumentCompleted',
+	'DocumentExpirationReset',
+	'DocumentExpired',
+	'DocumentProcessingFailed',
+	'SignerDeclined',
+	'SignerWhatsappFailed',
+	'TemplateProcessingFailed',
+]);
 
 export const workspaceDescription: INodeProperties[] = [
 	{
@@ -40,7 +54,12 @@ export const workspaceDescription: INodeProperties[] = [
 			{
 				name: 'Get Current User',
 				value: 'getCurrentUser',
-				action: 'Get the authenticated user and accessible workspaces',
+				action: 'Get the authenticated user',
+			},
+			{
+				name: 'Get Notification Preferences',
+				value: 'getNotificationPreferences',
+				action: 'Get my email notification preferences',
 			},
 			{ name: 'Get Theme', value: 'getTheme', action: 'Get the workspace theme' },
 			{
@@ -50,6 +69,11 @@ export const workspaceDescription: INodeProperties[] = [
 			},
 			{ name: 'List', value: 'list', action: 'List accessible workspaces' },
 			{ name: 'Update', value: 'update', action: 'Update a workspace' },
+			{
+				name: 'Update Notification Preferences',
+				value: 'updateNotificationPreferences',
+				action: 'Update my email notification preferences',
+			},
 			{ name: 'Upload Logo', value: 'uploadLogo', action: 'Upload or replace the workspace logo' },
 		],
 	},
@@ -90,11 +114,7 @@ export const workspaceDescription: INodeProperties[] = [
 
 	// --- operations needing a workspace id ---
 	{
-		displayName: 'Workspace ID',
-		name: 'workspaceId',
-		type: 'string',
-		default: '',
-		required: true,
+		...workspaceIdField,
 		displayOptions: {
 			show: showOnly([
 				'get',
@@ -107,7 +127,6 @@ export const workspaceDescription: INodeProperties[] = [
 				'deleteLogo',
 			]),
 		},
-		description: 'ID of the workspace to operate on',
 	},
 	{
 		displayName: 'Granularity',
@@ -168,6 +187,82 @@ export const workspaceDescription: INodeProperties[] = [
 		displayOptions: { show: showOnly(['delete']) },
 	},
 
+	// --- updateNotificationPreferences ---
+	{
+		displayName: 'Preferences',
+		name: 'notificationPreferences',
+		type: 'collection',
+		placeholder: 'Add Preference',
+		default: {},
+		description: 'Only selected preferences are changed; all omitted preferences keep their value',
+		displayOptions: { show: showOnly(['updateNotificationPreferences']) },
+		options: [
+			{
+				displayName: 'Document About to Expire',
+				name: 'DocumentAboutToExpire',
+				type: 'boolean',
+				default: true,
+				description: 'Whether to email when a signature deadline is approaching',
+			},
+			{
+				displayName: 'Document Cancelled',
+				name: 'DocumentCancelled',
+				type: 'boolean',
+				default: true,
+				description: 'Whether to email when a document is cancelled',
+			},
+			{
+				displayName: 'Document Completed',
+				name: 'DocumentCompleted',
+				type: 'boolean',
+				default: true,
+				description: 'Whether to email when every signer has signed and the document is certified',
+			},
+			{
+				displayName: 'Document Expiration Reset',
+				name: 'DocumentExpirationReset',
+				type: 'boolean',
+				default: true,
+				description: 'Whether to email when a signature deadline is extended',
+			},
+			{
+				displayName: 'Document Expired',
+				name: 'DocumentExpired',
+				type: 'boolean',
+				default: true,
+				description: 'Whether to email when a signature deadline has passed',
+			},
+			{
+				displayName: 'Document Processing Failed',
+				name: 'DocumentProcessingFailed',
+				type: 'boolean',
+				default: true,
+				description: 'Whether to email when an uploaded document cannot be processed',
+			},
+			{
+				displayName: 'Signer Declined',
+				name: 'SignerDeclined',
+				type: 'boolean',
+				default: true,
+				description: 'Whether to email when a signer declines to sign',
+			},
+			{
+				displayName: 'Signer WhatsApp Failed',
+				name: 'SignerWhatsappFailed',
+				type: 'boolean',
+				default: true,
+				description: 'Whether to email when a WhatsApp notification cannot be delivered',
+			},
+			{
+				displayName: 'Template Processing Failed',
+				name: 'TemplateProcessingFailed',
+				type: 'boolean',
+				default: true,
+				description: 'Whether to email when a template cannot be processed',
+			},
+		],
+	},
+
 	// --- uploadLogo / downloadLogo ---
 	{
 		displayName: 'Binary Property',
@@ -213,6 +308,10 @@ export async function executeWorkspace(
 			return wrap(await deleteWorkspace.call(this, itemIndex));
 		case 'getCurrentUser':
 			return wrap(await getCurrentUser.call(this));
+		case 'getNotificationPreferences':
+			return wrap(await getNotificationPreferences.call(this));
+		case 'updateNotificationPreferences':
+			return wrap(await updateNotificationPreferences.call(this, itemIndex));
 		case 'getAccountStats':
 			return getAccountStats.call(this, itemIndex);
 		case 'getUserStats':
@@ -236,7 +335,7 @@ async function getAccountStats(
 	this: IExecuteFunctions,
 	itemIndex: number,
 ): Promise<INodeExecutionData[]> {
-	const id = this.getNodeParameter('workspaceId', itemIndex) as string;
+	const id = extractWorkspaceId.call(this, itemIndex);
 	return getStats.call(this, itemIndex, `/accounts/${id}/stats`);
 }
 
@@ -261,7 +360,7 @@ async function getStats(
 		}
 		qs.month = month;
 	}
-	const response = await assinafyApiRequest<IDataObject[] | { data?: IDataObject[] }>(this, {
+	const response = await assinafyApiRequest<IDataObject[]>(this, {
 		method: 'GET',
 		path,
 		qs,
@@ -270,14 +369,29 @@ async function getStats(
 }
 
 async function createWorkspace(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
-	const name = this.getNodeParameter('name', itemIndex) as string;
+	const name = (this.getNodeParameter('name', itemIndex) as string).trim();
+	if (!name) {
+		throw new NodeOperationError(this.getNode(), 'Name is required', { itemIndex });
+	}
 	const additional = this.getNodeParameter('additionalFields', itemIndex, {}) as IDataObject;
 	const body: IDataObject = { name };
 	if (additional.notification_sender_type) {
 		body.notification_sender_type = additional.notification_sender_type;
 	}
-	if (additional.primary_color) body.primary_color = additional.primary_color;
-	if (additional.secondary_color) body.secondary_color = additional.secondary_color;
+	const primaryColor = normalizeHexColor(
+		this,
+		additional.primary_color,
+		itemIndex,
+		'Primary Color',
+	);
+	const secondaryColor = normalizeHexColor(
+		this,
+		additional.secondary_color,
+		itemIndex,
+		'Secondary Color',
+	);
+	if (primaryColor) body.primary_color = primaryColor;
+	if (secondaryColor) body.secondary_color = secondaryColor;
 	return assinafyApiRequest<IDataObject>(this, { method: 'POST', path: '/accounts', body });
 }
 
@@ -289,13 +403,35 @@ async function listWorkspaces(
 }
 
 async function getWorkspace(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
-	const id = this.getNodeParameter('workspaceId', itemIndex) as string;
+	const id = extractWorkspaceId.call(this, itemIndex);
 	return assinafyApiRequest<IDataObject>(this, { method: 'GET', path: `/accounts/${id}` });
 }
 
 async function updateWorkspace(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
-	const id = this.getNodeParameter('workspaceId', itemIndex) as string;
-	const updates = this.getNodeParameter('updateFields', itemIndex, {}) as IDataObject;
+	const id = extractWorkspaceId.call(this, itemIndex);
+	const updates = cleanQs(this.getNodeParameter('updateFields', itemIndex, {}) as IDataObject);
+	if (updates.name !== undefined) {
+		updates.name = String(updates.name).trim();
+		if (!updates.name) {
+			throw new NodeOperationError(this.getNode(), 'Name cannot be blank', { itemIndex });
+		}
+	}
+	if (updates.primary_color !== undefined) {
+		updates.primary_color = normalizeHexColor(
+			this,
+			updates.primary_color,
+			itemIndex,
+			'Primary Color',
+		)!;
+	}
+	if (updates.secondary_color !== undefined) {
+		updates.secondary_color = normalizeHexColor(
+			this,
+			updates.secondary_color,
+			itemIndex,
+			'Secondary Color',
+		)!;
+	}
 	if (Object.keys(updates).length === 0) {
 		throw new NodeOperationError(this.getNode(), 'At least one update field is required', {
 			itemIndex,
@@ -309,7 +445,7 @@ async function updateWorkspace(this: IExecuteFunctions, itemIndex: number): Prom
 }
 
 async function deleteWorkspace(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
-	const id = this.getNodeParameter('workspaceId', itemIndex) as string;
+	const id = extractWorkspaceId.call(this, itemIndex);
 	const force = this.getNodeParameter('force', itemIndex, false) as boolean;
 	await assinafyApiRequest(this, {
 		method: 'DELETE',
@@ -319,19 +455,66 @@ async function deleteWorkspace(this: IExecuteFunctions, itemIndex: number): Prom
 	return { deleted: true, workspaceId: id };
 }
 
-/** GET /users/self — the authenticated user plus the workspaces they can access. */
+/** GET /users/self — the authenticated user. */
 async function getCurrentUser(this: IExecuteFunctions): Promise<IDataObject> {
 	return assinafyApiRequest<IDataObject>(this, { method: 'GET', path: '/users/self' });
 }
 
+async function getNotificationPreferences(this: IExecuteFunctions): Promise<IDataObject> {
+	return assinafyApiRequest<IDataObject>(this, {
+		method: 'GET',
+		path: '/users/self/notification-preferences',
+	});
+}
+
+async function updateNotificationPreferences(
+	this: IExecuteFunctions,
+	itemIndex: number,
+): Promise<IDataObject> {
+	const preferences = this.getNodeParameter(
+		'notificationPreferences',
+		itemIndex,
+		{},
+	) as IDataObject;
+	if (Object.keys(preferences).length === 0) {
+		throw new NodeOperationError(
+			this.getNode(),
+			'At least one notification preference is required',
+			{
+				itemIndex,
+			},
+		);
+	}
+	const unknownKey = Object.keys(preferences).find((key) => !NOTIFICATION_PREFERENCE_KEYS.has(key));
+	if (unknownKey) {
+		throw new NodeOperationError(this.getNode(), `Unknown notification preference: ${unknownKey}`, {
+			itemIndex,
+		});
+	}
+	if (Object.values(preferences).some((value) => typeof value !== 'boolean')) {
+		throw new NodeOperationError(
+			this.getNode(),
+			'Notification preferences must be boolean values',
+			{
+				itemIndex,
+			},
+		);
+	}
+	return assinafyApiRequest<IDataObject>(this, {
+		method: 'PUT',
+		path: '/users/self/notification-preferences',
+		body: preferences,
+	});
+}
+
 /** GET /accounts/{id}/theme — branding (name, colors, logo URL) for a workspace. */
 async function getTheme(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
-	const id = this.getNodeParameter('workspaceId', itemIndex) as string;
+	const id = extractWorkspaceId.call(this, itemIndex);
 	return assinafyApiRequest<IDataObject>(this, { method: 'GET', path: `/accounts/${id}/theme` });
 }
 
 async function uploadLogo(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
-	const id = this.getNodeParameter('workspaceId', itemIndex) as string;
+	const id = extractWorkspaceId.call(this, itemIndex);
 	const binaryPropertyName = this.getNodeParameter(
 		'binaryPropertyName',
 		itemIndex,
@@ -365,7 +548,7 @@ async function downloadLogo(
 	this: IExecuteFunctions,
 	itemIndex: number,
 ): Promise<INodeExecutionData> {
-	const id = this.getNodeParameter('workspaceId', itemIndex) as string;
+	const id = extractWorkspaceId.call(this, itemIndex);
 	const outputProperty = this.getNodeParameter('binaryOutputProperty', itemIndex, 'data') as string;
 	const response = (await assinafyApiRequest<unknown>(this, {
 		method: 'GET',
@@ -391,7 +574,11 @@ async function downloadLogo(
 }
 
 async function deleteLogo(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
-	const id = this.getNodeParameter('workspaceId', itemIndex) as string;
+	const id = extractWorkspaceId.call(this, itemIndex);
 	await assinafyApiRequest(this, { method: 'DELETE', path: `/accounts/${id}/logo` });
 	return { deleted: true, workspaceId: id };
+}
+
+function extractWorkspaceId(this: IExecuteFunctions, itemIndex: number): string {
+	return extractRequiredId(this, 'workspaceId', 'Workspace ID', itemIndex);
 }

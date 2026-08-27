@@ -63,10 +63,10 @@ describe('resource request construction', () => {
 		expect(request.qs).toEqual({ force: true });
 	});
 
-	it('appends document tags as the documented tags array', async () => {
+	it('preserves commas in document tag names', async () => {
 		const { ctx, httpRequestWithAuthentication } = createMockContext({
 			documentId: 'doc_123',
-			tagNames: ['Urgent, Legal', 'Renewal'],
+			tagNames: ['ACME, Inc.', 'Renewal'],
 		});
 
 		await executeDocument.call(ctx as any, 0, 'appendTags');
@@ -76,7 +76,7 @@ describe('resource request construction', () => {
 		expect(request.url).toBe(
 			'https://api.assinafy.com.br/v1/accounts/acc_123/documents/doc_123/tags',
 		);
-		expect(request.body).toEqual({ tags: ['Urgent', 'Legal', 'Renewal'] });
+		expect(request.body).toEqual({ tags: ['ACME, Inc.', 'Renewal'] });
 	});
 
 	it('normalizes document tag filters to the documented comma-separated query value', async () => {
@@ -84,7 +84,7 @@ describe('resource request construction', () => {
 			{
 				returnAll: false,
 				limit: 10,
-				filters: { status: 'pending_signature', tags: ['tag_1, tag_2'] },
+				filters: { status: 'pending_signature', tags: ['tag_1', 'tag_2'] },
 			},
 			[{ id: 'doc_123' }],
 		);

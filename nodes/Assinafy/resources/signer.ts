@@ -22,7 +22,6 @@ import {
 	cleanQs,
 	extractRequiredId,
 	parseBinaryResponse,
-	parseJsonParam,
 	requireAccessCode,
 	sanitizeCpf,
 	showOnly as showOnlyFor,
@@ -57,7 +56,7 @@ export const signerDescription: INodeProperties[] = [
 			{
 				name: 'Confirm Data (Signer Side)',
 				value: 'confirmData',
-				action: 'Signer confirms email or whatsapp before signing',
+				action: 'Signer confirms identity data before signing',
 			},
 			{ name: 'Create', value: 'create', action: 'Create a signer' },
 			{ name: 'Delete', value: 'delete', action: 'Delete a signer' },
@@ -109,7 +108,7 @@ export const signerDescription: INodeProperties[] = [
 		placeholder: 'name@example.com',
 		default: '',
 		description:
-			'Signer email address. Optional when using WhatsApp-only verification/notification. At least one of Email or WhatsApp Phone Number must be provided.',
+			'Signer email address. Optional; add an email or WhatsApp number before requesting a remote signature.',
 		displayOptions: { show: showOnly(['create']) },
 	},
 	{
@@ -130,20 +129,6 @@ export const signerDescription: INodeProperties[] = [
 		default: {},
 		displayOptions: { show: showOnly(['create']) },
 		options: [
-			{
-				displayName: 'CPF',
-				name: 'cpf',
-				type: 'string',
-				default: '',
-				placeholder: '123.456.789-00',
-				description: 'Brazilian tax ID (CPF). Non-digit characters are stripped before sending.',
-			},
-			{
-				displayName: 'Metadata (JSON)',
-				name: 'metadata',
-				type: 'json',
-				default: '{}',
-			},
 			{
 				displayName: 'Reuse If Exists',
 				name: 'reuseIfExists',
@@ -180,12 +165,12 @@ export const signerDescription: INodeProperties[] = [
 		displayOptions: { show: showOnly(['update']) },
 		options: [
 			{
-				displayName: 'CPF',
-				name: 'cpf',
+				displayName: 'Government ID',
+				name: 'government_id',
 				type: 'string',
 				default: '',
-				placeholder: '123.456.789-00',
-				description: 'Brazilian tax ID (CPF). Non-digit characters are stripped before sending.',
+				placeholder: '390.533.447-05',
+				description: 'Brazilian CPF or CNPJ. Non-digit characters are stripped before sending.',
 			},
 			{
 				displayName: 'Email',
@@ -276,7 +261,7 @@ export const signerDescription: INodeProperties[] = [
 				type: 'boolean',
 				default: false,
 				description:
-					'Whether to accept terms through this legacy runtime-compatible field. Prefer the dedicated Accept Terms operation.',
+					'Whether to include terms acceptance in this data-confirmation request. The dedicated Accept Terms operation is also available.',
 			},
 			{
 				displayName: 'Email',
@@ -299,7 +284,7 @@ export const signerDescription: INodeProperties[] = [
 				type: 'string',
 				default: '',
 				placeholder: '+5548999990000',
-				description: 'Legacy runtime-compatible field; not listed in the current OpenAPI schema',
+				description: 'WhatsApp number to confirm for this signer in E.164 format',
 			},
 		],
 	},
@@ -397,21 +382,16 @@ async function createSigner(
 	itemIndex: number,
 	accountId: string,
 ): Promise<IDataObject> {
-	const fullName = this.getNodeParameter('fullName', itemIndex) as string;
+	const fullName = (this.getNodeParameter('fullName', itemIndex) as string).trim();
 	const email = (this.getNodeParameter('email', itemIndex, '') as string).trim();
 	const additional = this.getNodeParameter('additionalFields', itemIndex, {}) as IDataObject;
 	const reuseIfExists = additional.reuseIfExists !== false;
+	if (!fullName) {
+		throw new NodeOperationError(this.getNode(), 'Full Name is required', { itemIndex });
+	}
 
 	if (email && !assertEmail(email)) {
 		throw new NodeOperationError(this.getNode(), 'Invalid email address', { itemIndex });
-	}
-
-	if (!email && !additional.whatsapp_phone_number) {
-		throw new NodeOperationError(
-			this.getNode(),
-			'At least one of Email or WhatsApp Phone Number is required to create a signer',
-			{ itemIndex },
-		);
 	}
 
 	if (email && reuseIfExists) {
@@ -423,16 +403,6 @@ async function createSigner(
 	if (email) body.email = email;
 	if (additional.whatsapp_phone_number)
 		body.whatsapp_phone_number = additional.whatsapp_phone_number;
-	if (additional.cpf) body.cpf = sanitizeCpf(additional.cpf as string);
-	if (additional.metadata !== undefined && additional.metadata !== '') {
-		const metadata = parseJsonParam(this, additional.metadata, 'Metadata', itemIndex);
-		if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
-			throw new NodeOperationError(this.getNode(), 'Metadata must be a JSON object', {
-				itemIndex,
-			});
-		}
-		body.metadata = metadata as IDataObject;
-	}
 
 	try {
 		return await assinafyApiRequest<IDataObject>(this, {
@@ -485,13 +455,25 @@ async function updateSigner(
 ): Promise<IDataObject> {
 	const signerId = extractSignerId.call(this, itemIndex);
 	const updates = this.getNodeParameter('updateFields', itemIndex, {}) as IDataObject;
-	if (Object.keys(updates).length === 0) {
+	const body = cleanQs(updates);
+	// Map saved `cpf` workflow values to the API's `government_id` field.
+	const governmentId = body.government_id ?? body.cpf;
+	delete body.cpf;
+	if (governmentId !== undefined) body.government_id = sanitizeCpf(String(governmentId));
+	if (body.full_name !== undefined) {
+		body.full_name = String(body.full_name).trim();
+		if (!body.full_name) {
+			throw new NodeOperationError(this.getNode(), 'Full Name cannot be blank', { itemIndex });
+		}
+	}
+	if (body.email && !assertEmail(String(body.email))) {
+		throw new NodeOperationError(this.getNode(), 'Invalid email address', { itemIndex });
+	}
+	if (Object.keys(body).length === 0) {
 		throw new NodeOperationError(this.getNode(), 'At least one update field is required', {
 			itemIndex,
 		});
 	}
-	const body: IDataObject = { ...updates };
-	if (body.cpf) body.cpf = sanitizeCpf(body.cpf as string);
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'PUT',
 		path: `/accounts/${accountId}/signers/${signerId}`,
@@ -517,7 +499,7 @@ async function findByEmail(
 	itemIndex: number,
 	accountId: string,
 ): Promise<IDataObject> {
-	const email = this.getNodeParameter('email', itemIndex) as string;
+	const email = (this.getNodeParameter('email', itemIndex) as string).trim();
 	if (!assertEmail(email)) {
 		throw new NodeOperationError(this.getNode(), 'Invalid email address', { itemIndex });
 	}
@@ -531,7 +513,7 @@ async function lookupSignerByEmail(
 	email: string,
 ): Promise<IDataObject | null> {
 	try {
-		const response = await assinafyApiRequest<IDataObject[] | { data?: IDataObject[] }>(this, {
+		const response = await assinafyApiRequest<IDataObject[]>(this, {
 			method: 'GET',
 			path: `/accounts/${accountId}/signers`,
 			qs: { search: email, 'per-page': 100 },
@@ -586,10 +568,7 @@ async function verifyCode(this: IExecuteFunctions, itemIndex: number): Promise<I
 
 async function confirmData(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const code = requireAccessCode(this, itemIndex);
-	const documentId = (this.getNodeParameter('confirmDocumentId', itemIndex) as string).trim();
-	if (!documentId) {
-		throw new NodeOperationError(this.getNode(), 'Document ID is required', { itemIndex });
-	}
+	const documentId = extractRequiredId(this, 'confirmDocumentId', 'Document ID', itemIndex);
 	const fields = this.getNodeParameter('confirmFields', itemIndex, {}) as IDataObject;
 	const body: IDataObject = {};
 	if (fields.full_name) body.full_name = fields.full_name;
@@ -608,7 +587,7 @@ async function confirmData(this: IExecuteFunctions, itemIndex: number): Promise<
 
 async function uploadSignature(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const code = requireAccessCode(this, itemIndex);
-	const type = this.getNodeParameter('signatureType', itemIndex, 'signature') as string;
+	const type = extractRequiredId(this, 'signatureType', 'Signature Type', itemIndex, 'signature');
 	const binaryProperty = this.getNodeParameter('binaryPropertyName', itemIndex, 'data') as string;
 	const binary = this.helpers.assertBinaryData(itemIndex, binaryProperty) as IBinaryData;
 	const buffer = await this.helpers.getBinaryDataBuffer(itemIndex, binaryProperty);
@@ -641,7 +620,7 @@ async function downloadSignature(
 	itemIndex: number,
 ): Promise<INodeExecutionData> {
 	const code = requireAccessCode(this, itemIndex);
-	const type = this.getNodeParameter('signatureType', itemIndex, 'signature') as string;
+	const type = extractRequiredId(this, 'signatureType', 'Signature Type', itemIndex, 'signature');
 	const outputProperty = this.getNodeParameter('binaryOutputProperty', itemIndex, 'data') as string;
 	const response = (await assinafyApiRequest<unknown>(this, {
 		method: 'GET',
@@ -657,7 +636,7 @@ async function downloadSignature(
 		'Signature download',
 		itemIndex,
 	);
-	const ext = mime.includes('jpeg') ? 'jpg' : 'png';
+	const ext = mime.includes('jpeg') || mime.includes('jpg') ? 'jpg' : 'png';
 	const fileName = `${type}.${ext}`;
 	const data = await this.helpers.prepareBinaryData(buffer, fileName, mime);
 	return {

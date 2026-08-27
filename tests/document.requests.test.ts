@@ -15,6 +15,9 @@ describe('document request construction', () => {
 		expect(req.method).toBe('POST');
 		expect(req.url).toBe(`${BASE}/accounts/acc_123/documents`);
 		expect(req.body).toBeInstanceOf(FormData);
+		const entries = [...(req.body as FormData).entries()];
+		expect(entries.map(([name]) => name)).toEqual(['file']);
+		expect((entries[0][1] as { name: string }).name).toBe('contract.pdf');
 	});
 
 	it('rejects a non-PDF upload', async () => {
@@ -102,6 +105,16 @@ describe('document request construction', () => {
 		expect(result.binary.data).toBeDefined();
 	});
 
+	it('downloads the PAdES digital-certificate artifact', async () => {
+		const { ctx, requests } = makeCtx(
+			{ documentId: 'doc_123', artifact: 'pades', binaryOutputProperty: 'data' },
+			{ binaryBuffer: Buffer.from('PDF'), headers: { 'content-type': 'application/pdf' } },
+		);
+		const result = (await executeDocument.call(ctx as any, 0, 'download')) as any;
+		expect(lastAuth(requests).url).toBe(`${BASE}/documents/doc_123/download/pades`);
+		expect(result.json.fileName).toBe('doc_123-pades.pdf');
+	});
+
 	it('downloads a page image', async () => {
 		const { ctx, requests } = makeCtx(
 			{ documentId: 'doc_123', pageId: 'pg_1', binaryOutputProperty: 'data' },
@@ -141,6 +154,34 @@ describe('document request construction', () => {
 		expect(result.json.status).toBe('metadata_ready');
 	});
 
+	it('does not sleep past the configured maximum wait', async () => {
+		jest.useFakeTimers();
+		try {
+			const { ctx, requests } = makeCtx(
+				{ documentId: 'doc_123', maxWaitMs: 20, pollIntervalMs: 1000 },
+				{ response: { id: 'doc_123', status: 'metadata_processing' } },
+			);
+			const assertion = expect(
+				executeDocument.call(ctx as any, 0, 'waitUntilReady'),
+			).rejects.toThrow('Timed out after 20ms');
+
+			await jest.advanceTimersByTimeAsync(20);
+			await assertion;
+			expect(requests).toHaveLength(1);
+		} finally {
+			jest.useRealTimers();
+		}
+	});
+
+	it.each([
+		[{ maxWaitMs: 0, pollIntervalMs: 100 }, 'Max Wait must be a positive number'],
+		[{ maxWaitMs: 100, pollIntervalMs: 0 }, 'Poll Interval must be a positive number'],
+	])('rejects invalid wait timing before making a request', async (timing, message) => {
+		const { ctx, requests } = makeCtx({ documentId: 'doc_123', ...timing });
+		await expect(executeDocument.call(ctx as any, 0, 'waitUntilReady')).rejects.toThrow(message);
+		expect(requests).toHaveLength(0);
+	});
+
 	it('summarizes signing progress from assignment.summary', async () => {
 		const { ctx } = makeCtx(
 			{ documentId: 'doc_123' },
@@ -152,7 +193,58 @@ describe('document request construction', () => {
 			},
 		);
 		const result = (await executeDocument.call(ctx as any, 0, 'getSigningProgress')) as any;
-		expect(result.json).toMatchObject({ signed: 1, total: 2, pending: 1, percentage: 50 });
+		expect(result.json).toMatchObject({
+			available: true,
+			signed: 1,
+			total: 2,
+			pending: 1,
+			percentage: 50,
+		});
+	});
+
+	it('marks signing progress unavailable when the document omits assignment details', async () => {
+		const { ctx } = makeCtx(
+			{ documentId: 'doc_123' },
+			{ response: { status: 'pending_signature', assignment: null } },
+		);
+		const result = (await executeDocument.call(ctx as any, 0, 'getSigningProgress')) as any;
+		expect(result.json).toMatchObject({
+			available: false,
+			signed: null,
+			total: null,
+			pending: null,
+			percentage: null,
+		});
+	});
+
+	it('normalizes numeric signing-summary strings', async () => {
+		const { ctx } = makeCtx(
+			{ documentId: 'doc_123' },
+			{
+				response: {
+					status: 'pending_signature',
+					assignment: { summary: { signer_count: '2', completed_count: '2' } },
+				},
+			},
+		);
+		const result = (await executeDocument.call(ctx as any, 0, 'getSigningProgress')) as any;
+		expect(result.json).toMatchObject({ signed: 2, total: 2, pending: 0, percentage: 100 });
+		expect(result.json.isFullySigned).toBe(true);
+	});
+
+	it.each([
+		{ signer_count: 'many', completed_count: 1 },
+		{ signer_count: true, completed_count: 1 },
+		{ signer_count: 2, completed_count: -1 },
+		{ signer_count: 1, completed_count: 2 },
+	])('rejects invalid signing-summary counts: %j', async (summary) => {
+		const { ctx } = makeCtx(
+			{ documentId: 'doc_123' },
+			{ response: { status: 'pending_signature', assignment: { summary } } },
+		);
+		await expect(executeDocument.call(ctx as any, 0, 'getSigningProgress')).rejects.toThrow(
+			'Document signing summary contains invalid counts',
+		);
 	});
 
 	it('creates a document from a template with signers', async () => {
@@ -203,6 +295,41 @@ describe('document request construction', () => {
 		const req = lastAuth(requests);
 		expect(req.url).toBe(`${BASE}/accounts/acc_123/templates/tpl_1/documents/estimate-cost`);
 		expect(req.body.signers).toEqual([{ role_id: 'role_1' }]);
+	});
+
+	it('estimates Digital Certificate cost from a template', async () => {
+		const { ctx, requests } = makeCtx({
+			templateId: 'tpl_1',
+			templateSigners: {
+				signer: [{ role_id: 'role_1', verification_method: 'DigitalCertificate' }],
+			},
+		});
+		await executeDocument.call(ctx as any, 0, 'estimateCostFromTemplate');
+		expect(lastAuth(requests).body.signers).toEqual([
+			{ role_id: 'role_1', verification_method: 'DigitalCertificate' },
+		]);
+	});
+
+	it('rejects a Digital Certificate template signer sharing a signing step', async () => {
+		const { ctx, requests } = makeCtx({
+			templateId: 'tpl_1',
+			templateSigners: {
+				signer: [
+					{
+						role_id: 'role_1',
+						id: 'sig_1',
+						verification_method: 'DigitalCertificate',
+						step: 1,
+					},
+					{ role_id: 'role_2', id: 'sig_2', verification_method: 'Email', step: 1 },
+				],
+			},
+			additionalFields: {},
+		});
+		await expect(executeDocument.call(ctx as any, 0, 'createFromTemplate')).rejects.toThrow(
+			'must be alone in their signing step',
+		);
+		expect(requests).toHaveLength(0);
 	});
 
 	it('omits signer IDs and signing steps from a template cost estimate', async () => {
@@ -271,11 +398,11 @@ describe('document request construction', () => {
 	});
 
 	it('verifies a document by hash without authentication', async () => {
-		const { ctx, requests } = makeCtx({ signatureHash: 'hash123' });
+		const { ctx, requests } = makeCtx({ signatureHash: ' hash/123?value ' });
 		await executeDocument.call(ctx as any, 0, 'verify');
 		const req = lastPublic(requests);
 		expect(req.method).toBe('GET');
-		expect(req.url).toBe(`${BASE}/documents/hash123/verify`);
+		expect(req.url).toBe(`${BASE}/documents/hash%2F123%3Fvalue/verify`);
 	});
 
 	it('reads public info without authentication', async () => {
@@ -287,14 +414,39 @@ describe('document request construction', () => {
 	it('sends a public token via the public endpoint', async () => {
 		const { ctx, requests } = makeCtx({
 			publicDocumentId: 'doc_pub',
-			recipient: 'a@b.com',
+			recipient: ' user@example.com ',
 			channel: 'email',
 		});
 		await executeDocument.call(ctx as any, 0, 'sendPublicToken');
 		const req = lastPublic(requests);
 		expect(req.method).toBe('PUT');
 		expect(req.url).toBe(`${BASE}/public/documents/doc_pub/send-token`);
-		expect(req.body).toEqual({ recipient: 'a@b.com', channel: 'email' });
+		expect(req.body).toEqual({ recipient: 'user@example.com', channel: 'email' });
+	});
+
+	it('rejects an invalid email-channel public token recipient', async () => {
+		const { ctx, requests } = makeCtx({
+			publicDocumentId: 'doc_pub',
+			recipient: 'not-an-email',
+			channel: 'email',
+		});
+		await expect(executeDocument.call(ctx as any, 0, 'sendPublicToken')).rejects.toThrow(
+			'Invalid recipient email address',
+		);
+		expect(requests).toHaveLength(0);
+	});
+
+	it('accepts a WhatsApp public token recipient', async () => {
+		const { ctx, requests } = makeCtx({
+			publicDocumentId: 'doc_pub',
+			recipient: '+5511999990001',
+			channel: 'whatsapp',
+		});
+		await executeDocument.call(ctx as any, 0, 'sendPublicToken');
+		expect(lastPublic(requests).body).toEqual({
+			recipient: '+5511999990001',
+			channel: 'whatsapp',
+		});
 	});
 
 	it('lists document statuses', async () => {
@@ -314,12 +466,16 @@ describe('document request construction', () => {
 	});
 
 	it('replaces document tags', async () => {
-		const { ctx, requests } = makeCtx({ documentId: 'doc_123', tagNames: ['A', 'B'] });
-		await executeDocument.call(ctx as any, 0, 'replaceTags');
+		const { ctx, requests } = makeCtx(
+			{ documentId: 'doc_123', tagNames: ['A', 'B'] },
+			{ response: [{ id: 'tag_1', name: 'A' }] },
+		);
+		const result = (await executeDocument.call(ctx as any, 0, 'replaceTags')) as any;
 		const req = lastAuth(requests);
 		expect(req.method).toBe('PUT');
 		expect(req.url).toBe(`${BASE}/accounts/acc_123/documents/doc_123/tags`);
 		expect(req.body).toEqual({ tags: ['A', 'B'] });
+		expect(result.json).toEqual({ data: [{ id: 'tag_1', name: 'A' }] });
 	});
 
 	it('detaches a single tag', async () => {

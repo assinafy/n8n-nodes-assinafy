@@ -9,12 +9,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
-- Completed coverage of the 87-operation OpenAPI snapshot captured on 2026-08-08:
-  Assignment `List`, Authentication `Link Social Login`, Signer Document `Search`,
+- Added Assignment `List`, Authentication `Link Social Login`, Signer Document `Search`,
   Workspace `Get Account Statistics`, and Workspace `Get User Statistics`.
-- Added request/response documentation for the new operations and a shared schema catalog,
-  contract snapshot hash, binary/envelope conventions, and explicit live-versus-OpenAPI
-  compatibility notes.
+- Added request/response documentation for the new operations and a shared schema catalog
+  with binary and response-envelope conventions.
 - Added `notification_sender_type` to Workspace Create/Update, `force` to Workspace Delete,
   `has_accepted_terms` to Assignment Get Sign Page, and signature reuse control.
 
@@ -22,13 +20,13 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 - Corrected signer Accept Terms and Verify Code to send `signer-access-code` in the query
   string; Verify Code sends only `verification-code` in the JSON body.
-- Signer Confirm Data now exposes the published `full_name`, `email`, and `government_id`
-  fields while retaining clearly labelled legacy runtime fields. Signature uploads reject
-  empty data and preserve sandbox-compatible JPEG support alongside documented PNG.
+- Signer Confirm Data now exposes `full_name`, `email`, `government_id`,
+  `whatsapp_phone_number`, and `has_accepted_terms`. Signature uploads reject empty data
+  and accept detected PNG or JPEG content.
 - Field validation retains configured account authentication when optional signer context is
   supplied.
-- Documentation now treats npmjs as the primary registry, uses synthetic identities and
-  placeholders throughout, and no longer overstates live-test coverage.
+- Documentation now treats npmjs as the primary registry and uses synthetic identities and
+  placeholders throughout.
 - Centralized transport now validates base URLs, consistently wraps API failures, retries HTTP
   429 rate limits (including HTTP-date `Retry-After` values), and handles pagination when response
   headers are absent.
@@ -46,18 +44,6 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `finally` blocks, and keeps workspace/logo mutations behind a separate disposable-workspace
   gate.
 
-### Compatibility notes
-
-- The sandbox deployment tested on 2026-08-08 returned route-level HTTP 404 responses for the OpenAPI-published account
-  and current-user statistics endpoints. The operations remain implemented for deployments that
-  expose the published contract.
-- The sandbox deployment tested on 2026-08-08 rejected the OpenAPI-published `notification_sender_type` workspace field
-  with HTTP 400. The optional field remains available for contract-compatible deployments and is
-  documented as unsupported on that sandbox.
-- The live sandbox continues to require `{ recipient, channel }` for public-token delivery and
-  accepts document tag names, despite the current OpenAPI describing `{ email }` and tag IDs.
-  Proven working behavior was preserved and documented rather than removed.
-
 ### Fixed
 
 - **CI: `build (20.x)` job failed at `npm ci`.** A transitive build-toolchain
@@ -72,15 +58,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 - Updated GitHub Actions to the current major releases pinned by full commit SHA, and moved
   CI/release execution to Node.js 24 LTS with least-privilege permissions.
-- Added coverage-gated GitHub and GitLab pipelines, production dependency auditing, package
+- Added coverage-gated GitHub and GitLab pipelines, production dependency vulnerability checks, package
   content/runtime-entry checks, npmjs provenance publishing, and a GitHub Packages mirror.
 
 ## [1.4.0] — 2026-07-20
-
-API contract review against Assinafy v1 and selected live sandbox flows. The operation
-count quoted by the earlier release notes was provisional; the authoritative 2026-08-08
-snapshot contains 87 operations. Request-shape coverage and route checks must not be read as
-proof that every inbox-dependent, credential-dependent, or destructive flow completed end to end.
 
 ### Added
 
@@ -97,10 +78,7 @@ proof that every inbox-dependent, credential-dependent, or destructive flow comp
 
 ### Removed
 
-- **Webhook — `Delete Subscription`.** The API exposes no `DELETE` route for the
-  subscription (`DELETE /accounts/{accountId}/webhooks/subscriptions` returns HTTP 404).
-  Live testing confirmed the operation was non-functional; use **Inactivate Subscription**
-  to stop deliveries.
+- **Webhook — `Delete Subscription`.** Use **Inactivate Subscription** to stop deliveries.
 
 ### CI
 
@@ -109,17 +87,12 @@ proof that every inbox-dependent, credential-dependent, or destructive flow comp
 
 ## [1.3.0] — 2026-06-05
 
-Production-hardening release against the Assinafy v1 API with selected sandbox verification.
-It added a per-operation reference, a larger request-shape test suite, and CI execution. Some
-inbox-dependent and destructive flows were not successful end-to-end tests.
+Production-hardening release with a per-operation reference, a larger request-shape test suite,
+and CI execution.
 
 ### Removed
 
-- **Assignment — `Cancel Signature Request`.** Live testing confirmed the endpoint
-  does not exist (every candidate path — `POST /accounts/{id}/signature-requests/{docId}/cancel`,
-  `/documents/{id}/cancel`, `.../assignments/{id}/cancel` — returns 404, even against a real
-  document with an active assignment), and the API docs document no cancellation endpoint. The
-  non-functional operation was removed.
+- **Assignment — `Cancel Signature Request`.** Assinafy provides no cancellation operation.
 
 ### Fixed
 
@@ -137,10 +110,9 @@ inbox-dependent and destructive flows were not successful end-to-end tests.
 
 ### Changed
 
-- **Trigger signature verification is now opt-in (default off).** The Assinafy docs document
-  no delivery signature; enabling `Verify Signature` (with a credential Webhook Secret) keeps the
-  HMAC-SHA256 check, which now **fails closed** when the raw request body is unavailable instead
-  of re-serializing the parsed body.
+- **Trigger signature verification is now opt-in (default off).** Enabling `Verify Signature`
+  with a credential Webhook Secret performs an HMAC-SHA256 check and **fails closed** when the
+  raw request body is unavailable.
 - **`assinafyApiRequestAllItems` honors `skipAuth`** and wraps page errors in `NodeApiError`,
   and `per-page` is clamped to the documented maximum of 100.
 - **Signer Document `List` emits one n8n item per document** (was a single bundled item),
@@ -165,15 +137,12 @@ inbox-dependent and destructive flows were not successful end-to-end tests.
 
 - **New [`docs/OPERATIONS.md`](docs/OPERATIONS.md):** full request/response payload reference for
   all 80 operations across 10 resources.
-- Test suite grown from 98 to 185 tests: request-shape assertions for every resource/operation,
-  the Trigger's HMAC verification + lifecycle, and the list-search pickers (~80% statement
-  coverage, up from ~27%).
+- Added request-shape tests for resources and operations, Trigger HMAC/lifecycle behavior,
+  and list-search pickers.
 
 ## [1.2.0] — 2026-05-11
 
-Full API-coverage release. The action node now exposes every documented endpoint
-in `https://api.assinafy.com.br/v1/docs`, including the signer-side flows that
-authenticate via `signer-access-code` and the public/unauthenticated endpoints.
+Added signer-side flows authenticated by `signer-access-code` and public operations.
 
 ### Added
 
@@ -232,8 +201,7 @@ authenticate via `signer-access-code` and the public/unauthenticated endpoints.
 
 ## [1.1.0] — 2026-05-06
 
-Full coverage review against the Assinafy REST API v1 docs (`https://api.assinafy.com.br/v1/docs`).
-All endpoints re-verified. Three new Document operations and a complete Template resource added.
+Three new Document operations and a complete Template resource added.
 
 ### Added
 

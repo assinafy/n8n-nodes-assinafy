@@ -6,8 +6,20 @@ import type {
 } from 'n8n-workflow';
 import { NodeOperationError } from 'n8n-workflow';
 import { assinafyApiRequest, executeListOperation, getAccountId } from '../shared/transport';
-import { limitField, returnAllField, searchField, sortField } from '../shared/descriptions';
-import { cleanQs, normalizeTagFilter, showOnly as showOnlyFor, wrap } from '../shared/utils';
+import {
+	limitField,
+	returnAllField,
+	searchField,
+	sortField,
+	templateResourceLocator,
+} from '../shared/descriptions';
+import {
+	cleanQs,
+	extractRequiredId,
+	normalizeTagFilter,
+	showOnly as showOnlyFor,
+	wrap,
+} from '../shared/utils';
 
 const showOnly = showOnlyFor('template');
 
@@ -68,15 +80,7 @@ export const templateDescription: INodeProperties[] = [
 	},
 
 	// --- get ---
-	{
-		displayName: 'Template ID',
-		name: 'templateId',
-		type: 'string',
-		default: '',
-		required: true,
-		description: 'ID of the template to retrieve',
-		displayOptions: { show: showOnly(['get']) },
-	},
+	{ ...templateResourceLocator, displayOptions: { show: showOnly(['get']) } },
 ];
 
 export async function executeTemplate(
@@ -110,10 +114,7 @@ async function listTemplates(
 
 async function getTemplate(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const accountId = await getAccountId(this);
-	const templateId = this.getNodeParameter('templateId', itemIndex) as string;
-	if (!templateId) {
-		throw new NodeOperationError(this.getNode(), 'Template ID is required', { itemIndex });
-	}
+	const templateId = extractRequiredId(this, 'templateId', 'Template ID', itemIndex);
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'GET',
 		path: `/accounts/${accountId}/templates/${templateId}`,

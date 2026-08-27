@@ -180,7 +180,11 @@ async function updateTag(this: IExecuteFunctions, itemIndex: number): Promise<ID
 	}
 
 	const body: IDataObject = {};
-	if (updates.name) body.name = String(updates.name).trim();
+	if (updates.name !== undefined) {
+		const name = String(updates.name).trim();
+		if (!name) throw new NodeOperationError(this.getNode(), 'Name cannot be blank', { itemIndex });
+		body.name = name;
+	}
 	if (updates.clearColor) {
 		body.color = null;
 	} else if (hasColor) {

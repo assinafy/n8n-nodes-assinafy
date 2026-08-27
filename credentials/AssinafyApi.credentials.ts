@@ -92,7 +92,7 @@ export class AssinafyApi implements ICredentialType {
 			typeOptions: { password: true },
 			default: '',
 			description:
-				'Optional shared secret used by the Trigger node to verify the HMAC-SHA256 signature on incoming webhook deliveries',
+				'Optional secret used to authenticate Trigger webhook URLs and verify HMAC-SHA256 signatures. When empty, the Trigger derives its URL token from the API key.',
 		},
 	];
 
@@ -103,6 +103,14 @@ export class AssinafyApi implements ICredentialType {
 			// Test button, so reject before the API key is attached to either path.
 			throw new ApplicationError(validation.error);
 		}
+		const apiKey = String(credentials.apiKey ?? '').trim();
+		if (!apiKey) throw new ApplicationError('Assinafy API Key is required');
+		const rawAccountId = String(credentials.accountId ?? '');
+		const accountId = rawAccountId.trim();
+		if (!accountId) throw new ApplicationError('Assinafy Account ID is required');
+		if (accountId !== rawAccountId || /[/?#\\%\s]/.test(accountId)) {
+			throw new ApplicationError('Assinafy Account ID must be one URL path segment');
+		}
 
 		if (requestOptions.baseURL !== undefined) {
 			requestOptions.baseURL = validation.url;
@@ -110,7 +118,7 @@ export class AssinafyApi implements ICredentialType {
 		requestOptions.headers = {
 			...(requestOptions.headers ?? {}),
 			Accept: 'application/json',
-			'X-Api-Key': String(credentials.apiKey ?? ''),
+			'X-Api-Key': apiKey,
 		};
 		return requestOptions;
 	};

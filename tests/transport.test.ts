@@ -3,11 +3,11 @@ import {
 	assinafyApiRequest,
 	assinafyApiRequestAllItems,
 	CREDENTIALS_TYPE,
-	DEFAULT_BASE_URL,
 	getAccountId,
 	getBaseUrl,
 	unwrapEnvelope,
 } from '../nodes/Assinafy/shared/transport';
+import { DEFAULT_BASE_URL } from '../nodes/Assinafy/shared/baseUrl';
 
 const createMockContext = (credentials: Record<string, unknown>) => ({
 	getCredentials: jest.fn().mockResolvedValue(credentials),
@@ -99,7 +99,7 @@ describe('shared/transport', () => {
 		});
 
 		it.each([
-			['https://user:password@custom.api.com/v1', 'embedded credentials'],
+			['https://user:password@api.example.com/v1', 'embedded credentials'],
 			['https://custom.api.com/v1?target=other', 'query string or fragment'],
 			['https://custom.api.com/v1#fragment', 'query string or fragment'],
 			['https://custom.api.com/api', 'include the /v1 API path'],
@@ -136,6 +136,23 @@ describe('shared/transport', () => {
 				assinafyApiRequest(ctx as any, { method: 'GET', path: '/documents/doc_1' }),
 			).resolves.toEqual({ id: 'doc_1' });
 			expect(request).toHaveBeenCalledTimes(2);
+		});
+
+		it('does not replay a mutating request after HTTP 429', async () => {
+			const request = jest.fn().mockRejectedValue({
+				httpCode: 429,
+				response: { headers: { 'retry-after': '0' } },
+			});
+			const ctx = requestContext(request);
+
+			await expect(
+				assinafyApiRequest(ctx as any, {
+					method: 'POST',
+					path: '/documents/doc_1/assignments',
+					body: { method: 'virtual' },
+				}),
+			).rejects.toThrow('Assinafy API POST /documents/doc_1/assignments failed');
+			expect(request).toHaveBeenCalledTimes(1);
 		});
 
 		it('collects all pages from pagination headers', async () => {
@@ -226,6 +243,16 @@ describe('shared/transport', () => {
 			await expect(getAccountId(ctx as any)).resolves.toBe('acc_12345');
 		});
 
+		it('trims and encodes the account ID as one URL path segment', async () => {
+			const ctx = createMockContext({ accountId: ' account/id?value ' });
+			await expect(getAccountId(ctx as any)).resolves.toBe('account%2Fid%3Fvalue');
+		});
+
+		it('can return a trimmed account ID for a query parameter', async () => {
+			const ctx = createMockContext({ accountId: ' account/id?value ' });
+			await expect(getAccountId(ctx as any, false)).resolves.toBe('account/id?value');
+		});
+
 		it('should throw error when accountId is missing', async () => {
 			const ctx = createMockContext({});
 			await expect(getAccountId(ctx as any)).rejects.toThrow(
@@ -234,7 +261,7 @@ describe('shared/transport', () => {
 		});
 
 		it('should throw error when accountId is empty string', async () => {
-			const ctx = createMockContext({ accountId: '' });
+			const ctx = createMockContext({ accountId: '   ' });
 			await expect(getAccountId(ctx as any)).rejects.toThrow(
 				'Assinafy credentials are missing an Account ID',
 			);

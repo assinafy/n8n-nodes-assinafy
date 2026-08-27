@@ -10,10 +10,13 @@ import type {
 } from 'n8n-workflow';
 import { NodeApiError, NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
 import { CREDENTIALS_TYPE, assinafyApiRequest, getAccountId } from '../Assinafy/shared/transport';
+import { assertEmail } from '../Assinafy/shared/utils';
 import { DEFAULT_WEBHOOK_EVENTS, WEBHOOK_EVENT_OPTIONS } from '../Assinafy/resources/webhookEvents';
-import { isEmptySubscription } from '../Assinafy/resources/webhook';
+import { isEmptySubscription, normalizeWebhookUrl } from '../Assinafy/resources/webhook';
 
 const SIGNATURE_HEADER = 'x-assinafy-signature';
+const TOKEN_QUERY = 'assinafy-token';
+const WEBHOOK_HMAC_MESSAGE = 'assinafy-n8n-webhook-v1';
 const REDACTED_HEADER_VALUE = '[REDACTED]';
 const SENSITIVE_HEADERS = new Set([
 	'authorization',
@@ -81,22 +84,18 @@ export class AssinafyTrigger implements INodeType {
 			},
 			{
 				displayName:
-					'Important: Assinafy supports only one webhook subscription per workspace. Activating this trigger replaces any existing subscription. Deactivation inactivates it only while the registered URL, notification email, and event set still match this trigger, so an independently replaced subscription is left intact.',
+					'Important: Assinafy supports only one webhook subscription per workspace. Activating this trigger replaces any existing subscription with an HTTPS URL carrying a credential-derived authentication token. Do not replace the subscription concurrently with workflow deactivation because Assinafy inactivation is unconditional.',
 				name: 'singleSubscriptionNotice',
 				type: 'notice',
 				default: '',
 			},
 		],
-		usableAsTool: true,
 	};
 
 	webhookMethods = {
 		default: {
 			async checkExists(this: IHookFunctions): Promise<boolean> {
-				const webhookUrl = this.getNodeWebhookUrl('default');
-				const email = this.getNodeParameter('email', '') as string;
-				const events = this.getNodeParameter('events', []) as string[];
-				const desiredEvents = events.length > 0 ? events : DEFAULT_WEBHOOK_EVENTS;
+				const { webhookUrl, email, desiredEvents } = await getSubscriptionConfig(this);
 				try {
 					const accountId = await getAccountId(this);
 					const existing = await assinafyApiRequest<IDataObject | null>(this, {
@@ -116,9 +115,7 @@ export class AssinafyTrigger implements INodeType {
 			},
 
 			async create(this: IHookFunctions): Promise<boolean> {
-				const webhookUrl = this.getNodeWebhookUrl('default');
-				const email = this.getNodeParameter('email') as string;
-				const events = this.getNodeParameter('events', []) as string[];
+				const { webhookUrl, email, desiredEvents } = await getSubscriptionConfig(this);
 				const accountId = await getAccountId(this);
 
 				await assinafyApiRequest(this, {
@@ -127,7 +124,7 @@ export class AssinafyTrigger implements INodeType {
 					body: {
 						url: webhookUrl,
 						email,
-						events: events.length > 0 ? events : DEFAULT_WEBHOOK_EVENTS,
+						events: desiredEvents,
 						is_active: true,
 					},
 				});
@@ -135,12 +132,9 @@ export class AssinafyTrigger implements INodeType {
 			},
 
 			async delete(this: IHookFunctions): Promise<boolean> {
+				const { webhookUrl, email, desiredEvents } = await getSubscriptionConfig(this);
 				try {
 					const accountId = await getAccountId(this);
-					const webhookUrl = this.getNodeWebhookUrl('default');
-					const email = this.getNodeParameter('email', '') as string;
-					const events = this.getNodeParameter('events', []) as string[];
-					const desiredEvents = events.length > 0 ? events : DEFAULT_WEBHOOK_EVENTS;
 					const existing = await assinafyApiRequest<IDataObject | null>(this, {
 						method: 'GET',
 						path: `/accounts/${accountId}/webhooks/subscriptions`,
@@ -173,12 +167,22 @@ export class AssinafyTrigger implements INodeType {
 		const headers = this.getHeaderData() as Record<string, string | string[] | undefined>;
 		const safeHeaders = redactSensitiveHeaders(headers);
 		const body = this.getBodyData() as IDataObject;
+		const credentials = (await this.getCredentials(CREDENTIALS_TYPE)) as {
+			apiKey?: string;
+			webhookSecret?: string;
+		};
+		const query = this.getQueryData() as Record<string, unknown>;
+		const rawToken = query[TOKEN_QUERY];
+		const token = Array.isArray(rawToken) ? rawToken[0] : rawToken;
+		if (
+			typeof token !== 'string' ||
+			!safeEqual(createWebhookToken(credentials, this), token.trim())
+		) {
+			throw new NodeOperationError(this.getNode(), 'Invalid Assinafy webhook token');
+		}
 
 		const verifySignature = this.getNodeParameter('verifySignature', false) as boolean;
 		if (verifySignature) {
-			const credentials = (await this.getCredentials(CREDENTIALS_TYPE)) as {
-				webhookSecret?: string;
-			};
 			const secret = credentials.webhookSecret;
 			if (!secret) {
 				throw new NodeOperationError(
@@ -228,6 +232,37 @@ export class AssinafyTrigger implements INodeType {
 	}
 }
 
+async function getSubscriptionConfig(ctx: IHookFunctions): Promise<{
+	webhookUrl: string;
+	email: string;
+	desiredEvents: string[];
+}> {
+	const rawWebhookUrl = normalizeWebhookUrl(ctx.getNodeWebhookUrl('default'));
+	if (!rawWebhookUrl) {
+		throw new NodeOperationError(
+			ctx.getNode(),
+			'Webhook URL must be a valid HTTPS URL (HTTP is allowed only for loopback hosts)',
+		);
+	}
+	const credentials = (await ctx.getCredentials(CREDENTIALS_TYPE)) as {
+		apiKey?: string;
+		webhookSecret?: string;
+	};
+	const parsedWebhookUrl = new URL(rawWebhookUrl);
+	parsedWebhookUrl.searchParams.set(TOKEN_QUERY, createWebhookToken(credentials, ctx));
+	const webhookUrl = parsedWebhookUrl.toString();
+	const email = String(ctx.getNodeParameter('email', '') ?? '').trim();
+	if (!assertEmail(email)) {
+		throw new NodeOperationError(ctx.getNode(), 'Invalid email address');
+	}
+	const events = ctx.getNodeParameter('events', []) as string[];
+	return {
+		webhookUrl,
+		email,
+		desiredEvents: events.length > 0 ? events : DEFAULT_WEBHOOK_EVENTS,
+	};
+}
+
 function redactSensitiveHeaders(
 	headers: Record<string, string | string[] | undefined>,
 ): Record<string, string | string[] | undefined> {
@@ -243,7 +278,9 @@ function isSensitiveHeader(name: string): boolean {
 	const normalized = name.toLowerCase();
 	return (
 		SENSITIVE_HEADERS.has(normalized) ||
-		/(?:^|[-_])(?:api[-_]?key|token|secret|signature)(?:$|[-_])/.test(normalized)
+		/(?:^|[-_])(?:api[-_]?key|auth(?:entication|orization)?|credential|jwt|token|secret|signature|assertion)(?:$|[-_])/.test(
+			normalized,
+		)
 	);
 }
 
@@ -266,8 +303,25 @@ function sameEventSet(actual: unknown, desired: string[]): boolean {
 }
 
 function verifyHmac(secret: string, payload: Buffer, signature: string): boolean {
-	const provided = signature.trim();
 	const expected = createHmac('sha256', secret).update(payload).digest('hex');
+	return safeEqual(expected, signature.trim());
+}
+
+function createWebhookToken(
+	credentials: { apiKey?: string; webhookSecret?: string },
+	ctx: IHookFunctions | IWebhookFunctions,
+): string {
+	const secret = String(credentials.webhookSecret || credentials.apiKey || '').trim();
+	if (!secret) {
+		throw new NodeOperationError(
+			ctx.getNode(),
+			'Assinafy credentials require an API Key or Webhook Secret for trigger security',
+		);
+	}
+	return createHmac('sha256', secret).update(WEBHOOK_HMAC_MESSAGE).digest('hex');
+}
+
+function safeEqual(expected: string, provided: string): boolean {
 	const a = Buffer.from(expected, 'utf8');
 	const b = Buffer.from(provided, 'utf8');
 	if (a.length !== b.length) return false;

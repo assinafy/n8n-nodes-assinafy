@@ -1,17 +1,17 @@
-image: node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d
+default:
+  image: node:24.19.0-bookworm-slim@sha256:a9f5f7c91a432850b2a8a7797adf5eadb6c733ceed61167806cee7ea7fbc29df
+  cache:
+    key:
+      files:
+        - package-lock.json
+    paths:
+      - .npm/
 
 stages:
   - verify
 
 variables:
   npm_config_cache: '$CI_PROJECT_DIR/.npm'
-
-cache:
-  key:
-    files:
-      - package-lock.json
-  paths:
-    - .npm/
 
 verify:
   stage: verify
@@ -21,12 +21,10 @@ verify:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
   script:
-    - npm install --global npm@11.16.0
     - npm ci
     - npm run build
     - npm run lint
     - npm run test:ci
+    - npm run audit:dev
     - npm run audit:prod
-    - npm pack --dry-run --ignore-scripts --json > .package-contents.json
-    - node -e "const fs = require('node:fs'); const report = JSON.parse(fs.readFileSync('.package-contents.json', 'utf8'))[0]; const paths = report.files.map(({ path }) => path); const manifest = require('./package.json'); const required = [...manifest.n8n.credentials, ...manifest.n8n.nodes, 'docs/OPERATIONS.md', 'CHANGELOG.md', 'CONTRIBUTING.md', 'LICENSE.md', 'README.md', 'SECURITY.md']; const missing = required.filter((path) => !paths.includes(path)); const leakedGeneratedFiles = paths.filter((path) => path.endsWith('.tsbuildinfo') || path.startsWith('dist/coverage/')); if (missing.length || leakedGeneratedFiles.length) { throw new Error(JSON.stringify({ missing, leakedGeneratedFiles })); }"
-    - node -e "const manifest = require('./package.json'); for (const modulePath of [...manifest.n8n.credentials, ...manifest.n8n.nodes]) { require('./' + modulePath); }"
+    - npm run verify:package

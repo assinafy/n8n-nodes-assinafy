@@ -110,6 +110,33 @@ export const tagResourceLocator: INodeProperties = {
 	],
 };
 
+export const templateResourceLocator: INodeProperties = {
+	displayName: 'Template',
+	name: 'templateId',
+	type: 'resourceLocator',
+	default: { mode: 'list', value: '' },
+	required: true,
+	description: 'The Assinafy template to use',
+	modes: [
+		{
+			displayName: 'From List',
+			name: 'list',
+			type: 'list',
+			placeholder: 'Select a template…',
+			typeOptions: {
+				searchListMethod: 'getTemplates',
+				searchable: true,
+			},
+		},
+		{
+			displayName: 'By ID',
+			name: 'id',
+			type: 'string',
+			placeholder: 'e.g. fa8c14f32d732271e071998246e',
+		},
+	],
+};
+
 export const assignmentIdField: INodeProperties = {
 	displayName: 'Assignment ID',
 	name: 'assignmentId',
@@ -125,7 +152,7 @@ export const workspaceIdField: INodeProperties = {
 	type: 'string',
 	default: '',
 	required: true,
-	description: 'Workspace (account) ID. Leave blank in the credential to override per call.',
+	description: 'ID of the workspace to operate on',
 };
 
 export const returnAllField: INodeProperties = {

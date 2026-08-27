@@ -18,14 +18,28 @@ describe('webhookEvents', () => {
 			}
 		});
 
-		it('should contain expected event types', () => {
+		it('should contain every documented event type', () => {
 			const values = WEBHOOK_EVENT_OPTIONS.map((o) => o.value);
-			expect(values).toContain('document_ready');
-			expect(values).toContain('document_prepared');
-			expect(values).toContain('signer_signed_document');
-			expect(values).toContain('signer_rejected_document');
-			expect(values).toContain('signature_requested');
-			expect(values).toContain('assignment_created');
+			expect(values).toEqual([
+				'assignment_created',
+				'document_metadata_ready',
+				'document_prepared',
+				'document_processing_failed',
+				'document_ready',
+				'document_uploaded',
+				'signature_requested',
+				'signer_created',
+				'signer_data_confirmed',
+				'signer_email_verified',
+				'signer_rejected_document',
+				'signer_signed_document',
+				'signer_viewed_document',
+				'signer_whatsapp_verified',
+				'template_created',
+				'template_processed',
+				'template_processing_failed',
+				'user_rejected_document',
+			]);
 		});
 
 		it('should have unique values', () => {
@@ -47,9 +61,14 @@ describe('webhookEvents', () => {
 			}
 		});
 
-		it('should have a reasonable number of default events', () => {
-			expect(DEFAULT_WEBHOOK_EVENTS.length).toBeGreaterThan(0);
-			expect(DEFAULT_WEBHOOK_EVENTS.length).toBeLessThanOrEqual(WEBHOOK_EVENT_OPTIONS.length);
+		it('should use the documented default event set', () => {
+			expect(DEFAULT_WEBHOOK_EVENTS).toEqual([
+				'document_ready',
+				'document_prepared',
+				'signer_signed_document',
+				'signer_rejected_document',
+				'document_processing_failed',
+			]);
 		});
 	});
 });

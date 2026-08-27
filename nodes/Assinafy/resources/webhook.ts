@@ -9,7 +9,14 @@ import { NodeApiError, NodeOperationError } from 'n8n-workflow';
 import { assinafyApiRequest, executeListOperation, getAccountId } from '../shared/transport';
 import { limitField, returnAllField } from '../shared/descriptions';
 import { DEFAULT_WEBHOOK_EVENTS, WEBHOOK_EVENT_OPTIONS } from './webhookEvents';
-import { cleanQs, showOnly as showOnlyFor, wrap } from '../shared/utils';
+import {
+	asArray,
+	assertEmail,
+	cleanQs,
+	extractRequiredId,
+	showOnly as showOnlyFor,
+	wrap,
+} from '../shared/utils';
 
 const showOnly = showOnlyFor('webhook');
 
@@ -63,6 +70,7 @@ export const webhookDescription: INodeProperties[] = [
 		default: '',
 		required: true,
 		placeholder: 'https://example.com/hooks/assinafy',
+		description: 'HTTPS delivery URL. HTTP is accepted only for loopback development hosts.',
 		displayOptions: { show: showOnly(['register']) },
 	},
 	{
@@ -177,11 +185,23 @@ export async function executeWebhook(
 }
 
 async function registerWebhook(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
-	const accountId = await getAccountId(this);
-	const url = this.getNodeParameter('url', itemIndex) as string;
-	const email = this.getNodeParameter('email', itemIndex) as string;
+	const url = normalizeWebhookUrl(this.getNodeParameter('url', itemIndex));
+	if (!url) {
+		throw new NodeOperationError(
+			this.getNode(),
+			'Webhook URL must be a valid HTTPS URL (HTTP is allowed only for loopback hosts)',
+			{
+				itemIndex,
+			},
+		);
+	}
+	const email = String(this.getNodeParameter('email', itemIndex) ?? '').trim();
+	if (!assertEmail(email)) {
+		throw new NodeOperationError(this.getNode(), 'Invalid email address', { itemIndex });
+	}
 	const events = this.getNodeParameter('events', itemIndex, []) as string[];
 	const isActive = this.getNodeParameter('isActive', itemIndex, true) as boolean;
+	const accountId = await getAccountId(this);
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'PUT',
 		path: `/accounts/${accountId}/webhooks/subscriptions`,
@@ -222,6 +242,28 @@ function isEmptySubscription(subscription: IDataObject | null): boolean {
 	return !hasUrl && !hasEvents;
 }
 
+export function normalizeWebhookUrl(value: unknown): string | null {
+	const url = typeof value === 'string' ? value.trim() : '';
+	try {
+		const parsed = new URL(url);
+		const hostname = parsed.hostname.toLowerCase();
+		const isLoopback =
+			hostname === 'localhost' ||
+			hostname === '127.0.0.1' ||
+			hostname === '[::1]' ||
+			hostname === '::1';
+		return (parsed.protocol === 'https:' || (parsed.protocol === 'http:' && isLoopback)) &&
+			parsed.hostname &&
+			!parsed.username &&
+			!parsed.password &&
+			!parsed.hash
+			? url
+			: null;
+	} catch {
+		return null;
+	}
+}
+
 export { isEmptySubscription };
 
 async function inactivateWebhook(this: IExecuteFunctions): Promise<IDataObject> {
@@ -237,7 +279,7 @@ async function listEventTypes(this: IExecuteFunctions): Promise<IDataObject[]> {
 		method: 'GET',
 		path: '/webhooks/event-types',
 	});
-	return Array.isArray(response) ? response : [];
+	return asArray<IDataObject>(response);
 }
 
 async function listDispatches(
@@ -254,7 +296,7 @@ async function listDispatches(
 
 async function retryDispatch(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const accountId = await getAccountId(this);
-	const dispatchId = this.getNodeParameter('dispatchId', itemIndex) as string;
+	const dispatchId = extractRequiredId(this, 'dispatchId', 'Dispatch ID', itemIndex);
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'POST',
 		path: `/accounts/${accountId}/webhooks/${dispatchId}/retry`,
