@@ -5,7 +5,8 @@ import { join } from 'node:path';
 
 const require = createRequire(import.meta.url);
 const manifest = require('../package.json');
-const [report] = JSON.parse(
+// npm <= 10 reports an array of tarballs; npm 11 keys the same objects by package name.
+const packed = JSON.parse(
 	execFileSync('npm', ['pack', '--dry-run', '--ignore-scripts', '--json'], {
 		encoding: 'utf8',
 		env: {
@@ -14,6 +15,7 @@ const [report] = JSON.parse(
 		},
 	}),
 );
+const [report] = Array.isArray(packed) ? packed : Object.values(packed);
 const paths = report.files.map(({ path }) => path);
 const required = [
 	...manifest.n8n.credentials,

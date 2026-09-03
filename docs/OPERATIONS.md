@@ -105,6 +105,38 @@ Sections below show each operation-specific request and a representative respons
 
 Signer terms acceptance and OTP verification send `signer-access-code` in the query string. The OTP itself remains in the JSON body as `verification-code`. Field validation always retains the configured account authentication and can additionally send `signer-access-code`; it does not silently drop the API credential.
 
+### Where a signer access code comes from
+
+Fourteen operations authenticate with `signer-access-code` instead of the workspace API key. **No endpoint returns that code.** It reaches the signer only out of band, in the body of the notification the API sends when an assignment is created (or resent) — by email, or by WhatsApp for a `Whatsapp` signer. There is no API-key-authenticated way to read, mint, or look one up, by design: holding one is equivalent to being that signer.
+
+In particular, the `signing_urls` array on an Assignment is **not** a source of access codes. Each entry addresses the web signing page for the *document* and identifies the signer by email address:
+
+```json
+{
+	"signer_id": "<signer-id>",
+	"url": "https://app.assinafy.com.br/sign/<document-id>?email=signer%40example.com"
+}
+```
+
+The path segment is the document ID, not a code — passing it as `signer-access-code` returns `401 Credenciais inválidas.` Give that URL to the signer and let the signing page do the rest, or send them there with **Document → Send Public Token** (`PUT /public/documents/{documentId}/send-token`), which mails a fresh one-time token.
+
+An n8n workflow therefore drives the signer-side operations only when a code arrives through a step you control — an inbox-reading node, a WhatsApp integration, or a human pasting it in. Every other operation in this reference works from the API key alone.
+
+### Live verification coverage
+
+`tests/live.integration.test.ts` runs the real SDK resource functions against a live Assinafy workspace (the sandbox environment; the suite refuses to run anywhere else). It reaches **74 of the 93 node operations** — 69 from the API key alone, plus five signer-side reads (Get Self, Get Sign Page, Get Current, List, Search) that need `ASSINAFY_TEST_SIGNER_ACCESS_CODE`.
+
+The 19 it cannot reach fall into four groups, none of them a gap in the node:
+
+| Group                             | Operations                                                                                                                                       | Why it cannot run unattended                                                                                        |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Signer access code required (9)   | Assignment Sign / Decline; Signer Accept Terms, Verify Code, Confirm Data, Upload Signature, Download Signature; Signer Document Sign Multiple / Decline Multiple | Each mutates a live assignment or a signer's stored signature on behalf of that signer, so they are left to a human holding the code. |
+| User password or social token (6) | Login, Social Login, Link Social Login, Change Password, Request Password Reset, Reset Password                                                       | Needs a real user password or an identity-provider token; the reset flows mutate the account.                             |
+| Self-revoking (2)                 | Create API Key, Delete API Key                                                                                                                       | `POST /users/api-keys` deletes the previous key and `DELETE` revokes it — either call invalidates the key the suite is authenticating with. Get API Key (masked) is verified. |
+| Missing precondition (2)          | Create Document From Template, Verify Document                                                                                                       | Create needs a template with a non-Editor role (`Pelo menos um signatário deve ter uma função de assinatura.`) and the API has no template-create endpoint, so it must be authored in the Assinafy UI. Verify needs a `certificated` document, which needs a completed signature, which needs a signer access code. Estimate Cost From Template is verified. |
+
+Every one of the 19 still has request-shape coverage in the offline unit suite. Webhook **Retry Dispatch** is verified only while the workspace subscription is active; the API rejects a retry on an inactive subscription with `A assinatura do webhook não está ativa.`
+
 ### Verification, notification, and digital-certificate rules
 
 Assignment and template signer rows use `verification_method` (`Email`, `Whatsapp`, or `DigitalCertificate`) and `notification_methods` (`Email` or `Whatsapp`). If both are omitted, both default to `Email`. Assignment Create accepts any combination of Email and WhatsApp notification channels. Create From Template accepts exactly one notification channel per signer and infers the matching verification or notification method when only one is supplied. Cost-estimate operations can price either or both notification channels.
@@ -172,7 +204,7 @@ multipart/form-data:
 		"original": "https://.../documents/1031abf.../download/original"
 	},
 	"is_closed": false,
-	"signing_url": "https://app-sandbox.assinafy.com.br/sign/1031abf...",
+	"signing_url": "https://app.assinafy.com.br/sign/1031abf...",
 	"decline_reason": null,
 	"declined_by": null,
 	"tags": [],
@@ -227,7 +259,7 @@ Lists documents in the workspace, with optional filters; paginates via `X-Pagina
 			"thumbnail": "https://.../thumbnail"
 		},
 		"is_closed": false,
-		"signing_url": "https://app-sandbox.assinafy.com.br/sign/1031...",
+		"signing_url": "https://app.assinafy.com.br/sign/1031...",
 		"decline_reason": null,
 		"declined_by": null,
 		"tags": [],
@@ -403,7 +435,7 @@ Searches workspace documents via the dedicated lightweight search endpoint. Unli
 			"thumbnail": "https://.../thumbnail"
 		},
 		"is_closed": false,
-		"signing_url": "https://app-sandbox.assinafy.com.br/sign/19f80dc86e3cce2d39d7edc9e28",
+		"signing_url": "https://app.assinafy.com.br/sign/19f80dc86e3cce2d39d7edc9e28",
 		"decline_reason": null,
 		"declined_by": null,
 		"tags": [],

@@ -5,6 +5,39 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.6.1] — 2026-09-02
+
+### Fixed
+
+- The live sandbox suite no longer fabricates a signer access code from an assignment's
+  `signing_urls`. Those URLs address the web signing page and contain the document ID, not a
+  code, so every signer-side call built on it failed with `401 Credenciais inválidas.` The
+  suite now asserts the real signing-URL shape and runs the signer-side assertions only when
+  `ASSINAFY_TEST_SIGNER_ACCESS_CODE` supplies a code from a real inbox.
+- `npm run verify:package` crashed on npm 11, which keys `npm pack --json` output by package
+  name instead of returning an array. The release gate now accepts both shapes.
+
+### Added
+
+- Live sandbox coverage for Workspace `Get Account Statistics` (monthly and daily),
+  `Get User Statistics`, `Get`/`Update Notification Preferences`, Authentication
+  `Get API Key`, Document `Download Thumbnail`, `Download Page` and
+  `Estimate Cost From Template`, Assignment `Reset Expiration`, Webhook `List Dispatches`
+  and `Retry Dispatch`, and Signer Document `Download`. The suite now reaches 74 of the 93
+  node operations, up from 62.
+- Documented where a signer access code comes from, why no endpoint returns one, and a
+  live-verification matrix naming each unreachable operation and its blocker.
+
+### Changed
+
+- HTTP 429 responses are now retried for every method, not just `GET`. A rate limit is
+  refused before the request is handled — verified against the live API, where a
+  rate-limited `DELETE` left its target untouched — so replaying it cannot duplicate a
+  mutation. Every other failure is still surfaced after a single attempt. Previously a
+  rate-limited upload, assignment, or delete failed outright instead of waiting out the
+  `Retry-After` the server had just supplied.
+- Example signing URLs in the documentation use the production host.
+
 ## [1.5.0] — 2026-08-09
 
 ### Added

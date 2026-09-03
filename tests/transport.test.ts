@@ -138,11 +138,44 @@ describe('shared/transport', () => {
 			expect(request).toHaveBeenCalledTimes(2);
 		});
 
-		it('does not replay a mutating request after HTTP 429', async () => {
+		// A 429 is refused before the handler runs, so the mutation never happened and
+		// replaying it cannot duplicate anything.
+		it('retries a mutating request after HTTP 429', async () => {
+			const request = jest
+				.fn()
+				.mockRejectedValueOnce({ httpCode: 429, response: { headers: { 'retry-after': '0' } } })
+				.mockResolvedValue({ status: 200, data: { id: 'assignment_1' } });
+			const ctx = requestContext(request);
+
+			await expect(
+				assinafyApiRequest(ctx as any, {
+					method: 'POST',
+					path: '/documents/doc_1/assignments',
+					body: { method: 'virtual' },
+				}),
+			).resolves.toEqual({ id: 'assignment_1' });
+			expect(request).toHaveBeenCalledTimes(2);
+		});
+
+		it('gives up on a mutating request once the 429 retry budget is spent', async () => {
 			const request = jest.fn().mockRejectedValue({
 				httpCode: 429,
 				response: { headers: { 'retry-after': '0' } },
 			});
+			const ctx = requestContext(request);
+
+			await expect(
+				assinafyApiRequest(ctx as any, {
+					method: 'POST',
+					path: '/documents/doc_1/assignments',
+					body: { method: 'virtual' },
+				}),
+			).rejects.toThrow('Assinafy API POST /documents/doc_1/assignments failed');
+			expect(request).toHaveBeenCalledTimes(4);
+		});
+
+		it('does not replay a mutating request after a non-429 failure', async () => {
+			const request = jest.fn().mockRejectedValue({ httpCode: 500 });
 			const ctx = requestContext(request);
 
 			await expect(

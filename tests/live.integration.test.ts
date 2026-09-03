@@ -20,6 +20,11 @@
 //   ASSINAFY_BASE_URL=https://sandbox.assinafy.com.br/v1 \
 //   npx jest tests/live.integration.test.ts
 //
+// The 14 signer-facing endpoints authenticate with a `signer-access-code` that
+// no endpoint returns — it only reaches the signer by email/WhatsApp. Their test
+// needs ASSINAFY_TEST_SIGNER_ACCESS_CODE, pasted from a real sandbox inbox, and
+// is skipped otherwise. See docs/OPERATIONS.md for the full coverage matrix.
+//
 import { executeTag } from '../nodes/Assinafy/resources/tag';
 import { executeField } from '../nodes/Assinafy/resources/field';
 import { executeDocument } from '../nodes/Assinafy/resources/document';
@@ -29,6 +34,7 @@ import { executeWebhook } from '../nodes/Assinafy/resources/webhook';
 import { executeTemplate } from '../nodes/Assinafy/resources/template';
 import { executeSigner } from '../nodes/Assinafy/resources/signer';
 import { executeSignerDocument } from '../nodes/Assinafy/resources/signerDocument';
+import { executeAuth } from '../nodes/Assinafy/resources/auth';
 
 const env = process.env;
 const LIVE = env.ASSINAFY_LIVE === '1';
@@ -41,6 +47,12 @@ const SANDBOX_BASE_URL = 'https://sandbox.assinafy.com.br/v1';
 const BASE_URL = env.ASSINAFY_BASE_URL ?? SANDBOX_BASE_URL;
 const TEST_EMAIL_PRIMARY = env.ASSINAFY_TEST_EMAIL_PRIMARY ?? '';
 const TEST_EMAIL_SECONDARY = env.ASSINAFY_TEST_EMAIL_SECONDARY ?? '';
+// Signer-side endpoints authenticate with a `signer-access-code` that the API
+// never returns: it only reaches the signer through the notification email or
+// WhatsApp message. `signing_urls[].url` points at the web signing page
+// (/sign/{documentId}?email=...) and carries no code. So those assertions run
+// only when a code is pasted in from a real sandbox inbox.
+const SIGNER_ACCESS_CODE = env.ASSINAFY_TEST_SIGNER_ACCESS_CODE ?? '';
 
 const credentials = { apiKey: API_KEY, accountId: ACCOUNT_ID, baseUrl: BASE_URL };
 
@@ -146,6 +158,10 @@ const destructiveIt = LIVE && DESTRUCTIVE ? it : it.skip;
 const workspaceIt = LIVE && DESTRUCTIVE && WORKSPACE_MUTATIONS ? it : it.skip;
 const emailIt =
 	LIVE && DESTRUCTIVE && CREDIT_MUTATIONS && TEST_EMAIL_PRIMARY && TEST_EMAIL_SECONDARY
+		? it
+		: it.skip;
+const signerCodeIt =
+	LIVE && DESTRUCTIVE && CREDIT_MUTATIONS && TEST_EMAIL_PRIMARY && SIGNER_ACCESS_CODE
 		? it
 		: it.skip;
 
@@ -316,6 +332,22 @@ d('LIVE sandbox integration (real SDK code paths)', () => {
 				'download',
 			)) as any;
 			expect(original.binary.data).toBeDefined();
+
+			const thumbnail = (await executeDocument.call(
+				liveCtx({ documentId, binaryOutputProperty: 'data' }),
+				0,
+				'downloadThumbnail',
+			)) as any;
+			expect(thumbnail.binary.data.mimeType).toMatch(/^image\//);
+
+			const pageId = got.json.pages?.[0]?.id as string | undefined;
+			expect(pageId).toBeTruthy();
+			const page = (await executeDocument.call(
+				liveCtx({ documentId, pageId, binaryOutputProperty: 'data' }),
+				0,
+				'downloadPage',
+			)) as any;
+			expect(page.binary.data.mimeType).toMatch(/^image\//);
 
 			const progress = (await executeDocument.call(
 				liveCtx({ documentId }),
@@ -557,6 +589,115 @@ d('LIVE sandbox integration (real SDK code paths)', () => {
 		expect(workspaces.some((item) => item.json.id === ACCOUNT_ID)).toBe(true);
 	});
 
+	it('workspace: account and user KPI series, monthly and daily', async () => {
+		const monthly = (await executeWorkspace.call(
+			liveCtx({ workspaceId: ACCOUNT_ID, granularity: 'monthly' }),
+			0,
+			'getAccountStats',
+		)) as any[];
+		expect(monthly.length).toBeGreaterThan(0);
+		expect(monthly[0].json).toHaveProperty('period');
+		expect(monthly[0].json).toHaveProperty('documents_uploaded');
+
+		const month = (monthly[0].json.period as string).slice(0, 7);
+		const daily = (await executeWorkspace.call(
+			liveCtx({ workspaceId: ACCOUNT_ID, granularity: 'daily', statsMonth: month }),
+			0,
+			'getAccountStats',
+		)) as any[];
+		expect(daily.length).toBeGreaterThan(0);
+		expect(daily[0].json.period).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+
+		const userStats = (await executeWorkspace.call(
+			liveCtx({ granularity: 'monthly' }),
+			0,
+			'getUserStats',
+		)) as any[];
+		expect(userStats.length).toBeGreaterThan(0);
+		expect(userStats[0].json).toHaveProperty('signature_requests');
+	});
+
+	it('auth: the stored API key is returned masked', async () => {
+		const key = (await executeAuth.call(liveCtx({}), 0, 'getApiKey')) as any;
+		// Only the tail is revealed; the API never returns a usable key.
+		expect(String(key.json.api_key)).toMatch(/^\*+/);
+	});
+
+	it('template: estimate the cost of generating a document from a template', async () => {
+		const templates = (await executeTemplate.call(
+			liveCtx({ returnAll: false, limit: 5, filters: {} }),
+			0,
+			'list',
+		)) as any[];
+		if (templates.length === 0) return;
+
+		const template = templates[0].json;
+		const estimate = (await executeDocument.call(
+			liveCtx({
+				templateId: template.id,
+				templateSigners: {
+					signer: (template.roles as any[]).map((role) => ({
+						role_id: role.id,
+						verification_method: 'Email',
+						notification_methods: ['Email'],
+					})),
+				},
+			}),
+			0,
+			'estimateCostFromTemplate',
+		)) as any;
+		expect(estimate.json).toHaveProperty('total_credits');
+	});
+
+	destructiveIt('workspace: notification preferences round-trip', async () => {
+		const before = (await executeWorkspace.call(
+			liveCtx({}),
+			0,
+			'getNotificationPreferences',
+		)) as any;
+		expect(typeof before.json.DocumentCompleted).toBe('boolean');
+
+		const flipped = !before.json.DocumentCompleted;
+		try {
+			const updated = (await executeWorkspace.call(
+				liveCtx({ notificationPreferences: { DocumentCompleted: flipped } }),
+				0,
+				'updateNotificationPreferences',
+			)) as any;
+			expect(updated.json.DocumentCompleted).toBe(flipped);
+			// Every omitted preference must keep its previous value.
+			expect(updated.json.SignerDeclined).toBe(before.json.SignerDeclined);
+		} finally {
+			await executeWorkspace.call(
+				liveCtx({ notificationPreferences: { DocumentCompleted: before.json.DocumentCompleted } }),
+				0,
+				'updateNotificationPreferences',
+			);
+		}
+	});
+
+	destructiveIt('webhook: dispatch history and retry', async () => {
+		const dispatches = (await executeWebhook.call(
+			liveCtx({ returnAll: false, limit: 5, filters: {} }),
+			0,
+			'listDispatches',
+		)) as any[];
+		expect(Array.isArray(dispatches)).toBe(true);
+		if (dispatches.length === 0) return;
+
+		const subscription = (await executeWebhook.call(liveCtx({}), 0, 'get')) as any;
+		// The API refuses a retry while the subscription is inactive
+		// ("A assinatura do webhook não está ativa"), so only assert the happy path.
+		if (!subscription.json.is_active) return;
+
+		const retried = (await executeWebhook.call(
+			liveCtx({ dispatchId: dispatches[0].json.id }),
+			0,
+			'retryDispatch',
+		)) as any;
+		expect(retried.json.id).toBeTruthy();
+	});
+
 	destructiveIt('contactless signer lifecycle: create → list → get → update → delete', async () => {
 		let signerId: string | undefined;
 		const fullName = `Assinafy SDK Contactless ${Date.now()}`;
@@ -626,12 +767,59 @@ d('LIVE sandbox integration (real SDK code paths)', () => {
 		}
 	});
 
+	// Read-only signer-side coverage. Needs ASSINAFY_TEST_SIGNER_ACCESS_CODE: paste
+	// the `signer-access-code` out of a signing link that the sandbox emailed to
+	// ASSINAFY_TEST_EMAIL_PRIMARY. Codes are per-assignment and expire, so this is
+	// a manual, opt-in run — see docs/OPERATIONS.md.
+	signerCodeIt('signer access code drives the signer-side endpoints', async () => {
+		const signerSelf = (await executeSigner.call(
+			liveCtx({ signerAccessCode: SIGNER_ACCESS_CODE }),
+			0,
+			'getSelf',
+		)) as any;
+		expect(signerSelf.json.id).toBeTruthy();
+		const signerId = signerSelf.json.id as string;
+
+		const signPage = (await executeAssignment.call(
+			liveCtx({ signerAccessCode: SIGNER_ACCESS_CODE }),
+			0,
+			'getSignPage',
+		)) as any;
+		expect(signPage.json.id).toBeTruthy();
+
+		const currentDocument = (await executeSignerDocument.call(
+			liveCtx({ signerAccessCode: SIGNER_ACCESS_CODE, signerId }),
+			0,
+			'getCurrent',
+		)) as any;
+		expect(currentDocument.json.id).toBe(signPage.json.id);
+
+		const documents = (await executeSignerDocument.call(
+			liveCtx({
+				signerAccessCode: SIGNER_ACCESS_CODE,
+				signerId,
+				returnAll: false,
+				limit: 20,
+				filters: {},
+			}),
+			0,
+			'list',
+		)) as any[];
+		expect(Array.isArray(documents)).toBe(true);
+
+		const found = (await executeSignerDocument.call(
+			liveCtx({ signerAccessCode: SIGNER_ACCESS_CODE, signerId, search: '' }),
+			0,
+			'search',
+		)) as any[];
+		expect(Array.isArray(found)).toBe(true);
+	});
+
 	emailIt(
 		'signer + assignment lifecycle uses both configured inboxes and public token delivery',
 		async () => {
 			let documentId: string | undefined;
 			let assignmentId: string | undefined;
-			let primaryAccessCode: string | undefined;
 			const createdSignerIds: string[] = [];
 			const signerIds: string[] = [];
 
@@ -692,15 +880,18 @@ d('LIVE sandbox integration (real SDK code paths)', () => {
 				)) as any;
 				assignmentId = assignment.json.id as string;
 				expect(assignmentId).toBeTruthy();
+
+				// Every signer gets a signing URL for the web signing page. It addresses
+				// the DOCUMENT and identifies the signer by email — it carries no
+				// signer-access-code, so it cannot be used to drive the signer-side API.
 				const signingUrl = (assignment.json.signing_urls as any[])?.find(
 					(entry) => entry.signer_id === signerIds[0],
 				)?.url;
 				expect(typeof signingUrl).toBe('string');
 				const parsedSigningUrl = new URL(signingUrl);
-				primaryAccessCode =
-					parsedSigningUrl.searchParams.get('signer-access-code') ??
-					parsedSigningUrl.pathname.split('/').filter(Boolean).at(-1);
-				expect(primaryAccessCode).toBeTruthy();
+				expect(parsedSigningUrl.pathname).toBe(`/sign/${documentId}`);
+				expect(parsedSigningUrl.searchParams.get('email')).toBe(TEST_EMAIL_PRIMARY);
+				expect(parsedSigningUrl.searchParams.get('signer-access-code')).toBeNull();
 
 				const progress = (await executeDocument.call(
 					liveCtx({ documentId }),
@@ -708,27 +899,6 @@ d('LIVE sandbox integration (real SDK code paths)', () => {
 					'getSigningProgress',
 				)) as any;
 				expect(progress.json).toMatchObject({ available: true, signed: 0, total: 2 });
-
-				const signPage = (await executeAssignment.call(
-					liveCtx({ signerAccessCode: primaryAccessCode }),
-					0,
-					'getSignPage',
-				)) as any;
-				expect(signPage.json).toBeDefined();
-
-				const signerSelf = (await executeSigner.call(
-					liveCtx({ signerAccessCode: primaryAccessCode }),
-					0,
-					'getSelf',
-				)) as any;
-				expect(signerSelf.json.id).toBe(signerIds[0]);
-
-				const currentDocument = (await executeSignerDocument.call(
-					liveCtx({ signerAccessCode: primaryAccessCode, signerId: signerIds[0] }),
-					0,
-					'getCurrent',
-				)) as any;
-				expect(currentDocument.json.id).toBe(documentId);
 
 				const assignments = (await executeAssignment.call(
 					liveCtx({ returnAll: false, limit: 100 }),
@@ -757,12 +927,33 @@ d('LIVE sandbox integration (real SDK code paths)', () => {
 				)) as any;
 				expect(Array.isArray(whatsapp.json.notifications)).toBe(true);
 
+				const expiresAt = new Date(Date.now() + 7 * 86400_000).toISOString().replace(/\.\d+Z$/, 'Z');
+				const reset = (await executeAssignment.call(
+					liveCtx({ documentId, assignmentId, expiresAt }),
+					0,
+					'resetExpiration',
+				)) as any;
+				expect(reset.json).toEqual(expect.any(Object));
+
 				const publicInfo = (await executeDocument.call(
 					liveCtx({ publicDocumentId: documentId }),
 					0,
 					'getPublicInfo',
 				)) as any;
 				expect(publicInfo.json.id).toBe(documentId);
+
+				// Public artifact route: the signer access code is optional here.
+				const signerCopy = (await executeSignerDocument.call(
+					liveCtx({
+						signerId: signerIds[0],
+						documentId,
+						artifact: 'original',
+						binaryOutputProperty: 'data',
+					}),
+					0,
+					'download',
+				)) as any;
+				expect(signerCopy.binary.data).toBeDefined();
 
 				const tokenDelivery = (await executeDocument.call(
 					liveCtx({
@@ -776,17 +967,6 @@ d('LIVE sandbox integration (real SDK code paths)', () => {
 				expect(tokenDelivery.json).toEqual(expect.any(Object));
 				expect(Array.isArray(tokenDelivery.json)).toBe(false);
 
-				const declined = (await executeAssignment.call(
-					liveCtx({
-						documentId,
-						assignmentId,
-						signerAccessCode: primaryAccessCode,
-						declineReason: 'Automated sandbox lifecycle test',
-					}),
-					0,
-					'decline',
-				)) as any;
-				expect(declined.json).toEqual({ data: [] });
 			} finally {
 				try {
 					if (documentId) await executeDocument.call(liveCtx({ documentId }), 0, 'delete');

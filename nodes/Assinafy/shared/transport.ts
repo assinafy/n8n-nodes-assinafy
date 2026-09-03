@@ -144,7 +144,11 @@ async function sendRequest(
 						requestOptions,
 					)) as unknown);
 		} catch (error) {
-			if (options.method === 'GET' && getHttpCode(error) === 429 && attempt < MAX_RETRIES) {
+			// A 429 is refused before the handler runs, so the request had no effect:
+			// replaying it cannot duplicate a mutation, whatever the method. Every
+			// other failure stays single-shot, because an ambiguous response could
+			// mean the mutation was applied.
+			if (getHttpCode(error) === 429 && attempt < MAX_RETRIES) {
 				await sleep(retryDelayMs(error, attempt));
 				continue;
 			}

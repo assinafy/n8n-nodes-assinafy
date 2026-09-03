@@ -34,6 +34,8 @@ The release workflow enables the destructive and credit-consuming document/signi
 
 Successful signer, social-login, password-reset, and verification flows require external tokens or inbox access. When those are unavailable, document the limitation and test request construction; do not describe an expected 401/404 route check as end-to-end success.
 
+Signer-side operations authenticate with a `signer-access-code` that no endpoint returns — it arrives only in the signer's notification email or WhatsApp message, and the `signing_urls` on an assignment do not contain one. Set `ASSINAFY_TEST_SIGNER_ACCESS_CODE` to a code pasted from a real sandbox inbox to run the signer-side assertions; without it they skip. Never derive a stand-in code from a URL and assert it is truthy: that passes while proving nothing, and the next call fails with `401 Credenciais inválidas.` [`docs/OPERATIONS.md`](docs/OPERATIONS.md#live-verification-coverage) tracks which operations the live suite reaches and why the rest cannot run unattended; update it whenever that changes.
+
 ## Dependency updates
 
 GitLab is the source repository and GitHub is its release mirror. Treat GitHub Dependabot pull requests as update notifications: reproduce the locked dependency change on a GitLab branch, run the full verification set, and merge it in GitLab so the next mirror update does not overwrite the change.

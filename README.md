@@ -51,6 +51,12 @@ The credential test calls `GET /accounts/{accountId}` to confirm the key and acc
 > example request body/query, and example response (`{status,message,data}` envelope,
 > unwrapped by the node). The tables below are a quick endpoint index.
 
+### Signer access codes
+
+Operations marked **(Signer Side)** authenticate with a per-signer `signer-access-code` instead of the workspace API key. **No endpoint returns that code** — it reaches the signer only in the notification the API sends when an assignment is created or resent, by email or WhatsApp. The `signing_urls` on a new assignment are not a substitute: each one addresses the web signing page for the document (`https://app.assinafy.com.br/sign/{documentId}?email=…`) and carries no code, so passing its path segment as `signer-access-code` returns `401 Credenciais inválidas.`
+
+Drive these operations only when a code enters the workflow through a step you control — an inbox-reading node, a WhatsApp integration, or a human pasting it in. To simply get a signer to their document, hand them the signing URL or use **Document → Send Public Token**. Every other operation works from the API key alone. See [Where a signer access code comes from](docs/OPERATIONS.md#where-a-signer-access-code-comes-from).
+
 ### Resource: Document
 
 | Operation                   | Endpoint                                                                                                      |
@@ -271,7 +277,7 @@ The Trigger owns the account's single Assinafy subscription. Use one trigger wor
 - List operations emit one n8n item per resource. Array-valued mutation responses emit one item shaped as `{ "data": [...] }`.
 - Binary downloads emit one item with JSON metadata and the file in the selected binary property.
 - **Get Signing Progress** sets `available: false` and returns null counts when the document response does not include assignment details; it never reports a synthetic `0/0` as known progress.
-- Read-only GET requests retry bounded HTTP 429 responses. Mutations are sent once so an ambiguous response cannot duplicate a document, signer, assignment, notification, or webhook action.
+- HTTP 429 responses are retried with a bounded budget for every method, honoring `Retry-After`. A rate limit is refused before the request is handled, so replaying it cannot duplicate a document, signer, assignment, notification, or webhook action. Every other failure is surfaced after a single attempt, because an ambiguous response may mean the mutation was applied.
 
 ## Development
 
@@ -289,7 +295,7 @@ npm run verify:package # verify the publish allowlist and load compiled node mod
 
 The codebase contains one credential, one action node with ten resources, and one trigger. The shared transport handles authenticated and public/signer-access-code requests, response-envelope unwrapping, pagination, and GET rate-limit retries. List-search methods back the resource-locator pickers for documents, signers, tags, and templates.
 
-The sandbox suite requires explicit credentials, rejects production hosts, and cleans up disposable records. Mutations, account-credit consumption, and workspace/logo/subscription changes each have separate opt-in gates. See [CONTRIBUTING.md](CONTRIBUTING.md) for the commands and environment variables.
+The sandbox suite requires explicit credentials, rejects production hosts, and cleans up disposable records. Mutations, account-credit consumption, and workspace/logo/subscription changes each have separate opt-in gates. It reaches 74 of the 93 node operations; the remaining 19 need a signer access code, a user password, a key rotation that would revoke its own credential, or a precondition the API cannot create — [`docs/OPERATIONS.md`](docs/OPERATIONS.md#live-verification-coverage) lists each one and why. All 93 have request-shape coverage offline. See [CONTRIBUTING.md](CONTRIBUTING.md) for the commands and environment variables.
 
 ## Releasing
 
