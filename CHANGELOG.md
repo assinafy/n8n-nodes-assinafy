@@ -5,6 +5,14 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.6.2] — 2026-09-02
+
+### Fixed
+
+- `nodeVersion` in `Assinafy.node.json` and `AssinafyTrigger.node.json` was left at `1.6.0`
+  by the 1.6.1 bump, so both nodes advertised a stale version and `npm run test:ci` failed
+  on the metadata-alignment check. Both files now track the package version.
+
 ## [1.6.1] — 2026-09-02
 
 ### Fixed
