@@ -52,6 +52,7 @@
 		"CONTRIBUTING.md",
 		"LICENSE.md",
 		"README.md",
+		"README.en.md",
 		"SECURITY.md"
 	],
 	"n8n": {
