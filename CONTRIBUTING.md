@@ -1,5 +1,7 @@
 # Contributing
 
+Contributions are welcome through [GitHub issues](https://github.com/assinafy/n8n-nodes-assinafy/issues) and [pull requests](https://github.com/assinafy/n8n-nodes-assinafy/pulls). Fork the repository, create a branch from `main`, and open a pull request against `main`. Describe the problem, the resulting behavior, and how you verified the change.
+
 Use Node.js 24.21.0 LTS for development and GitHub Actions. With nvm, run `nvm install` and `nvm use` to select the version in `.nvmrc`. The official n8n container supplies its own supported Node.js runtime.
 
 ```bash
@@ -39,7 +41,7 @@ Signer-side operations authenticate with a `signer-access-code` delivered in the
 
 ## Dependency updates
 
-GitLab stores the source repository; CI and release workflows run on the GitHub mirror. Treat GitHub Dependabot pull requests as update notifications: reproduce the locked dependency change on a GitLab branch, run the full verification set, and merge it in GitLab so the next mirror update does not overwrite the change.
+Include both `package.json` and `package-lock.json` when updating dependencies, and run the verification commands above. Dependency updates, including Dependabot pull requests, follow the same GitHub review process as other contributions.
 
 ## Community package verification
 
