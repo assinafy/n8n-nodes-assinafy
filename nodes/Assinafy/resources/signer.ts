@@ -7,7 +7,12 @@ import type {
 	JsonObject,
 } from 'n8n-workflow';
 import { NodeApiError, NodeOperationError } from 'n8n-workflow';
-import { assinafyApiRequest, executeListOperation, getAccountId } from '../shared/transport';
+import {
+	assinafyApiRequest,
+	assinafyApiRequestAllItems,
+	executeListOperation,
+	getAccountId,
+} from '../shared/transport';
 import {
 	limitField,
 	returnAllField,
@@ -16,7 +21,6 @@ import {
 	sortField,
 } from '../shared/descriptions';
 import {
-	asArray,
 	assertBinaryFormat,
 	assertEmail,
 	cleanQs,
@@ -412,8 +416,8 @@ async function createSigner(
 		});
 	} catch (error) {
 		// A duplicate email loses the lookup→create race; the API rejects it with
-		// HTTP 400 ("Um signatário com este e-mail já existe."), not 409 (verified
-		// live). On any duplicate-style failure, re-resolve and return the existing
+		// HTTP 400 ("Um signatário com este e-mail já existe."). On a duplicate-style
+		// failure, re-resolve and return the existing
 		// signer rather than surfacing the conflict.
 		const code = String((error as { httpCode?: string | number }).httpCode ?? '');
 		if (email && reuseIfExists && (code === '400' || code === '409')) {
@@ -513,12 +517,11 @@ async function lookupSignerByEmail(
 	email: string,
 ): Promise<IDataObject | null> {
 	try {
-		const response = await assinafyApiRequest<IDataObject[]>(this, {
+		const signers = await assinafyApiRequestAllItems<IDataObject>(this, {
 			method: 'GET',
 			path: `/accounts/${accountId}/signers`,
-			qs: { search: email, 'per-page': 100 },
+			qs: { search: email },
 		});
-		const signers = asArray<IDataObject>(response);
 		return signers.find((s) => String(s.email ?? '').toLowerCase() === email.toLowerCase()) ?? null;
 	} catch (error) {
 		const code = (error as { httpCode?: string | number }).httpCode;

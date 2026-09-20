@@ -16,6 +16,7 @@ import { fieldDescription, executeField } from './resources/field';
 import { signerDocumentDescription, executeSignerDocument } from './resources/signerDocument';
 import { authDescription, executeAuth } from './resources/auth';
 import { tagDescription, executeTag } from './resources/tag';
+import { oauthDescription, executeOAuth } from './resources/oauth';
 import { getDocuments } from './listSearch/getDocuments';
 import { getSigners } from './listSearch/getSigners';
 import { getTemplates } from './listSearch/getTemplates';
@@ -41,9 +42,26 @@ export class Assinafy implements INodeType {
 			{
 				name: 'assinafyApi',
 				required: false,
+				displayOptions: { show: { authentication: ['apiKey'] } },
+			},
+			{
+				name: 'assinafyOAuth2Api',
+				required: true,
+				displayOptions: { show: { authentication: ['oAuth2'] } },
 			},
 		],
 		properties: [
+			{
+				displayName: 'Authentication',
+				name: 'authentication',
+				type: 'options',
+				noDataExpression: true,
+				default: 'apiKey',
+				options: [
+					{ name: 'API Key', value: 'apiKey' },
+					{ name: 'OAuth2', value: 'oAuth2' },
+				],
+			},
 			{
 				displayName: 'Resource',
 				name: 'resource',
@@ -55,6 +73,7 @@ export class Assinafy implements INodeType {
 					{ name: 'Authentication', value: 'auth' },
 					{ name: 'Document', value: 'document' },
 					{ name: 'Field Definition', value: 'field' },
+					{ name: 'OAuth', value: 'oauth' },
 					{ name: 'Signer', value: 'signer' },
 					{ name: 'Signer Document', value: 'signerDocument' },
 					{ name: 'Tag', value: 'tag' },
@@ -73,6 +92,7 @@ export class Assinafy implements INodeType {
 			...fieldDescription,
 			...signerDocumentDescription,
 			...authDescription,
+			...oauthDescription,
 		],
 	};
 
@@ -125,6 +145,9 @@ export class Assinafy implements INodeType {
 						break;
 					case 'auth':
 						result = await executeAuth.call(this, i, operation);
+						break;
+					case 'oauth':
+						result = await executeOAuth.call(this, i, operation);
 						break;
 					default:
 						throw new NodeOperationError(this.getNode(), `Unknown resource: ${resource}`, {

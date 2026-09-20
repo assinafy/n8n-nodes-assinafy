@@ -202,20 +202,23 @@ describe('document request construction', () => {
 		});
 	});
 
-	it('marks signing progress unavailable when the document omits assignment details', async () => {
-		const { ctx } = makeCtx(
-			{ documentId: 'doc_123' },
-			{ response: { status: 'pending_signature', assignment: null } },
-		);
-		const result = (await executeDocument.call(ctx as any, 0, 'getSigningProgress')) as any;
-		expect(result.json).toMatchObject({
-			available: false,
-			signed: null,
-			total: null,
-			pending: null,
-			percentage: null,
-		});
-	});
+	it.each([null, {}, { summary: {} }, { signers: [{ id: 'signer_1' }] }])(
+		'marks signing progress unavailable with incomplete assignment details: %j',
+		async (assignment) => {
+			const { ctx } = makeCtx(
+				{ documentId: 'doc_123' },
+				{ response: { status: 'pending_signature', assignment } },
+			);
+			const result = (await executeDocument.call(ctx as any, 0, 'getSigningProgress')) as any;
+			expect(result.json).toMatchObject({
+				available: false,
+				signed: null,
+				total: null,
+				pending: null,
+				percentage: null,
+			});
+		},
+	);
 
 	it('normalizes numeric signing-summary strings', async () => {
 		const { ctx } = makeCtx(

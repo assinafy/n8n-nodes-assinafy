@@ -1,0 +1,27 @@
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:2.39.8@sha256:b73045abaddb40cb4024e86eea1b1f69093501a7339f685a4cd486b7743d23ae
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:5679:5678'
+    environment:
+      N8N_DIAGNOSTICS_ENABLED: 'false'
+      N8N_VERSION_NOTIFICATIONS_ENABLED: 'false'
+      N8N_TEMPLATES_ENABLED: 'false'
+      N8N_SECURE_COOKIE: '${N8N_SECURE_COOKIE:-false}'
+      N8N_EDITOR_BASE_URL: '${N8N_EDITOR_BASE_URL:-http://localhost:5679}'
+      WEBHOOK_URL: '${WEBHOOK_URL:-http://localhost:5679/}'
+      N8N_PROXY_HOPS: '1'
+    entrypoint: ['/bin/sh', '-c']
+    command:
+      - |
+        mkdir -p /home/node/.n8n/nodes/node_modules/@assinafy/n8n-nodes-assinafy
+        cp -R /opt/assinafy/. /home/node/.n8n/nodes/node_modules/@assinafy/n8n-nodes-assinafy/
+        exec /docker-entrypoint.sh
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./dist:/opt/assinafy/dist:ro
+      - ./package.json:/opt/assinafy/package.json:ro
+
+volumes:
+  n8n_data:

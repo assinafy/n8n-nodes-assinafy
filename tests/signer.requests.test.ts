@@ -61,6 +61,36 @@ describe('signer request construction', () => {
 		expect(lastAuth(requests).url).toBe(`${BASE}/accounts/acc_123/signers/sig_1`);
 	});
 
+	it.each(['findByEmail', 'create'])(
+		'finds an existing signer beyond the first search page for %s',
+		async (operation) => {
+			const { ctx, httpRequestWithAuthentication } = makeCtx({
+				fullName: 'Jane',
+				email: 'jane@example.com',
+				additionalFields: {},
+			});
+			httpRequestWithAuthentication.mockImplementation(async (_type, options) => {
+				const data =
+					options.qs.page === 2
+						? [{ id: 'existing', email: 'JANE@example.com' }]
+						: [{ id: 'other', email: 'other@example.com' }];
+				return options.returnFullResponse
+					? { body: { data }, headers: { 'X-Pagination-Page-Count': '2' } }
+					: { data };
+			});
+			const result = await executeSigner.call(ctx, 0, operation);
+			expect(result).toEqual({ json: { id: 'existing', email: 'JANE@example.com' } });
+			expect(httpRequestWithAuthentication).toHaveBeenCalledTimes(2);
+			expect(httpRequestWithAuthentication).toHaveBeenLastCalledWith(
+				'assinafyApi',
+				expect.objectContaining({
+					method: 'GET',
+					qs: { search: 'jane@example.com', 'per-page': 100, page: 2 },
+				}),
+			);
+		},
+	);
+
 	it('updates a signer with a sanitized government ID', async () => {
 		const { ctx, requests } = makeCtx({
 			signerId: 'sig_1',
@@ -119,7 +149,7 @@ describe('signer request construction', () => {
 		await executeSigner.call(ctx as any, 0, 'findByEmail');
 		const req = lastAuth(requests);
 		expect(req.url).toBe(`${BASE}/accounts/acc_123/signers`);
-		expect(req.qs).toEqual({ search: 'jane@example.com', 'per-page': 100 });
+		expect(req.qs).toEqual({ search: 'jane@example.com', 'per-page': 100, page: 1 });
 	});
 
 	it('getSelf sends the access code as a query param without auth', async () => {

@@ -748,7 +748,18 @@ async function getSigningProgress(
 	});
 
 	const status = details.status as string | undefined;
-	if (!details.assignment || typeof details.assignment !== 'object') {
+	const assignment = details.assignment as IDataObject | null | undefined;
+	const summary = assignment?.summary as IDataObject | null | undefined;
+	const totalValue =
+		summary?.signer_count ??
+		(Array.isArray(assignment?.signers) ? assignment.signers.length : undefined);
+	const signedValue = summary?.completed_count;
+	if (
+		totalValue === undefined ||
+		totalValue === null ||
+		signedValue === undefined ||
+		signedValue === null
+	) {
 		return {
 			documentId,
 			status,
@@ -761,11 +772,6 @@ async function getSigningProgress(
 		};
 	}
 
-	const assignment = details.assignment as IDataObject;
-	const summary = (assignment.summary ?? {}) as IDataObject;
-	const totalValue =
-		summary.signer_count ?? (Array.isArray(assignment.signers) ? assignment.signers.length : 0);
-	const signedValue = summary.completed_count ?? 0;
 	const total = Number(totalValue);
 	const signed = Number(signedValue);
 	const isValidCount = (value: unknown, count: number) =>

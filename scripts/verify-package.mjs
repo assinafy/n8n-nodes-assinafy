@@ -25,11 +25,15 @@ const required = [
 	'CONTRIBUTING.md',
 	'LICENSE.md',
 	'README.md',
+	'README.en.md',
+	'README.pt-BR.md',
 	'SECURITY.md',
 ];
 const missing = required.filter((path) => !paths.includes(path));
 const leakedGeneratedFiles = paths.filter(
-	(path) => path.endsWith('.tsbuildinfo') || path.startsWith('dist/coverage/'),
+	(path) =>
+		path.endsWith('.tsbuildinfo') ||
+		/(^|\/)(coverage|\.local|\.env(?:\.[^/]*)?|AGENTS\.md|CLAUDE\.md)(\/|$)/.test(path),
 );
 
 if (missing.length || leakedGeneratedFiles.length) {

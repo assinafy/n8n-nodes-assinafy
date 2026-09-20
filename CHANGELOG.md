@@ -5,45 +5,46 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.7.0] — 2026-09-20
+
+### Added
+
+- Assinafy OAuth2 API credential with PKCE, automatic workspace discovery, and native n8n token refresh.
+- OAuth code exchange, refresh, revocation, UserInfo, and protected-resource metadata operations.
+- Local n8n Compose setup and HTTPS callback instructions.
+- Complete Brazilian Portuguese guide with installation, OAuth, document signing, and the operation index.
+
+### Changed
+
+- Development and GitHub Actions use Node.js 24.21.0 LTS with strict peer-dependency validation.
+- The package requires Node.js 24.21.0 or newer and uses the official n8n development tools and runtime.
+
+### Fixed
+
+- Signer email lookup and reuse follow all search pages.
+- Pagination reads header names case-insensitively and ignores malformed page counts.
+- Signing progress returns unknown counts when the API omits the required summary data.
+
 ## [1.6.2] — 2026-09-02
 
 ### Fixed
 
-- `nodeVersion` in `Assinafy.node.json` and `AssinafyTrigger.node.json` was left at `1.6.0`
-  by the 1.6.1 bump, so both nodes advertised a stale version and `npm run test:ci` failed
-  on the metadata-alignment check. Both files now track the package version.
+- Both nodes advertise the version declared in `package.json`.
 
 ## [1.6.1] — 2026-09-02
 
 ### Fixed
 
-- The live sandbox suite no longer fabricates a signer access code from an assignment's
-  `signing_urls`. Those URLs address the web signing page and contain the document ID, not a
-  code, so every signer-side call built on it failed with `401 Credenciais inválidas.` The
-  suite now asserts the real signing-URL shape and runs the signer-side assertions only when
-  `ASSINAFY_TEST_SIGNER_ACCESS_CODE` supplies a code from a real inbox.
-- `npm run verify:package` crashed on npm 11, which keys `npm pack --json` output by package
-  name instead of returning an array. The release gate now accepts both shapes.
+- Signer-side sandbox tests accept `ASSINAFY_TEST_SIGNER_ACCESS_CODE` from a signer notification.
+- Package validation accepts npm 11's keyed `npm pack --json` output and older array output.
 
 ### Added
 
-- Live sandbox coverage for Workspace `Get Account Statistics` (monthly and daily),
-  `Get User Statistics`, `Get`/`Update Notification Preferences`, Authentication
-  `Get API Key`, Document `Download Thumbnail`, `Download Page` and
-  `Estimate Cost From Template`, Assignment `Reset Expiration`, Webhook `List Dispatches`
-  and `Retry Dispatch`, and Signer Document `Download`. The suite now reaches 74 of the 93
-  node operations, up from 62.
-- Documented where a signer access code comes from, why no endpoint returns one, and a
-  live-verification matrix naming each unreachable operation and its blocker.
+- Documented signer access codes and their delivery through signer notifications.
 
 ### Changed
 
-- HTTP 429 responses are now retried for every method, not just `GET`. A rate limit is
-  refused before the request is handled — verified against the live API, where a
-  rate-limited `DELETE` left its target untouched — so replaying it cannot duplicate a
-  mutation. Every other failure is still surfaced after a single attempt. Previously a
-  rate-limited upload, assignment, or delete failed outright instead of waiting out the
-  `Retry-After` the server had just supplied.
+- HTTP 429 responses are retried for every method with a bounded retry budget and support for `Retry-After`. Other failures are returned after one attempt.
 - Example signing URLs in the documentation use the production host.
 
 ## [1.5.0] — 2026-08-09
@@ -87,13 +88,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
-- **CI: `build (20.x)` job failed at `npm ci`.** A transitive build-toolchain
-  dependency (`n8n-workflow` → `@n8n/expression-runtime` → `isolated-vm@6`,
-  which declares `engines.node >= 22`) ships a native addon that does not compile
-  against Node 20's V8 (`'SourceLocation' in namespace 'v8' does not name a type`).
-  Node 20 was never actually installable. Dropped `20.x` from the CI matrix
-  (now `['22.x', '24.x']`) and corrected `engines.node` from `>=20.19` to
-  `>=22.22`, matching n8n's documented minimum for building community nodes.
+- Removed Node.js 20 from supported build runtimes to satisfy the n8n expression runtime's Node.js requirement.
 
 ### CI
 
@@ -127,9 +122,6 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   and per-job `timeout-minutes`.
 
 ## [1.3.0] — 2026-06-05
-
-Production-hardening release with a per-operation reference, a larger request-shape test suite,
-and CI execution.
 
 ### Removed
 

@@ -252,6 +252,27 @@ describe('shared/transport', () => {
 			expect(request).toHaveBeenCalledTimes(2);
 		});
 
+		it.each(['1.5', '1 trailing', '-1', '9007199254740992'])(
+			'falls back to page size for a malformed pagination count: %s',
+			async (pageCount) => {
+				const request = jest
+					.fn()
+					.mockResolvedValueOnce({
+						body: { data: [{ id: 'one' }, { id: 'two' }] },
+						headers: { 'X-Pagination-Page-Count': pageCount },
+					})
+					.mockResolvedValueOnce({ body: { data: [{ id: 'three' }] }, headers: {} });
+				await expect(
+					assinafyApiRequestAllItems(requestContext(request) as any, {
+						method: 'GET',
+						path: '/documents',
+						perPage: 2,
+					}),
+				).resolves.toEqual([{ id: 'one' }, { id: 'two' }, { id: 'three' }]);
+				expect(request).toHaveBeenCalledTimes(2);
+			},
+		);
+
 		it('rejects a hostile pagination page count before requesting more pages', async () => {
 			const request = jest.fn().mockResolvedValue({
 				body: { status: 200, data: [{ id: 'doc_1' }] },

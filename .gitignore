@@ -5,3 +5,8 @@ coverage
 .env
 .env.*
 !.env.example
+AGENTS.md
+CLAUDE.md
+.local/
+.npm/
+*.tgz

@@ -23,7 +23,7 @@
 // The 14 signer-facing endpoints authenticate with a `signer-access-code` that
 // no endpoint returns — it only reaches the signer by email/WhatsApp. Their test
 // needs ASSINAFY_TEST_SIGNER_ACCESS_CODE, pasted from a real sandbox inbox, and
-// is skipped otherwise. See docs/OPERATIONS.md for the full coverage matrix.
+// is skipped otherwise. See CONTRIBUTING.md for live-test configuration.
 //
 import { executeTag } from '../nodes/Assinafy/resources/tag';
 import { executeField } from '../nodes/Assinafy/resources/field';

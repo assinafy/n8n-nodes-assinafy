@@ -63,7 +63,7 @@ export function makeCtx(params: Record<string, unknown>, opts: MockOptions = {})
 
 	const ctx: any = {
 		getCredentials: jest.fn().mockResolvedValue(opts.credentials ?? DEFAULT_CREDENTIALS),
-		getNode: jest.fn().mockReturnValue({ name: 'Assinafy' }),
+		getNode: jest.fn().mockReturnValue({ name: 'Assinafy', parameters: params }),
 		continueOnFail: jest.fn().mockReturnValue(false),
 		getInputData: jest.fn().mockReturnValue([{ json: {} }]),
 		getNodeParameter: jest.fn(

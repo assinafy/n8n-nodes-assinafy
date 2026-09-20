@@ -1,15 +1,13 @@
 import type {
 	IAuthenticate,
 	Icon,
-	ICredentialDataDecryptedObject,
 	ICredentialTestRequest,
 	ICredentialType,
 	INodeProperties,
 } from 'n8n-workflow';
 import { ApplicationError } from 'n8n-workflow';
 import {
-	DEFAULT_BASE_URL,
-	SANDBOX_BASE_URL,
+	resolveCredentialBaseUrl,
 	validateAssinafyBaseUrl,
 } from '../nodes/Assinafy/shared/baseUrl';
 
@@ -130,17 +128,4 @@ export class AssinafyApi implements ICredentialType {
 			method: 'GET',
 		},
 	};
-}
-
-function resolveCredentialBaseUrl(credentials: ICredentialDataDecryptedObject): string {
-	const environment = String(credentials.environment ?? '').trim();
-	if (environment === 'sandbox') return SANDBOX_BASE_URL;
-	if (environment === 'custom') {
-		return String(credentials.customBaseUrl ?? '').trim();
-	}
-	if (environment === 'production') return DEFAULT_BASE_URL;
-
-	const computed = String(credentials.baseUrl ?? '').trim();
-	if (computed && !computed.startsWith('=')) return computed;
-	return DEFAULT_BASE_URL;
 }

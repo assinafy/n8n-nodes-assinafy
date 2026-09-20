@@ -2,6 +2,7 @@
 import { Assinafy } from '../nodes/Assinafy/Assinafy.node';
 import * as assignment from '../nodes/Assinafy/resources/assignment';
 import * as auth from '../nodes/Assinafy/resources/auth';
+import * as oauth from '../nodes/Assinafy/resources/oauth';
 import * as document from '../nodes/Assinafy/resources/document';
 import * as field from '../nodes/Assinafy/resources/field';
 import * as signer from '../nodes/Assinafy/resources/signer';
@@ -39,6 +40,7 @@ describe('Assinafy top-level dispatch', () => {
 	it.each([
 		['assignment', assignment, 'executeAssignment'],
 		['auth', auth, 'executeAuth'],
+		['oauth', oauth, 'executeOAuth'],
 		['document', document, 'executeDocument'],
 		['field', field, 'executeField'],
 		['signer', signer, 'executeSigner'],

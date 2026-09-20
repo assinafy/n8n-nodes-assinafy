@@ -42,3 +42,20 @@ export function validateAssinafyBaseUrl(value: string): AssinafyBaseUrlValidatio
 	}
 	return { valid: true, url: `${parsed.origin}${path}` };
 }
+
+export function resolveCredentialBaseUrl(credentials: {
+	environment?: unknown;
+	customBaseUrl?: unknown;
+	baseUrl?: unknown;
+}): string {
+	const environment = String(credentials.environment ?? '').trim();
+	if (environment === 'sandbox') return SANDBOX_BASE_URL;
+	if (environment === 'custom') {
+		return String(credentials.customBaseUrl ?? '').trim();
+	}
+	if (environment === 'production') return DEFAULT_BASE_URL;
+
+	const computed = String(credentials.baseUrl ?? '').trim();
+	if (computed && !computed.startsWith('=')) return computed;
+	return DEFAULT_BASE_URL;
+}

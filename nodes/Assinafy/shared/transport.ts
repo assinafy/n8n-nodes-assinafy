@@ -13,10 +13,17 @@ import type {
 	JsonObject,
 } from 'n8n-workflow';
 import { NodeApiError, NodeOperationError, sleep } from 'n8n-workflow';
-import { DEFAULT_BASE_URL, SANDBOX_BASE_URL, validateAssinafyBaseUrl } from './baseUrl';
+import { DEFAULT_BASE_URL, resolveCredentialBaseUrl, validateAssinafyBaseUrl } from './baseUrl';
 import { asArray } from './utils';
 
 export const CREDENTIALS_TYPE = 'assinafyApi';
+export const DELEGATED_CREDENTIAL_TYPE = 'assinafyOAuth2Api';
+
+export function getCredentialsType(ctx: AssinafyContext): string {
+	return ctx.getNode().parameters?.authentication === 'oAuth2'
+		? DELEGATED_CREDENTIAL_TYPE
+		: CREDENTIALS_TYPE;
+}
 
 /** Documented maximum page size (`per-page`) accepted by the API. */
 const MAX_PER_PAGE = 100;
@@ -43,6 +50,10 @@ export interface AssinafyRequestOptions {
 	 * signer-access-code flows where the API key is irrelevant.
 	 */
 	skipAuth?: boolean;
+	/** Resolve discovery metadata at the origin rather than below /v1. */
+	basePath?: 'origin';
+	/** Single-use authorization codes and rotating refresh tokens cannot be replayed. */
+	retry?: false;
 }
 
 /** Resolve the effective base URL from credentials (respects environment/custom override). */
@@ -50,15 +61,16 @@ export async function getBaseUrl(
 	ctx: AssinafyContext,
 	allowMissingCredentials = false,
 ): Promise<string> {
+	const credentialsType = getCredentialsType(ctx);
 	let credentials: {
 		environment?: string;
 		customBaseUrl?: string;
 		baseUrl?: string;
 	};
 	try {
-		credentials = (await ctx.getCredentials(CREDENTIALS_TYPE)) as typeof credentials;
+		credentials = (await ctx.getCredentials(credentialsType)) as typeof credentials;
 	} catch (error) {
-		const hasSelectedCredential = Boolean(ctx.getNode().credentials?.[CREDENTIALS_TYPE]);
+		const hasSelectedCredential = Boolean(ctx.getNode().credentials?.[credentialsType]);
 		if (allowMissingCredentials && !hasSelectedCredential) return DEFAULT_BASE_URL;
 		throw new NodeApiError(ctx.getNode(), error as JsonObject, {
 			message: hasSelectedCredential
@@ -66,19 +78,27 @@ export async function getBaseUrl(
 				: 'Assinafy credentials are required for this operation',
 		});
 	}
-	if (credentials.environment === 'sandbox') return SANDBOX_BASE_URL;
-	if (credentials.environment === 'custom') {
-		return normalizeBaseUrl(ctx, credentials.customBaseUrl ?? '');
-	}
-	if (credentials.environment === 'production') return DEFAULT_BASE_URL;
-	if (credentials.baseUrl) return normalizeBaseUrl(ctx, credentials.baseUrl);
-	return DEFAULT_BASE_URL;
+	if (credentialsType === DELEGATED_CREDENTIAL_TYPE) return DEFAULT_BASE_URL;
+	return normalizeBaseUrl(ctx, resolveCredentialBaseUrl(credentials));
 }
 
 /** Resolve the default account (workspace) ID from credentials. Throws if missing. */
 export async function getAccountId(ctx: AssinafyContext, encodeForPath = true): Promise<string> {
-	const credentials = (await ctx.getCredentials(CREDENTIALS_TYPE)) as { accountId?: string };
-	const accountId = String(credentials.accountId ?? '').trim();
+	const credentialsType = getCredentialsType(ctx);
+	const credentials = (await ctx.getCredentials(credentialsType)) as { accountId?: string };
+	let accountId = String(credentials.accountId ?? '').trim();
+	if (!accountId && credentialsType === DELEGATED_CREDENTIAL_TYPE) {
+		const accounts = asArray<IDataObject>(
+			await assinafyApiRequest(ctx, { method: 'GET', path: '/accounts' }),
+		);
+		if (accounts.length !== 1 || typeof accounts[0].id !== 'string' || !accounts[0].id.trim()) {
+			throw new NodeOperationError(
+				ctx.getNode(),
+				'OAuth must grant access to exactly one workspace',
+			);
+		}
+		accountId = accounts[0].id.trim();
+	}
 	if (!accountId) {
 		throw new NodeOperationError(ctx.getNode(), 'Assinafy credentials are missing an Account ID');
 	}
@@ -94,6 +114,7 @@ function buildHttpOptions(
 	const requestOptions: IHttpRequestOptions = {
 		method: options.method,
 		url,
+		timeout: 30000,
 		headers: {
 			Accept: 'application/json',
 			...(options.headers ?? {}),
@@ -128,7 +149,7 @@ function buildHttpOptions(
 	return requestOptions;
 }
 
-/** Issue the HTTP call, retrying only read-only GET requests after HTTP 429. */
+/** Issue the HTTP call with a bounded retry budget for rate-limit responses. */
 async function sendRequest(
 	ctx: AssinafyContext,
 	options: AssinafyRequestOptions,
@@ -140,7 +161,7 @@ async function sendRequest(
 				? ((await ctx.helpers.httpRequest.call(ctx, requestOptions)) as unknown)
 				: ((await ctx.helpers.httpRequestWithAuthentication.call(
 						ctx,
-						CREDENTIALS_TYPE,
+						getCredentialsType(ctx),
 						requestOptions,
 					)) as unknown);
 		} catch (error) {
@@ -148,7 +169,7 @@ async function sendRequest(
 			// replaying it cannot duplicate a mutation, whatever the method. Every
 			// other failure stays single-shot, because an ambiguous response could
 			// mean the mutation was applied.
-			if (getHttpCode(error) === 429 && attempt < MAX_RETRIES) {
+			if (options.retry !== false && getHttpCode(error) === 429 && attempt < MAX_RETRIES) {
 				await sleep(retryDelayMs(error, attempt));
 				continue;
 			}
@@ -168,7 +189,7 @@ export async function assinafyApiRequest<T = IDataObject>(
 	options: AssinafyRequestOptions,
 ): Promise<T> {
 	const baseURL = await getBaseUrl(ctx, options.skipAuth === true);
-	const url = `${baseURL}${ensureLeadingSlash(options.path)}`;
+	const url = `${options.basePath === 'origin' ? new URL(baseURL).origin : baseURL}${ensureLeadingSlash(options.path)}`;
 	const requestOptions = buildHttpOptions(url, options);
 
 	const response = await sendRequest(ctx, options, requestOptions);
@@ -287,13 +308,11 @@ export async function searchResource(
 	const qs: IDataObject = { page, 'per-page': perPage };
 	if (opts.filter) qs.search = opts.filter;
 
-	const requestOptions: IHttpRequestOptions = {
-		method: 'GET',
-		url: `${baseURL}${ensureLeadingSlash(opts.path)}`,
-		qs,
-		headers: { Accept: 'application/json' },
-		returnFullResponse: true,
-	};
+	const requestOptions = buildHttpOptions(
+		`${baseURL}${ensureLeadingSlash(opts.path)}`,
+		{ method: 'GET', path: opts.path },
+		{ qs, returnFullResponse: true },
+	);
 
 	const response = (await sendRequest(ctx, { method: 'GET', path: opts.path }, requestOptions)) as {
 		body?: unknown;
@@ -344,11 +363,14 @@ function normalizeBaseUrl(ctx: AssinafyContext, value: string): string {
 
 function readPaginationHeader(headers: IDataObject | undefined, name: string): number | undefined {
 	if (!headers) return undefined;
-	const raw = headers[name] ?? headers[name.toLowerCase()] ?? headers[name.toUpperCase()];
+	const raw = Object.entries(headers).find(
+		([key]) => key.toLowerCase() === name.toLowerCase(),
+	)?.[1];
 	if (raw === undefined || raw === null) return undefined;
 	const value = Array.isArray(raw) ? raw[0] : raw;
-	const parsed = Number.parseInt(String(value), 10);
-	return Number.isFinite(parsed) ? parsed : undefined;
+	if (!/^\d+$/.test(String(value).trim())) return undefined;
+	const parsed = Number(value);
+	return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
 /** Extract the numeric HTTP status from an n8n/axios-style request error. */
