@@ -11,6 +11,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 - npm publishing uses the configured protected environment token.
 
+### Changed
+
+- Release publishing no longer depends on live Assinafy sandbox tests; those tests remain available for opt-in development use.
+
 ## [1.7.1] — 2026-09-23
 
 ### Fixed

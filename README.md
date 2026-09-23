@@ -366,11 +366,11 @@ The sandbox suite requires explicit credentials, rejects production hosts, and c
 
 ## Releasing
 
-Prepare a versioned main commit and a matching stable `vMAJOR.MINOR.PATCH` tag. Pushing the tag to GitHub builds one immutable tarball, runs the protected Assinafy document/signing sandbox gate (including credit-consuming assignment delivery), publishes the tarball to npmjs with provenance, and then mirrors the same bytes to GitHub Packages (see `.github/workflows/publish.yml`). Direct `npm publish` is blocked, and this repository does not use the n8n CLI's local `npm run release` path.
+Prepare a versioned main commit and a matching stable `vMAJOR.MINOR.PATCH` tag. Pushing the tag to GitHub verifies the package, builds one immutable tarball, publishes it to npmjs with provenance, and then mirrors the same bytes to GitHub Packages (see `.github/workflows/publish.yml`). Direct `npm publish` is blocked, and this repository does not use the n8n CLI's local `npm run release` path.
 
 For the first npmjs release, store a one-time granular token as `NODE_AUTH_TOKEN` in the protected `npm` GitHub environment and publish only through the workflow. Then configure npm trusted publishing for repository `assinafy/n8n-nodes-assinafy`, workflow `publish.yml`, and environment `npm`; revoke and remove the bootstrap token. Later releases authenticate with GitHub OIDC and keep provenance enabled.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the verification and sandbox-test workflow. Report vulnerabilities according to [SECURITY.md](SECURITY.md); never put API keys, signer codes, personal data, or document contents in a public issue.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for verification and optional sandbox tests. Report vulnerabilities according to [SECURITY.md](SECURITY.md); never put API keys, signer codes, personal data, or document contents in a public issue.
 
 ## License
 

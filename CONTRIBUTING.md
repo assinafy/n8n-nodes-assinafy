@@ -33,9 +33,7 @@ npx jest tests/live.integration.test.ts --runInBand
 
 Mutation tests additionally require `ASSINAFY_LIVE_DESTRUCTIVE=1`. Assignment and notification checks that consume account credits also require `ASSINAFY_LIVE_CREDIT_MUTATIONS=1` and both test-email variables. Workspace create/logo/webhook/delete checks require the separate `ASSINAFY_LIVE_WORKSPACE_MUTATIONS=1` safety gate. Use disposable records, confirm cleanup in `finally`, and never point the suite at production. Do not mutate a primary logo, API key, subscription, or account.
 
-The release workflow enables the destructive and credit-consuming document/signing gates and fails when their protected sandbox secrets or account credits are unavailable. Workspace/logo administration remains outside that release gate.
-
-Prepare a versioned main commit and matching Git tag for releases. The GitHub tag workflow performs package verification, sandbox tests, and provenance publishing. Direct `npm publish` is blocked; the n8n CLI's local `npm run release` command is not used for this repository's release path.
+Prepare a versioned main commit and matching Git tag for releases. The GitHub tag workflow performs package verification and provenance publishing. Direct `npm publish` is blocked; the n8n CLI's local `npm run release` command is not used for this repository's release path.
 
 Successful signer, social-login, password-reset, and verification flows require external tokens or inbox access. When those are unavailable, document the limitation and test request construction; do not describe an expected 401/404 route check as end-to-end success.
 
