@@ -364,13 +364,7 @@ The codebase contains two credentials, one action node with eleven resources, an
 
 The sandbox suite requires explicit credentials, rejects production hosts, and cleans up disposable records. Mutations, account-credit consumption, and workspace/logo/subscription changes each have separate opt-in gates. See [CONTRIBUTING.md](CONTRIBUTING.md) for the commands and environment variables.
 
-## Releasing
-
-Prepare a versioned main commit and a matching stable `vMAJOR.MINOR.PATCH` tag. Pushing the tag to GitHub verifies the package, builds one immutable tarball, publishes it to npmjs with provenance, and then mirrors the same bytes to GitHub Packages (see `.github/workflows/publish.yml`). Direct `npm publish` from the source tree is blocked, and this repository does not use the n8n CLI's local `npm run release` path.
-
-Before tagging a release, configure [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/) for package `@assinafy/n8n-nodes-assinafy`: GitHub repository `assinafy/n8n-nodes-assinafy`, workflow `publish.yml`, environment `npm`, with `npm publish` allowed. The protected GitHub environment gate remains required. The workflow authenticates to npmjs through GitHub OIDC and publishes with provenance; it does not need an npm token.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for verification and optional sandbox tests. Report vulnerabilities according to [SECURITY.md](SECURITY.md); never put API keys, signer codes, personal data, or document contents in a public issue.
+Report vulnerabilities according to [SECURITY.md](SECURITY.md); never put API keys, signer codes, personal data, or document contents in a public issue.
 
 ## License
 

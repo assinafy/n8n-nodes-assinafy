@@ -33,6 +33,8 @@ npx jest tests/live.integration.test.ts --runInBand
 
 Mutation tests additionally require `ASSINAFY_LIVE_DESTRUCTIVE=1`. Assignment and notification checks that consume account credits also require `ASSINAFY_LIVE_CREDIT_MUTATIONS=1` and both test-email variables. Workspace create/logo/webhook/delete checks require the separate `ASSINAFY_LIVE_WORKSPACE_MUTATIONS=1` safety gate. Use disposable records, confirm cleanup in `finally`, and never point the suite at production. Do not mutate a primary logo, API key, subscription, or account.
 
+## Releasing
+
 Configure the package's [npm trusted publisher](https://docs.npmjs.com/trusted-publishers/) with npm CLI 11.15.0 or later and an account with write access and two-factor authentication:
 
 ```bash

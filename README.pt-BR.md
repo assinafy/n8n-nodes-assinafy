@@ -367,13 +367,7 @@ O projeto contém duas credenciais, um nó de ação com onze recursos e um gati
 
 A suíte de sandbox exige credenciais explícitas, rejeita endereços de produção e remove os registros descartáveis que cria. Alterações de registros, consumo de créditos da conta e mudanças em workspaces, logos e assinaturas de webhook exigem habilitações separadas. Consulte [CONTRIBUTING.md](CONTRIBUTING.md), em inglês, para ver os comandos e as variáveis de ambiente.
 
-## Publicação de versões
-
-Prepare um commit na main com a versão atualizada e uma tag estável `vMAJOR.MINOR.PATCH` correspondente. Ao enviar a tag ao GitHub, o fluxo verifica o pacote, gera um único arquivo imutável, publica-o no npmjs com comprovação de origem e espelha os mesmos bytes no GitHub Packages. Consulte `.github/workflows/publish.yml`. O comando direto `npm publish` a partir da árvore de arquivos do projeto é bloqueado, e este repositório não usa a publicação local do n8n CLI via `npm run release`.
-
-Antes de criar a tag de uma versão, configure a [publicação confiável do npm](https://docs.npmjs.com/trusted-publishers/) para o pacote `@assinafy/n8n-nodes-assinafy`: repositório do GitHub `assinafy/n8n-nodes-assinafy`, fluxo `publish.yml`, ambiente `npm`, com permissão para `npm publish`. A aprovação pelo ambiente protegido do GitHub continua obrigatória. O fluxo usa o GitHub OIDC para autenticar no npmjs e publica com comprovação de origem; não precisa de um token do npm.
-
-Consulte [CONTRIBUTING.md](CONTRIBUTING.md) para o processo de verificação e os testes opcionais no sandbox. Relate vulnerabilidades conforme [SECURITY.md](SECURITY.md). Nunca inclua chaves de API, códigos de signatários, dados pessoais ou conteúdo de documentos em uma issue pública.
+Relate vulnerabilidades conforme [SECURITY.md](SECURITY.md). Nunca inclua chaves de API, códigos de signatários, dados pessoais ou conteúdo de documentos em uma issue pública.
 
 ## Licença
 
