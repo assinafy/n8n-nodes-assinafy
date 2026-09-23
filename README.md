@@ -33,12 +33,12 @@ For production hosting, use the supported official n8n image, a stable HTTPS hos
 
 ### OAuth for document workflows
 
-Use a current n8n release; the local setup in this repository pins n8n 2.39.8. Select **Authentication → OAuth2** in the Assinafy action node and create an **Assinafy OAuth2 API** credential.
+Use a current n8n release; the local setup in this repository pins n8n 2.40.5. Select **Authentication → OAuth2** in the Assinafy action node and create an **Assinafy OAuth2 API** credential.
 
 1. Copy the **OAuth Redirect URL** displayed by n8n. It must be a public HTTPS URL, normally `https://n8n.example.com/rest/oauth2-credential/callback`.
 2. In your Assinafy workspace, open **Integrations → OAuth Apps → New application**. Choose **Server application / Confidential**, enter the exact callback, and select the permissions your workflows need.
 3. Copy the issued Client ID and one-time Client Secret into the n8n credential. Store the secret in n8n credentials, never in workflow parameters or exported JSON.
-4. Set **Scope** to a space-separated subset of the permissions registered for the application. A document workflow uses `documents:read documents:write account:read offline_access`; add `templates:read` when using templates. The credential default also includes `templates:read`, so remove it if the application does not allow it.
+4. Set **Scope** to a space-separated subset of the permissions registered for the application. A document workflow uses `documents:read documents:write account:read offline_access`; add `templates:read` when using templates. To register or inactivate Assinafy webhooks through the action node, enable `webhooks:write` in the OAuth application and add it to the credential's **Scope** field. The credential default includes `templates:read`, so remove it if the application does not allow it.
 5. Leave **Account ID** empty to discover the single workspace selected during consent, or enter that workspace's ID explicitly. Click **Connect my account**, sign in to Assinafy, select the workspace, and approve the requested access.
 6. Test the connection with **Workspace → List**. OAuth returns only the consented workspace; a different workspace is forbidden. The credential's connection test also calls `GET /accounts`.
 
@@ -50,10 +50,11 @@ n8n performs Authorization Code with PKCE S256 and sends the confidential client
 | `documents:write` | Upload documents, manage signers, and request signatures |
 | `templates:read` | Read templates used to generate documents |
 | `account:read` | Read the selected workspace's permitted details |
+| `webhooks:write` | Register or inactivate a webhook subscription through the action node; add this scope only when needed |
 | `offline_access` | Maintain the connection using rotating refresh tokens |
 | `openid`, `profile`, `email` | OAuth UserInfo: identity, name, and email, respectively; optional |
 
-OAuth does not authorize owner administration such as password/API-key changes, workspace lifecycle, billing, membership, or webhook administration. Use the API-key credential for those operations and for **Assinafy Trigger**. Signer-side operations still require the signer's access code.
+OAuth does not authorize owner administration such as password/API-key changes, workspace lifecycle, billing, or membership. Use the API-key credential for those operations and for **Assinafy Trigger**. The action node's Webhook operations can use OAuth when the application grants the required scopes: `account:read` to get the subscription, `webhooks:write` to register or inactivate it, and `documents:read` to list event types or dispatches. Signer-side operations still require the signer's access code.
 
 **Each deployment registers its callback.** Self-hosted n8n and n8n Cloud use the URL shown by that instance. One application may serve multiple workflows and connections; separate deployments should use separate applications, or explicitly register each exact callback in an application they control. There is no shared client secret or desktop loopback callback in this package. Behind a reverse proxy, configure `N8N_EDITOR_BASE_URL`, `WEBHOOK_URL`, and `N8N_PROXY_HOPS` so n8n advertises the external HTTPS origin. A temporary tunnel URL changes when the tunnel is recreated, requiring a callback update and reconnection. OAuth currently uses Production; Sandbox remains available for API-key workflows.
 
@@ -230,7 +231,7 @@ Signer creation follows the published request body: only **Full Name** is requir
 | Decline (Signer Side)       | `PUT /documents/{documentId}/assignments/{assignmentId}/reject?signer-access-code=…`              |
 | List                        | `GET /assignments?accountId={accountId}`                                                          |
 
-The `method` can be `virtual` (remote signature via email or WhatsApp) or `collect` (field-placed signatures on the document). Each signer entry accepts optional `verification_method` (`Email`, `Whatsapp`, or `DigitalCertificate`), one or more `notification_methods`, and sequential-signing `step`. Match the notification channel to the available signer contact data; omitted verification and notification methods default to `Email`. `DigitalCertificate` requires the account feature, a signer CPF/CNPJ in `government_id`, and a signing step containing no other signer; it costs 2 credits per signer in addition to notification cost and produces the optional `pades` artifact. For `collect`, provide `entries` as JSON. `copy_receivers` are signer IDs, not email addresses.
+The `method` can be `virtual` (remote signature via email or WhatsApp) or `collect` (field-placed signatures on the document). Each signer entry accepts optional `verification_method` (`Email`, `Whatsapp`, or `DigitalCertificate`), exactly one compatible `notification_methods` value when supplied, and sequential-signing `step`. Match the notification channel to the available signer contact data; when omitted, the API infers the notification channel from the verification method, defaulting both to `Email` when neither is supplied. `DigitalCertificate` requires the account feature, a signer CPF/CNPJ in `government_id`, and a signing step containing no other signer; it costs 2 credits per signer in addition to notification cost and produces the optional `pades` artifact. For `collect`, provide `entries` as JSON. `copy_receivers` are signer IDs, not email addresses.
 
 ### Resource: Template
 
@@ -354,7 +355,7 @@ npm test          # unit and request-shape tests
 npm run test:ci   # tests with enforced coverage thresholds
 npm run audit:dev # development-tooling vulnerability gate
 npm run audit:prod # production-dependency vulnerability check
-npm run verify:package # verify the publish allowlist and load compiled node modules
+npm run verify:package # check package contents, load modules, and scan source and compiled tarball
 ```
 
 For an isolated instance on `http://localhost:5679`, run `npm run build` followed by `docker compose up -d`, complete owner setup, and follow [Local n8n and HTTPS OAuth](CONTRIBUTING.md#local-n8n-and-https-oauth). Rebuild and restart the service after code changes.

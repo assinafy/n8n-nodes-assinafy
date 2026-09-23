@@ -36,7 +36,7 @@ export class AssinafyOAuth2Api implements ICredentialType {
 			type: 'string',
 			default: 'documents:read documents:write templates:read account:read offline_access',
 			description:
-				'Space-separated permissions registered for your application. Request offline_access for automatic refresh. Add openid, profile or email only when needed.',
+				'Space-separated permissions registered for your application. Add webhooks:write here to register or inactivate webhooks through the action node. Request offline_access for automatic refresh. Add openid, profile or email only when needed.',
 		},
 		{
 			displayName: 'Auth URI Query Parameters',
@@ -54,7 +54,7 @@ export class AssinafyOAuth2Api implements ICredentialType {
 		},
 		{
 			displayName:
-				'OAuth is available in Production. Register the exact HTTPS OAuth Redirect URL shown above in your Assinafy application. Webhook administration, passwords and API keys require an Assinafy API credential.',
+				'OAuth is available in Production. Register the exact HTTPS OAuth Redirect URL shown above in your Assinafy application. To change webhooks through the action node, enable webhooks:write in the application and add it to Scope. The Assinafy Trigger, passwords and API keys require an Assinafy API credential.',
 			name: 'oauthNotice',
 			type: 'notice',
 			default: '',

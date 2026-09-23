@@ -302,8 +302,14 @@ export async function searchResource(
 ): Promise<INodeListSearchResult> {
 	const baseURL = await getBaseUrl(ctx);
 	const perPage = clampPageSize(opts.perPage ?? 50);
-	const parsedPage = opts.paginationToken ? Number.parseInt(opts.paginationToken, 10) : 1;
-	const page = Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1;
+	const page = opts.paginationToken === undefined ? 1 : Number(opts.paginationToken);
+	if (
+		(opts.paginationToken !== undefined && !/^[1-9]\d*$/.test(opts.paginationToken)) ||
+		!Number.isSafeInteger(page) ||
+		page > MAX_PAGINATION_PAGES
+	) {
+		throw new NodeOperationError(ctx.getNode(), 'Invalid Assinafy pagination token');
+	}
 
 	const qs: IDataObject = { page, 'per-page': perPage };
 	if (opts.filter) qs.search = opts.filter;
@@ -322,6 +328,9 @@ export async function searchResource(
 	const items = asArray<IDataObject>(unwrapEnvelope(response.body));
 	const result: INodeListSearchResult = { results: items.map(toItem) };
 	const pageCount = readPaginationHeader(response.headers, 'x-pagination-page-count');
+	if (pageCount !== undefined && pageCount > MAX_PAGINATION_PAGES) {
+		throw new NodeOperationError(ctx.getNode(), 'Assinafy pagination exceeded the page safety limit');
+	}
 	if (pageCount !== undefined ? page < pageCount : items.length === perPage) {
 		result.paginationToken = String(page + 1);
 	}

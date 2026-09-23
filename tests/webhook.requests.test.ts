@@ -30,10 +30,11 @@ describe('webhook request construction', () => {
 			url: 'http://127.0.0.1:5678/hook?source=n8n',
 			email: 'ops@example.com',
 			events: ['document_ready'],
-			isActive: true,
+			isActive: false,
 		});
 		await executeWebhook.call(ctx as any, 0, 'register');
 		expect(lastAuth(requests).body.url).toBe('http://127.0.0.1:5678/hook?source=n8n');
+		expect(lastAuth(requests).body.is_active).toBe(false);
 	});
 
 	it.each([
@@ -42,20 +43,16 @@ describe('webhook request construction', () => {
 		'http://example.com/hook',
 		'https://user:password@example.com/hook',
 		'https://example.com/hook#fragment',
-	])(
-		'rejects an invalid absolute webhook URL: %s',
-		async (url) => {
-			const { ctx, requests } = makeCtx({
-				url,
-				email: 'ops@example.com',
-				events: [],
-			});
-			await expect(executeWebhook.call(ctx as any, 0, 'register')).rejects.toThrow(
-				'valid HTTPS URL',
-			);
-			expect(requests).toHaveLength(0);
-		},
-	);
+		'https://example.com/ho\nok',
+	])('rejects an invalid absolute webhook URL: %s', async (url) => {
+		const { ctx, requests } = makeCtx({
+			url,
+			email: 'ops@example.com',
+			events: [],
+		});
+		await expect(executeWebhook.call(ctx as any, 0, 'register')).rejects.toThrow('valid HTTPS URL');
+		expect(requests).toHaveLength(0);
+	});
 
 	it('rejects an invalid notification email', async () => {
 		const { ctx, requests } = makeCtx({
@@ -69,6 +66,22 @@ describe('webhook request construction', () => {
 		expect(requests).toHaveLength(0);
 	});
 
+	it.each([
+		[{ events: 'document_ready' }, 'Events must be an array'],
+		[{ events: ['document_ready', ' '] }, 'Events must be an array'],
+		[{ isActive: 'false' }, 'Is Active must be a boolean'],
+	])('rejects malformed subscription fields before sending: %j', async (override, message) => {
+		const { ctx, requests } = makeCtx({
+			url: 'https://example.com/hook',
+			email: 'ops@example.com',
+			events: [],
+			isActive: true,
+			...override,
+		});
+		await expect(executeWebhook.call(ctx as any, 0, 'register')).rejects.toThrow(message);
+		expect(requests).toHaveLength(0);
+	});
+
 	it('gets the subscription and normalizes the empty sentinel', async () => {
 		const { ctx } = makeCtx(
 			{},
@@ -76,6 +89,17 @@ describe('webhook request construction', () => {
 		);
 		const result = (await executeWebhook.call(ctx as any, 0, 'get')) as any;
 		expect(result.json).toEqual({ subscribed: false });
+	});
+
+	it('treats a missing subscription as unsubscribed but preserves other API errors', async () => {
+		const missing = makeCtx({}, { rejectWith: { httpCode: 404 } });
+		const result = (await executeWebhook.call(missing.ctx as any, 0, 'get')) as any;
+		expect(result.json).toEqual({ subscribed: false });
+
+		const failed = makeCtx({}, { rejectWith: { httpCode: 503 } });
+		await expect(executeWebhook.call(failed.ctx as any, 0, 'get')).rejects.toMatchObject({
+			httpCode: 503,
+		});
 	});
 
 	it('inactivates the subscription', async () => {

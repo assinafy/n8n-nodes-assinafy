@@ -32,6 +32,22 @@ describe('listSearch pickers', () => {
 		expect(result.paginationToken).toBe('2');
 	});
 
+	it.each(['2junk', '0', '10001', '9007199254740992'])(
+		'rejects an invalid pagination token before making a request: %s',
+		async (paginationToken) => {
+			const { ctx, requests } = makeCtx({});
+			await expect(getDocuments.call(ctx as any, undefined, paginationToken)).rejects.toThrow(
+				'Invalid Assinafy pagination token',
+			);
+			expect(requests).toHaveLength(0);
+		},
+	);
+
+	it('rejects a picker response with an excessive page count', async () => {
+		const { ctx } = makeCtx({}, { response: [{ id: 'd1' }], headers: { 'x-pagination-page-count': '10001' } });
+		await expect(getDocuments.call(ctx as any)).rejects.toThrow('page safety limit');
+	});
+
 	it('getSigners maps full_name and email into the label', async () => {
 		const { ctx } = makeCtx(
 			{},

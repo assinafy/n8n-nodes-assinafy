@@ -199,8 +199,19 @@ async function registerWebhook(this: IExecuteFunctions, itemIndex: number): Prom
 	if (!assertEmail(email)) {
 		throw new NodeOperationError(this.getNode(), 'Invalid email address', { itemIndex });
 	}
-	const events = this.getNodeParameter('events', itemIndex, []) as string[];
-	const isActive = this.getNodeParameter('isActive', itemIndex, true) as boolean;
+	const events = this.getNodeParameter('events', itemIndex, []);
+	if (
+		!Array.isArray(events) ||
+		events.some((event) => typeof event !== 'string' || !event.trim())
+	) {
+		throw new NodeOperationError(this.getNode(), 'Events must be an array of event types', {
+			itemIndex,
+		});
+	}
+	const isActive = this.getNodeParameter('isActive', itemIndex, true);
+	if (typeof isActive !== 'boolean') {
+		throw new NodeOperationError(this.getNode(), 'Is Active must be a boolean', { itemIndex });
+	}
 	const accountId = await getAccountId(this);
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'PUT',
@@ -244,6 +255,9 @@ function isEmptySubscription(subscription: IDataObject | null): boolean {
 
 export function normalizeWebhookUrl(value: unknown): string | null {
 	const url = typeof value === 'string' ? value.trim() : '';
+	if (url.split('').some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) {
+		return null;
+	}
 	try {
 		const parsed = new URL(url);
 		const hostname = parsed.hostname.toLowerCase();

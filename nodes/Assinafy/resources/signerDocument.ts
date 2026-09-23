@@ -283,6 +283,11 @@ async function declineMultiple(this: IExecuteFunctions, itemIndex: number): Prom
 	if (!reason) {
 		throw new NodeOperationError(this.getNode(), 'Decline Reason is required', { itemIndex });
 	}
+	if ([...reason].length > 2000) {
+		throw new NodeOperationError(this.getNode(), 'Decline Reason must be at most 2000 characters', {
+			itemIndex,
+		});
+	}
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'PUT',
 		path: '/signers/documents/decline-multiple',

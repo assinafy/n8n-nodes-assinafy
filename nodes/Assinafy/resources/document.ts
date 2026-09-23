@@ -305,9 +305,9 @@ export const documentDescription: INodeProperties[] = [
 						displayName: 'Notification Methods',
 						name: 'notification_methods',
 						type: 'multiOptions',
-						default: ['Email'],
+						default: [],
 						description:
-							'Create From Template accepts one method per signer. Estimate Cost can price one or both methods.',
+							'Leave empty to infer the channel from Verification Method. Choose one channel per signer when providing it.',
 						options: [
 							{ name: 'Email', value: 'Email' },
 							{ name: 'WhatsApp', value: 'Whatsapp' },
@@ -1004,7 +1004,7 @@ async function sendPublicToken(this: IExecuteFunctions, itemIndex: number): Prom
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'PUT',
 		path: `/public/documents/${id}/send-token`,
-		body: { recipient, channel },
+		body: channel === 'email' ? { email: recipient } : { recipient, channel },
 		skipAuth: true,
 	});
 }

@@ -35,12 +35,12 @@ Em produção, use a imagem oficial compatível do n8n, um endereço HTTPS está
 
 ### OAuth para fluxos de documentos
 
-Use uma versão atual do n8n; a configuração local deste repositório fixa a versão 2.39.8. No nó de ação Assinafy, selecione **Authentication → OAuth2** e crie uma credencial **Assinafy OAuth2 API**.
+Use uma versão atual do n8n; a configuração local deste repositório fixa a versão 2.40.5. No nó de ação Assinafy, selecione **Authentication → OAuth2** e crie uma credencial **Assinafy OAuth2 API**.
 
 1. Copie a **OAuth Redirect URL** exibida pelo n8n. Ela deve ser uma URL HTTPS pública, normalmente `https://n8n.example.com/rest/oauth2-credential/callback`.
 2. No seu workspace da Assinafy, acesse **Integrações → Apps OAuth → Novo aplicativo**. Escolha **Aplicação no servidor / Confidential**, informe exatamente a URL de callback e selecione as permissões necessárias para os seus fluxos.
 3. Copie o Client ID e o Client Secret, exibido uma única vez, para a credencial do n8n. Guarde o segredo nas credenciais do n8n, nunca nos parâmetros do fluxo ou em arquivos JSON exportados.
-4. Em **Scope**, informe as permissões separadas por espaços, usando apenas as que foram habilitadas no aplicativo. Um fluxo de documentos usa `documents:read documents:write account:read offline_access`; adicione `templates:read` se usar modelos. A configuração padrão da credencial já inclui `templates:read`; remova esse escopo se o aplicativo não o permitir.
+4. Em **Scope**, informe as permissões separadas por espaços, usando apenas as que foram habilitadas no aplicativo. Um fluxo de documentos usa `documents:read documents:write account:read offline_access`; adicione `templates:read` se usar modelos. Para registrar ou inativar webhooks da Assinafy pelo nó de ação, habilite `webhooks:write` no aplicativo OAuth e adicione esse escopo ao campo **Scope** da credencial. A configuração padrão da credencial já inclui `templates:read`; remova esse escopo se o aplicativo não o permitir.
 5. Deixe **Account ID** vazio para descobrir automaticamente o único workspace selecionado no consentimento, ou informe explicitamente o ID desse workspace. Clique em **Connect my account**, entre na Assinafy, selecione o workspace e autorize o acesso solicitado.
 6. Teste a conexão com **Workspace → List**. O OAuth retorna apenas o workspace autorizado; o acesso a outro workspace é proibido. O teste de conexão da própria credencial também chama `GET /accounts`.
 
@@ -52,10 +52,11 @@ O n8n executa o fluxo Authorization Code com PKCE S256 e envia o segredo do clie
 | `documents:write` | Enviar documentos, gerenciar signatários e solicitar assinaturas |
 | `templates:read` | Consultar os modelos usados para gerar documentos |
 | `account:read` | Consultar os dados permitidos do workspace selecionado |
+| `webhooks:write` | Registrar ou inativar uma assinatura de webhook pelo nó de ação; adicione apenas quando necessário |
 | `offline_access` | Manter a conexão com tokens de renovação com rotação |
 | `openid`, `profile`, `email` | Acessar identidade, nome e e-mail, respectivamente, pelo OAuth UserInfo; são opcionais |
 
-O OAuth não autoriza operações administrativas do proprietário, como alteração de senha ou chave de API, criação e exclusão de workspaces, cobrança, membros ou administração de webhooks. Use a credencial de chave de API para essas operações e para o **Assinafy Trigger**. As operações executadas em nome do signatário continuam exigindo o código de acesso dele.
+O OAuth não autoriza operações administrativas do proprietário, como alteração de senha ou chave de API, criação e exclusão de workspaces, cobrança ou membros. Use a credencial de chave de API para essas operações e para o **Assinafy Trigger**. As operações Webhook do nó de ação aceitam OAuth quando o aplicativo tem os escopos necessários: `account:read` para consultar a assinatura, `webhooks:write` para registrar ou inativar e `documents:read` para listar tipos de eventos ou entregas. As operações executadas em nome do signatário continuam exigindo o código de acesso dele.
 
 **Cada implantação registra seu próprio callback.** Tanto o n8n em infraestrutura própria quanto o n8n Cloud usam a URL exibida pela respectiva instância. Um aplicativo pode atender a vários fluxos e conexões. Implantações separadas devem usar aplicativos separados ou registrar explicitamente cada callback exato em um aplicativo que controlem. O pacote não fornece um segredo de cliente compartilhado nem um callback local de aplicativo desktop. Ao usar um proxy reverso, configure `N8N_EDITOR_BASE_URL`, `WEBHOOK_URL` e `N8N_PROXY_HOPS` para que o n8n anuncie o endereço HTTPS externo. A URL de um túnel temporário muda quando ele é recriado, exigindo atualização do callback e nova conexão. Atualmente, o OAuth usa o ambiente de produção; o sandbox continua disponível para fluxos com chave de API.
 
@@ -233,7 +234,7 @@ O cadastro de signatário segue o corpo de requisição publicado: apenas **Full
 | Decline (Signer Side) | `PUT /documents/{documentId}/assignments/{assignmentId}/reject?signer-access-code=…` |
 | List | `GET /assignments?accountId={accountId}` |
 
-O campo `method` pode ser `virtual` (assinatura remota por e-mail ou WhatsApp) ou `collect` (assinaturas em campos posicionados no documento). Cada signatário aceita os campos opcionais `verification_method` (`Email`, `Whatsapp` ou `DigitalCertificate`), um ou mais `notification_methods` e `step` para definir a sequência. Use um canal de notificação compatível com os dados de contato do signatário; quando omitidos, os métodos de verificação e notificação usam `Email`. `DigitalCertificate` exige que a conta tenha o recurso habilitado, que o CPF/CNPJ do signatário esteja em `government_id` e que ele seja o único signatário da sua etapa. Esse método custa 2 créditos por signatário, além do custo da notificação, e gera o artefato opcional `pades`. Para `collect`, informe `entries` como JSON. O campo `copy_receivers` recebe IDs de signatários, não endereços de e-mail.
+O campo `method` pode ser `virtual` (assinatura remota por e-mail ou WhatsApp) ou `collect` (assinaturas em campos posicionados no documento). Cada signatário aceita os campos opcionais `verification_method` (`Email`, `Whatsapp` ou `DigitalCertificate`), exatamente um valor compatível em `notification_methods` quando informado e `step` para definir a sequência. Use um canal de notificação compatível com os dados de contato do signatário; quando omitido, a API infere o canal a partir do método de verificação e usa `Email` para ambos quando nenhum é informado. `DigitalCertificate` exige que a conta tenha o recurso habilitado, que o CPF/CNPJ do signatário esteja em `government_id` e que ele seja o único signatário da sua etapa. Esse método custa 2 créditos por signatário, além do custo da notificação, e gera o artefato opcional `pades`. Para `collect`, informe `entries` como JSON. O campo `copy_receivers` recebe IDs de signatários, não endereços de e-mail.
 
 ### Recurso: Template (modelos)
 
@@ -357,7 +358,7 @@ npm test          # testes unitários e de formato das requisições
 npm run test:ci   # testes com limites mínimos de cobertura
 npm run audit:dev # verifica vulnerabilidades nas ferramentas de desenvolvimento
 npm run audit:prod # verifica vulnerabilidades nas dependências de produção
-npm run verify:package # verifica os arquivos publicáveis e carrega os módulos compilados
+npm run verify:package # verifica o pacote, carrega os módulos e analisa fonte e distribuição
 ```
 
 Para iniciar uma instância isolada em `http://localhost:5679`, execute `npm run build` e depois `docker compose up -d`, conclua a configuração da conta proprietária e siga as instruções de [n8n local e OAuth com HTTPS](CONTRIBUTING.md#local-n8n-and-https-oauth), em inglês. Recompile e reinicie o serviço após alterar o código.

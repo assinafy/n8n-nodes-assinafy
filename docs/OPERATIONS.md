@@ -126,7 +126,7 @@ An n8n workflow therefore drives the signer-side operations only when a code arr
 
 ### Verification, notification, and digital-certificate rules
 
-Assignment and template signer rows use `verification_method` (`Email`, `Whatsapp`, or `DigitalCertificate`) and `notification_methods` (`Email` or `Whatsapp`). If both are omitted, both default to `Email`. Assignment Create accepts any combination of Email and WhatsApp notification channels. Create From Template accepts exactly one notification channel per signer and infers the matching verification or notification method when only one is supplied. Cost-estimate operations can price either or both notification channels.
+Assignment and template signer rows use `verification_method` (`Email`, `Whatsapp`, or `DigitalCertificate`) and `notification_methods` (`Email` or `Whatsapp`). If both are omitted, both default to `Email`. Create and cost-estimate operations accept exactly one compatible notification channel per signer when supplied; the array shape is historical. When only a verification method is supplied, the API infers its notification channel. Create From Template also infers the verification method when only a notification channel is supplied.
 
 | Verification         | Requirements                                                                                                                  | Per-signer signature cost |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------- |
@@ -284,12 +284,12 @@ Fetches a single document by ID, including expanded `assignment` and `pages`.
 ```json
 {
 	"resource": "document",
-	"id": "1016d5795af62e28c2161efcb7a6",
+	"id": "<document-id-1>",
 	"account_id": "<account-id>",
 	"name": "3.pdf",
 	"status": "pending_signature",
 	"assignment": {
-		"id": "1016d5a650dcb1e056eddd367bbd",
+		"id": "<assignment-id-1>",
 		"sender_email": "sender@example.com",
 		"method": "virtual",
 		"expires_at": null,
@@ -312,7 +312,7 @@ Fetches a single document by ID, including expanded `assignment` and `pages`.
 		"copy_receivers": [],
 		"items": [],
 		"summary": {
-			"signer_count": 2,
+			"signer_count": 1,
 			"completed_count": 0,
 			"signers": [{ "id": "customid1", "full_name": "Signer 1", "completed": false }]
 		},
@@ -350,7 +350,7 @@ Changes a document's display name.
 ```json
 {
 	"resource": "document",
-	"id": "1016d5795af62e28c2161efcb7a6",
+	"id": "<document-id-1>",
 	"account_id": "<account-id>",
 	"template_id": null,
 	"name": "signed-contract.pdf",
@@ -383,7 +383,7 @@ Deletes a document by ID. The SDK returns a synthesized confirmation rather than
 **Example response:**
 
 ```json
-{ "deleted": true, "documentId": "1016d5795af62e28c2161efcb7a6" }
+{ "deleted": true, "documentId": "<document-id-1>" }
 ```
 
 #### Search documents (lightweight)
@@ -413,7 +413,7 @@ Searches workspace documents via the dedicated lightweight search endpoint. Unli
 ```json
 [
 	{
-		"id": "19f80dc86e3cce2d39d7edc9e28",
+		"id": "<document-id-2>",
 		"account_id": "<account-id>",
 		"template_id": null,
 		"name": "contract.pdf",
@@ -423,7 +423,7 @@ Searches workspace documents via the dedicated lightweight search endpoint. Unli
 			"thumbnail": "https://.../thumbnail"
 		},
 		"is_closed": false,
-		"signing_url": "https://app.assinafy.com.br/sign/19f80dc86e3cce2d39d7edc9e28",
+		"signing_url": "https://app.assinafy.com.br/sign/<document-id-2>",
 		"decline_reason": null,
 		"declined_by": null,
 		"tags": [],
@@ -488,7 +488,7 @@ Returns the document's activity log. The SDK wraps the array under `documentId` 
 
 ```json
 {
-	"documentId": "1016d5795af62e28c2161efcb7a6",
+	"documentId": "<document-id-1>",
 	"activities": [
 		{
 			"id": 8232,
@@ -516,7 +516,7 @@ Convenience wrapper: it fetches the document and synthesizes a signing-progress 
 
 ```json
 {
-	"documentId": "1016d5795af62e28c2161efcb7a6",
+	"documentId": "<document-id-1>",
 	"status": "pending_signature",
 	"available": true,
 	"signed": 1,
@@ -556,7 +556,7 @@ Creates a document from a template, mapping one signer entry per template role.
   - Role ID — string — required — template role ID.
   - Signer ID — string — required for Create — existing signer ID. The shared UI also serves Estimate Cost, where it may be omitted; Create validates every row and fails before sending if an ID is missing.
   - Verification Method — options — optional — `Email`, `Whatsapp`, or `DigitalCertificate` (default `Email`).
-  - Notification Methods — multiOptions — optional — choose one of `Email` or `Whatsapp` (default `Email`). The Create contract permits only one method per signer; selecting both fails before a request is sent.
+  - Notification Methods — multiOptions — optional — choose one of `Email` or `Whatsapp` (default empty, so the API infers a channel from Verification Method). The Create contract permits only one method per signer; selecting both fails before a request is sent.
   - Step — number — optional — signing order; 0 = notify all at once, otherwise a contiguous sequence starting at 1.
 - Additional Fields > Document Name — string — optional — overrides the template's default name.
 - Additional Fields > Editor Fields (JSON) — json — optional — array of `{ "field_id", "value" }`.
@@ -577,8 +577,8 @@ The node validates signing steps client-side. `step` is only sent when > 0; `ver
 	"tags": ["Onboarding"],
 	"signers": [
 		{
-			"role_id": "fa8c14f32d732271e071998246e",
-			"id": "fa8c140cb49b79f940aab95fddd",
+			"role_id": "<role-id-1>",
+			"id": "<signer-id-5>",
 			"verification_method": "Email",
 			"notification_methods": ["Email"],
 			"step": 1
@@ -592,19 +592,19 @@ The node validates signing steps client-side. `step` is only sent when > 0; `ver
 ```json
 {
 	"resource": "document",
-	"id": "fa8c140c614c928f7e7efa086b2",
+	"id": "<document-id-5>",
 	"account_id": "<account-id>",
-	"template_id": "fa8c140b5ee344f8e48236ed284",
+	"template_id": "<template-id-2>",
 	"name": "sample-contract.pdf",
 	"status": "uploaded",
 	"assignment": {
-		"id": "fa8c140ccd5781b079738d19e95",
+		"id": "<assignment-id-3>",
 		"sender_email": "sender@example.com",
 		"method": "virtual",
 		"expires_at": "2026-07-30T23:59:00Z",
 		"signers": [
 			{
-				"id": "<signer-id>",
+				"id": "<signer-id-5>",
 				"full_name": "Example Signer",
 				"email": "signer@example.com",
 				"has_accepted_terms": false
@@ -614,14 +614,14 @@ The node validates signing steps client-side. `step` is only sent when > 0; `ver
 		"summary": {
 			"signer_count": 1,
 			"completed_count": 0,
-			"signers": [{ "id": "fa8c140cb49b79f940aab95fddd", "completed": false }]
+			"signers": [{ "id": "<signer-id-5>", "completed": false }]
 		},
-		"signing_urls": [{ "signer_id": "fa8c140cb49b79f940aab95fddd", "url": "https://.../sign/..." }]
+		"signing_urls": [{ "signer_id": "<signer-id-5>", "url": "https://.../sign/..." }]
 	},
 	"tags": [{ "id": "ab12cd34...", "name": "Onboarding" }],
 	"pages": [
 		{
-			"id": "fa8c140c9617a07be842995d4a1",
+			"id": "<page-id-2>",
 			"number": 1,
 			"height": 2100,
 			"width": 1275,
@@ -645,7 +645,7 @@ Estimates the credit/document cost of a template-based document without creating
 **Node parameters:**
 
 - Template ID — resourceLocator — required — the template to use, selected from a searchable list or entered by ID.
-- Signers — fixedCollection (multiple) — required — same row shape as Create From Template. Only `role_id`, `verification_method` (`Email`, `Whatsapp`, or `DigitalCertificate`), and `notification_methods` (`Email` or `Whatsapp`) matter for cost; the estimate may include one or both notification methods. The node accepts the shared UI's `id` and `step` values but deliberately omits them from the request.
+- Signers — fixedCollection (multiple) — required — same row shape as Create From Template. Only `role_id`, `verification_method` (`Email`, `Whatsapp`, or `DigitalCertificate`), and one compatible `notification_methods` value (`Email` or `Whatsapp`) matter for cost. The node accepts the shared UI's `id` and `step` values but deliberately omits them from the request.
 
 The node requires at least one row and a `role_id` for each row. It sends only `signers`, strips create-only signer IDs and signing steps, and does not validate those ignored create-only values or send additional document fields. A `DigitalCertificate` estimate adds 2 credits per signer, plus 0 credits for Email or 0.45 credits for WhatsApp; the signature line uses breakdown code `SignatureDigitalCertificate`.
 
@@ -655,7 +655,7 @@ The node requires at least one row and a `role_id` for each row. It sends only `
 {
 	"signers": [
 		{
-			"role_id": "fa8c14f32d732271e071998246e",
+			"role_id": "<role-id-1>",
 			"verification_method": "Whatsapp",
 			"notification_methods": ["Whatsapp"]
 		}
@@ -741,23 +741,23 @@ The node returns the unwrapped document information without reshaping it. The pa
 
 #### Send a 6 digit access token to a signer via email or whatsapp
 
-Sends a 6-digit signing access token to a recipient via email or WhatsApp. Public endpoint — no API key is sent.
-
-The recipient must already be assigned to the document. The node sends both `recipient` and `channel`.
+Sends a 6-digit signing access token to a recipient. Public endpoint — no API key is sent. The recipient must already be assigned to the document. Email delivery uses the API's `email` request field. Existing WhatsApp workflows retain the `recipient` and `channel` request fields.
 
 **Endpoint:** `PUT /public/documents/{publicDocumentId}/send-token`
 
 **Node parameters:**
 
 - Document ID — string — required — public document ID.
-- Recipient — string — required — email or WhatsApp phone number.
+- Recipient — string — required — email or WhatsApp phone number, matching Channel.
 - Channel — options — required — `email` or `whatsapp` (default `email`).
 
 **Example request:**
 
 ```json
-{ "recipient": "signer@example.com", "channel": "email" }
+{ "email": "signer@example.com" }
 ```
+
+For an existing WhatsApp workflow, the node sends `{ "recipient": "<telephone>", "channel": "whatsapp" }`.
 
 **Example response:**
 
@@ -818,7 +818,7 @@ Lists the tags currently attached to a document. Returns one output item per tag
 ```json
 [
 	{
-		"id": "fa8c09f3e709a8a1c82d69b1454",
+		"id": "<tag-id-1>",
 		"name": "Contracts",
 		"color": "ff0000",
 		"created_at": "2026-05-14T12:00:00Z",
@@ -884,14 +884,14 @@ Attaches additional tags without removing existing ones (idempotent; unknown nam
 {
 	"data": [
 		{
-			"id": "ab12c09f3e709a8a1c82d69b145",
+			"id": "<tag-id-2>",
 			"name": "Contracts",
 			"color": "ff0000",
 			"created_at": "2026-05-14T12:00:00Z",
 			"updated_at": "2026-05-14T12:00:00Z"
 		},
 		{
-			"id": "fa8c09f3e709a8a1c82d69b1454",
+			"id": "<tag-id-1>",
 			"name": "Urgent",
 			"color": null,
 			"created_at": "2026-05-14T13:00:00Z",
@@ -919,8 +919,8 @@ Detaches a single tag from a document (the tag itself is not deleted; detaching 
 ```json
 {
 	"detached": true,
-	"documentId": "60f720572d7fecf7c16c8463",
-	"tagId": "fa8c09f3e709a8a1c82d69b1454"
+	"documentId": "<document-id-3>",
+	"tagId": "<tag-id-1>"
 }
 ```
 
@@ -940,7 +940,7 @@ Creates a signer in the account. Only `full_name` is required; email and WhatsAp
 - Email — string — optional — signer email.
 - Additional Fields — collection — optional:
   - Reuse If Exists — boolean (default `true`) — when true and an email is provided, looks up an existing signer with that email and returns it instead of creating a duplicate.
-  - WhatsApp Phone Number — string — E.164 format (e.g. `+5548999990000`).
+  - WhatsApp Phone Number — string — E.164 format (e.g. `+55` followed by the area code and subscriber number).
 
 Signer Create sends only `full_name`, `email`, and `whatsapp_phone_number`. CPF/CNPJ is set later through Signer Update as `government_id`; create-time `cpf` and `metadata` keys are not sent.
 
@@ -994,14 +994,14 @@ Lists signers in the account. Supports return-all or a capped limit and is pagin
 ```json
 [
 	{
-		"id": "60f720577e30d2047d4f385f",
+		"id": "<signer-id-1>",
 		"full_name": "Example Signer One",
 		"email": "joan@example.com",
-		"whatsapp_phone_number": "+5548999990000",
+		"whatsapp_phone_number": "<e164-whatsapp-number>",
 		"has_accepted_terms": false
 	},
 	{
-		"id": "60f72057b865123687d56c3c",
+		"id": "<signer-id-2>",
 		"full_name": "Example Signer Two",
 		"email": "mary@example.com",
 		"whatsapp_phone_number": null,
@@ -1025,10 +1025,10 @@ Retrieves a single signer by ID.
 ```json
 {
 	"resource": "signer",
-	"id": "62d6ee35c7741ca4006b9e11",
+	"id": "<signer-id-3>",
 	"full_name": "Example Signer",
 	"email": "john@example.com",
-	"whatsapp_phone_number": "+5548999990000",
+	"whatsapp_phone_number": "<e164-whatsapp-number>",
 	"has_accepted_terms": false
 }
 ```
@@ -1055,7 +1055,7 @@ Updates a signer's information. At least one update field must be provided. `ema
 	"full_name": "Example Signer",
 	"email": "john.dove@example.com",
 	"government_id": "<cpf-or-cnpj>",
-	"whatsapp_phone_number": "+5548999990000"
+	"whatsapp_phone_number": "<e164-whatsapp-number>"
 }
 ```
 
@@ -1064,10 +1064,10 @@ Updates a signer's information. At least one update field must be provided. `ema
 ```json
 {
 	"resource": "signer",
-	"id": "62d6ee35c7741ca4006b9e11",
+	"id": "<signer-id-3>",
 	"full_name": "Example Signer",
 	"email": "john.dove@example.com",
-	"whatsapp_phone_number": "+5548999990000",
+	"whatsapp_phone_number": "<e164-whatsapp-number>",
 	"has_accepted_terms": false
 }
 ```
@@ -1089,7 +1089,7 @@ Deletes a signer. The SDK returns a synthesized confirmation object (the API its
 ```json
 {
 	"deleted": true,
-	"signerId": "62d6ee35c7741ca4006b9e11"
+	"signerId": "<signer-id-3>"
 }
 ```
 
@@ -1161,7 +1161,7 @@ Signer-side flow: the signer obtains their own record using the per-signer acces
 	"id": "uahkinwvg8tWJ2RC",
 	"full_name": "Signer Name",
 	"email": "signer@example.com",
-	"whatsapp_phone_number": "+5548999990000",
+	"whatsapp_phone_number": "<e164-whatsapp-number>",
 	"has_accepted_terms": false,
 	"has_signature": false,
 	"has_initial": false,
@@ -1263,7 +1263,7 @@ Signer-side flow: confirms the signer's identity data for a specific document be
 	"id": "<signer-id>",
 	"full_name": "Example Signer",
 	"email": "signer@example.com",
-	"whatsapp_phone_number": "+5548999990000",
+	"whatsapp_phone_number": "<e164-whatsapp-number>",
 	"has_accepted_terms": false
 }
 ```
@@ -1390,7 +1390,7 @@ Creates a signature request on a document. Use `virtual` to collect signatures r
 - Signers — fixedCollection (multiple) — required — at least one signer; each must supply a Signer ID for create.
   - Signer ID — string — required (for create).
   - Verification Method — options (`Email` | `Whatsapp` | `DigitalCertificate`) — optional (default `Email`).
-  - Notification Methods — multiOptions (`Email` | `Whatsapp`) — optional (default `Email`); select either or both channels.
+  - Notification Methods — multiOptions (`Email` | `Whatsapp`) — optional (default empty, so the API infers a channel from Verification Method); select exactly one compatible channel when supplying it.
   - Step — number (≥0) — optional — signing order; set every signer to a contiguous sequence starting at 1, or leave all at 0 to notify everyone at once.
 - Additional Fields — collection — optional:
   - Message — string — optional — invite message.
@@ -1407,7 +1407,7 @@ The API infers omitted verification/notification methods as described in the [sh
 	"method": "collect",
 	"signers": [
 		{
-			"id": "61521202f665dffcef5f6b24",
+			"id": "<signer-id-4>",
 			"verification_method": "Email",
 			"notification_methods": ["Email"],
 			"step": 1
@@ -1417,11 +1417,11 @@ The API infers omitted verification/notification methods as described in the [sh
 	"expires_at": "2026-09-30T21:00:00Z",
 	"entries": [
 		{
-			"page_id": "615213ed81b071f4293b2fc2",
+			"page_id": "<page-id-1>",
 			"fields": [
 				{
-					"signer_id": "61521202f665dffcef5f6b24",
-					"field_id": "6152120297080d55bdd13197",
+					"signer_id": "<signer-id-4>",
+					"field_id": "<field-id-1>",
 					"display_settings": {
 						"top": 282,
 						"left": 69,
@@ -1443,14 +1443,14 @@ The API infers omitted verification/notification methods as described in the [sh
 ```json
 {
 	"resource": "assignment",
-	"id": "615606ef81d199996981dbce",
+	"id": "<assignment-id-2>",
 	"sender_email": "sender@example.com",
 	"method": "collect",
 	"expires_at": "2026-09-30T21:00:00Z",
 	"message": "Please sign the contract",
 	"signers": [
 		{
-			"id": "61521202f665dffcef5f6b24",
+			"id": "<signer-id-4>",
 			"full_name": "Example Signer",
 			"email": "signer@example.com",
 			"whatsapp_phone_number": null,
@@ -1466,20 +1466,20 @@ The API infers omitted verification/notification methods as described in the [sh
 	"copy_receivers": [],
 	"items": [
 		{
-			"id": "615606efbb67641186c12330",
+			"id": "<assignment-item-id-1>",
 			"page": {
-				"id": "615213ed81b071f4293b2fc2",
+				"id": "<page-id-1>",
 				"number": 1,
 				"height": 2100,
 				"width": 1275,
-				"download_url": "https://api.assinafy.com.br/v1/documents/615213edf8a58f132e1b2384/pages/615213ed81b071f4293b2fc2/download"
+				"download_url": "https://api.assinafy.com.br/v1/documents/<document-id-4>/pages/<page-id-1>/download"
 			},
 			"signer": {
 				"id": "<signer-id>",
 				"full_name": "Example Signer",
 				"email": "signer@example.com"
 			},
-			"field": { "id": "6152120297080d55bdd13197", "name": "Signature", "type": "signature" },
+			"field": { "id": "<field-id-1>", "name": "Signature", "type": "signature" },
 			"display_settings": {
 				"top": 282,
 				"left": 69,
@@ -1496,10 +1496,10 @@ The API infers omitted verification/notification methods as described in the [sh
 	"summary": {
 		"signer_count": 1,
 		"completed_count": 0,
-		"signers": [{ "id": "61521202f665dffcef5f6b24", "completed": false }]
+		"signers": [{ "id": "<signer-id-4>", "completed": false }]
 	},
 	"signing_urls": [
-		{ "signer_id": "61521202f665dffcef5f6b24", "url": "https://api.assinafy.com.br/v1/sign/abc" }
+		{ "signer_id": "<signer-id-4>", "url": "https://api.assinafy.com.br/v1/sign/abc" }
 	]
 }
 ```
@@ -1631,12 +1631,12 @@ Signer-side read: retrieves the document and embedded assignment details using o
 
 ```json
 {
-	"id": "615213edf8a58f132e1b2384",
+	"id": "<document-id-4>",
 	"account_id": "<account-id>",
 	"name": "sample-contract-one-page.pdf",
 	"status": "pending_signature",
 	"assignment": {
-		"id": "615606ef81d199996981dbce",
+		"id": "<assignment-id-2>",
 		"expires_at": "2026-09-30T23:59:59Z",
 		"method": "collect",
 		"signers": [
@@ -1651,13 +1651,13 @@ Signer-side read: retrieves the document and embedded assignment details using o
 		],
 		"items": [
 			{
-				"id": "615606efcde1a39c9d21e30e",
+				"id": "<assignment-item-id-2>",
 				"page": {
-					"id": "615213ed81b071f4293b2fc2",
+					"id": "<page-id-1>",
 					"number": 1,
 					"height": 2100,
 					"width": 1275,
-					"download_url": "https://api.assinafy.com.br/v1/documents/615213edf8a58f132e1b2384/pages/615213ed81b071f4293b2fc2/download"
+					"download_url": "https://api.assinafy.com.br/v1/documents/<document-id-4>/pages/<page-id-1>/download"
 				},
 				"signer": {
 					"id": "<signer-id>",
@@ -1665,7 +1665,7 @@ Signer-side read: retrieves the document and embedded assignment details using o
 					"email": "signer@example.com",
 					"has_accepted_terms": true
 				},
-				"field": { "id": "6152120297080d55bdd13197", "name": "Signature", "type": "signature" },
+				"field": { "id": "<field-id-1>", "name": "Signature", "type": "signature" },
 				"display_settings": {
 					"top": 285,
 					"left": 639,
@@ -1694,11 +1694,11 @@ Signer-side read: retrieves the document and embedded assignment details using o
 	},
 	"pages": [
 		{
-			"id": "615213ed81b071f4293b2fc2",
+			"id": "<page-id-1>",
 			"number": 1,
 			"height": 2100,
 			"width": 1275,
-			"download_url": "https://api.assinafy.com.br/v1/documents/615213edf8a58f132e1b2384/pages/615213ed81b071f4293b2fc2/download"
+			"download_url": "https://api.assinafy.com.br/v1/documents/<document-id-4>/pages/<page-id-1>/download"
 		}
 	],
 	"created_at": "2026-08-20T12:00:00Z",
@@ -1722,6 +1722,8 @@ Lists the WhatsApp notification messages sent for an assignment, including the r
 
 **Endpoint:** `GET /documents/{documentId}/assignments/{assignmentId}/whatsapp-notifications`
 
+**OAuth scope:** `documents:read`.
+
 **Node parameters:**
 
 - Document — resource locator — required.
@@ -1737,7 +1739,7 @@ Lists the WhatsApp notification messages sent for an assignment, including the r
 			"header": "Documento para assinatura: Contrato de Servico",
 			"body": "Oi, Maria.\n\nJoao Silva enviou um documento para voce revisar e assinar.\n\nMensagem:\nPor favor assine o contrato\n\nPara acessar o documento, toque em \"Abrir documento\".",
 			"buttons": [{ "text": "Abrir documento" }],
-			"phone_number": "+5511999990001",
+			"phone_number": "<e164-whatsapp-number>",
 			"signer_id": "a51edaee68a7"
 		}
 	]
@@ -1855,7 +1857,7 @@ Sets a new expiration date for an assignment.
 
 #### Signer submits values for collect method input fields
 
-Signer-side sign: submits values for the signer's collect-method input items, authenticated by the per-signer access code passed as a query param (no account auth; SDK uses `skipAuth`). The request body is the raw JSON array of items.
+Signer-side sign: submits values for the signer's collect-method input items, authenticated by the per-signer access code passed as a query param (no account auth; SDK uses `skipAuth`). The request body is the raw JSON array of items. For a virtual assignment, submit an empty array after confirming signer data; collect assignments require item values.
 
 **Endpoint:** `POST /documents/{documentId}/assignments/{assignmentId}`
 
@@ -1864,7 +1866,7 @@ Signer-side sign: submits values for the signer's collect-method input items, au
 - Signer Access Code — string (password) — required.
 - Document — resource locator — required.
 - Assignment ID — string — required.
-- Items (JSON) — json — required — non-empty array of `{ itemId, fieldId, pageId, value }`.
+- Items (JSON) — json — required — array of `{ itemId, fieldId, pageId, value }`; empty for virtual signing after data confirmation, non-empty for collect signing.
 
 **Example request (query + body):**
 
@@ -1873,9 +1875,9 @@ Signer-side sign: submits values for the signer's collect-method input items, au
 	"query": { "signer-access-code": "<signer-access-code>" },
 	"body": [
 		{
-			"itemId": "615606efcde1a39c9d21e30e",
-			"fieldId": "6152120297080d55bdd13197",
-			"pageId": "615213ed81b071f4293b2fc2",
+			"itemId": "<assignment-item-id-2>",
+			"fieldId": "<field-id-1>",
+			"pageId": "<page-id-1>",
 			"value": "Signed by Example Signer"
 		}
 	]
@@ -1957,31 +1959,31 @@ When selected, `status`, comma-joined `tags`, and `sort` are forwarded as query 
 ```json
 [
 	{
-		"id": "fa7f3e524f3a2cc00a5ea4325e2",
+		"id": "<template-id-1>",
 		"name": "sample-contract-one-page.pdf",
 		"document_name": "sample-contract-one-page.pdf",
 		"message": null,
 		"status": "ready",
 		"pages": [
 			{
-				"id": "fa7f3e528d77f2b3ed786df2ce0",
+				"id": "<page-id-3>",
 				"number": 1,
 				"height": 2100,
 				"width": 1275,
-				"download_url": "https://api.assinafy.com.br/v1/accounts/1a/templates/fa7f3e524f3a2cc00a5ea4325e2/pages/fa7f3e528d77f2b3ed786df2ce0/download",
+				"download_url": "https://api.assinafy.com.br/v1/accounts/1a/templates/<template-id-1>/pages/<page-id-3>/download",
 				"fields": []
 			}
 		],
 		"roles": [
 			{
-				"id": "fa7f3e525bfefc71df3701eac6f",
+				"id": "<role-id-2>",
 				"name": "Editor",
 				"assignment_type": "Editor",
 				"created_at": "2024-07-19T15:23:03Z",
 				"updated_at": "2024-07-19T15:23:03Z"
 			}
 		],
-		"tags": [{ "id": "fa8c09f3e709a8a1c82d69b1454", "name": "HR" }],
+		"tags": [{ "id": "<tag-id-1>", "name": "HR" }],
 		"created_at": "2024-07-19T15:23:03Z",
 		"updated_at": "2024-07-19T15:23:03Z"
 	}
@@ -2005,23 +2007,23 @@ Retrieves a single template by ID, including its pages, roles, field placements,
 ```json
 {
 	"resource": "template",
-	"id": "fa7f3e524f3a2cc00a5ea4325e2",
+	"id": "<template-id-1>",
 	"name": "sample-contract-one-page.pdf",
 	"document_name": "sample-contract-one-page.pdf",
 	"message": null,
 	"status": "ready",
 	"pages": [
 		{
-			"id": "fa7f3e528d77f2b3ed786df2ce0",
+			"id": "<page-id-3>",
 			"number": 1,
 			"height": 2100,
 			"width": 1275,
-			"download_url": "https://api.assinafy.com.br/v1/accounts/1a/templates/fa7f3e524f3a2cc00a5ea4325e2/pages/fa7f3e528d77f2b3ed786df2ce0/download",
+			"download_url": "https://api.assinafy.com.br/v1/accounts/1a/templates/<template-id-1>/pages/<page-id-3>/download",
 			"fields": [
 				{
-					"id": "fa7f3e52aa11bb22cc33dd44ee5",
-					"field_id": "fa7f3e52ff00112233445566778",
-					"role_id": "fa7f3e525bfefc71df3701eac6f",
+					"id": "<template-field-id-1>",
+					"field_id": "<field-id-8>",
+					"role_id": "<role-id-2>",
 					"label": "Full Name",
 					"display_settings": null,
 					"created_at": "2024-07-19T15:23:03Z",
@@ -2032,15 +2034,15 @@ Retrieves a single template by ID, including its pages, roles, field placements,
 	],
 	"roles": [
 		{
-			"id": "fa7f3e525bfefc71df3701eac6f",
+			"id": "<role-id-2>",
 			"name": "Editor",
 			"assignment_type": "Editor",
 			"created_at": "2024-07-19T15:23:03Z",
 			"updated_at": "2024-07-19T15:23:03Z"
 		}
 	],
-	"tags": [{ "id": "fa8c09f3e709a8a1c82d69b1454", "name": "HR" }],
-	"default_document_tags": [{ "id": "fa8c09f3e709a8a1c82d69b1454", "name": "HR" }],
+	"tags": [{ "id": "<tag-id-1>", "name": "HR" }],
+	"default_document_tags": [{ "id": "<tag-id-1>", "name": "HR" }],
 	"created_at": "2024-07-19T15:23:03Z",
 	"updated_at": "2024-07-19T15:23:03Z"
 }
@@ -2282,7 +2284,7 @@ Retrieves a single field definition by ID.
 ```json
 {
 	"resource": "field_definition",
-	"id": "63cfe123880b1ba571a97916",
+	"id": "<field-id-2>",
 	"name": "Field Name",
 	"type": "text",
 	"regex": null,
@@ -2323,7 +2325,7 @@ Lists the field definitions in the workspace. The SDK returns them wrapped under
 {
 	"fields": [
 		{
-			"id": "64a7584106d7e3ded274da11",
+			"id": "<field-id-4>",
 			"name": "Name",
 			"type": "personName",
 			"regex": null,
@@ -2335,7 +2337,7 @@ Lists the field definitions in the workspace. The SDK returns them wrapped under
 			"is_visible": true
 		},
 		{
-			"id": "64a758410c5a5df8d07256b5",
+			"id": "<field-id-5>",
 			"name": "CPF",
 			"type": "cpf",
 			"regex": null,
@@ -2401,7 +2403,7 @@ Updates one or more attributes of an existing field definition. At least one upd
 ```json
 {
 	"resource": "field_definition",
-	"id": "63cfe0e0fdc4e3aeb74783d7",
+	"id": "<field-id-3>",
 	"name": "New Field Name",
 	"type": "text",
 	"regex": null,
@@ -2460,8 +2462,8 @@ Validates multiple `{field_id, value}` pairs in a single request. It uses the sa
 
 ```json
 [
-	{ "field_id": "63488ffb7adf435aba319787", "value": "1111111111111" },
-	{ "field_id": "63488ffb0461cebb70775497", "value": "user@example.com" }
+	{ "field_id": "<field-id-6>", "value": "<government-id>" },
+	{ "field_id": "<field-id-7>", "value": "user@example.com" }
 ]
 ```
 
@@ -2473,13 +2475,13 @@ When supplied, the access code is appended as `?signer-access-code=<signer-acces
 {
 	"results": [
 		{
-			"field_id": "63488ffb7adf435aba319787",
+			"field_id": "<field-id-6>",
 			"type": "cpf",
 			"success": false,
 			"error_message": "Invalid CPF."
 		},
 		{
-			"field_id": "63488ffb0461cebb70775497",
+			"field_id": "<field-id-7>",
 			"type": "email",
 			"success": true,
 			"error_message": ""
@@ -2492,7 +2494,7 @@ When supplied, the access code is appended as `?signer-access-code=<signer-acces
 
 ### Webhook
 
-The Webhook resource manages the account's single webhook subscription (Assinafy allows exactly one subscription per account), inspects the available event catalog, and reviews/retries delivery history. All account-scoped paths use the Account ID from the credential.
+The Webhook resource manages the account's single webhook subscription (Assinafy allows exactly one subscription per account), inspects the available event catalog, and reviews/retries delivery history. All account-scoped paths use the Account ID from the credential. Action operations accept an API key or an OAuth Bearer token for the consented workspace. OAuth needs `account:read` to get the subscription, `webhooks:write` to register or inactivate it, and `documents:read` to list event types or dispatches. The **Assinafy Trigger** manages subscriptions with an API-key credential.
 
 #### Register Subscription
 
@@ -2888,7 +2890,7 @@ Retrieves the single document bound to the signer's access code (page content om
 	"created_at": "2023-07-21T13:43:17Z",
 	"updated_at": "2023-07-21T13:43:17Z",
 	"current_signer": {
-		"id": "62d6ee35c7741ca4006b9e11",
+		"id": "<signer-id-3>",
 		"full_name": "Signer Name",
 		"email": "signer@example.com",
 		"has_accepted_terms": false,
@@ -2922,7 +2924,7 @@ Retrieves the single document bound to the signer's access code (page content om
 
 #### Signer lists their visible documents
 
-Lists the documents visible to the signer and returns one n8n item per document. The node supports pagination and forwards optional `status`, `method`, `search`, and `sort` query controls.
+Lists the documents visible to the signer and returns one n8n item per document. Pagination is part of the published endpoint. The node also forwards the optional `status`, `method`, `search`, and `sort` controls for compatible deployments.
 
 **Endpoint:** `GET /signers/{signerId}/documents`
 
@@ -3097,7 +3099,7 @@ Declines several documents in one call with a shared reason. This is a code-only
 
 - Signer Access Code — string (password) — required — per-signer access code.
 - Document IDs (CSV) — string — required — comma-separated list of document IDs (split into `document_ids`; an empty list errors before the request is sent).
-- Decline Reason — string (multiline) — required — text explaining the reason for the decline (sent as `decline_reason`).
+- Decline Reason — string (multiline) — required — text explaining the reason for the decline (sent as `decline_reason`, maximum 2,000 characters).
 
 **Example request:**
 
@@ -3142,10 +3144,10 @@ Downloads one artifact of a signer's document as a binary file. This public rout
 
 ```json
 {
-	"documentId": "62d6ee35c7741ca4006b9e11",
-	"signerId": "62d6ee35c7741ca4006b9e11",
+	"documentId": "<document-id>",
+	"signerId": "<signer-id>",
 	"artifact": "certificated",
-	"fileName": "62d6ee35c7741ca4006b9e11-certificated.pdf",
+	"fileName": "<document-id>-certificated.pdf",
 	"mimeType": "application/pdf",
 	"size": 51234
 }
@@ -3359,7 +3361,7 @@ Exchanges an email and password for a JWT access token, returning the user profi
 	},
 	"accounts": [
 		{
-			"id": "6401df46d6a6b0c692d9ec49",
+			"id": "<user-id-1>",
 			"name": "JS",
 			"roles": ["owner"],
 			"is_delete_allowed": true,
@@ -3409,7 +3411,7 @@ Trades a social provider access/ID token (currently Google only) for an Assinafy
 	},
 	"accounts": [
 		{
-			"id": "6401df46d6a6b0c692d9ec49",
+			"id": "<user-id-1>",
 			"name": "JS",
 			"roles": ["owner"],
 			"is_delete_allowed": true,

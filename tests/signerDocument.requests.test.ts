@@ -90,6 +90,25 @@ describe('signerDocument request construction (signer-side, no auth)', () => {
 		expect(requests).toHaveLength(0);
 	});
 
+	it('enforces the documented 2000-character multiple-decline reason limit', async () => {
+		const params = {
+			signerAccessCode: 'code123',
+			documentIds: 'd1',
+			declineReason: 'x'.repeat(2000),
+		};
+		const valid = makeCtx(params);
+		await executeSignerDocument.call(valid.ctx as any, 0, 'declineMultiple');
+		expect(lastPublic(valid.requests).body.decline_reason).toHaveLength(2000);
+		const unicode = makeCtx({ ...params, declineReason: '😀'.repeat(2000) });
+		await executeSignerDocument.call(unicode.ctx as any, 0, 'declineMultiple');
+
+		const invalid = makeCtx({ ...params, declineReason: 'x'.repeat(2001) });
+		await expect(
+			executeSignerDocument.call(invalid.ctx as any, 0, 'declineMultiple'),
+		).rejects.toThrow('at most 2000 characters');
+		expect(invalid.requests).toHaveLength(0);
+	});
+
 	it('downloads a signer document artifact', async () => {
 		const { ctx, requests } = makeCtx(
 			{

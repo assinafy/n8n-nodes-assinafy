@@ -159,7 +159,9 @@ export const assignmentDescription: INodeProperties[] = [
 						displayName: 'Notification Methods',
 						name: 'notification_methods',
 						type: 'multiOptions',
-						default: ['Email'],
+						default: [],
+						description:
+							'Leave empty to infer the channel from Verification Method. Choose one channel per signer when providing it.',
 						options: [
 							{ name: 'Email', value: 'Email' },
 							{ name: 'WhatsApp', value: 'Whatsapp' },
@@ -284,7 +286,7 @@ export const assignmentDescription: INodeProperties[] = [
 		default: '[]',
 		required: true,
 		description:
-			'Array of items to sign: [{ "itemId": "...", "fieldId": "...", "pageId": "...", "value": "..." }]',
+			'Array of items to sign: [{ "itemId": "...", "fieldId": "...", "pageId": "...", "value": "..." }]. Use [] for a virtual assignment after confirming signer data.',
 		displayOptions: { show: showOnly(['sign']) },
 	},
 	{
@@ -373,6 +375,13 @@ function buildAssignmentBody(
 	}
 	const signers: IDataObject[] = [];
 	for (const entry of signerEntries) {
+		if (!options.forEstimate && entry.notification_methods && entry.notification_methods.length > 1) {
+			throw new NodeOperationError(
+				this.getNode(),
+				'Each signer supports at most one Notification Method',
+				{ itemIndex },
+			);
+		}
 		const ref: IDataObject = {};
 		if (entry.verification_method) ref.verification_method = entry.verification_method;
 		if (entry.notification_methods && entry.notification_methods.length > 0) {
@@ -517,8 +526,8 @@ async function signAssignment(this: IExecuteFunctions, itemIndex: number): Promi
 	const code = requireAccessCode(this, itemIndex);
 	const raw = this.getNodeParameter('signItems', itemIndex, '[]') as unknown;
 	const items = parseJsonParam(this, raw, 'Items', itemIndex);
-	if (!Array.isArray(items) || items.length === 0) {
-		throw new NodeOperationError(this.getNode(), 'Items must be a non-empty JSON array', {
+	if (!Array.isArray(items)) {
+		throw new NodeOperationError(this.getNode(), 'Items must be a JSON array', {
 			itemIndex,
 		});
 	}

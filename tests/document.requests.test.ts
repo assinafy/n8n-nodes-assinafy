@@ -424,7 +424,7 @@ describe('document request construction', () => {
 		const req = lastPublic(requests);
 		expect(req.method).toBe('PUT');
 		expect(req.url).toBe(`${BASE}/public/documents/doc_pub/send-token`);
-		expect(req.body).toEqual({ recipient: 'user@example.com', channel: 'email' });
+		expect(req.body).toEqual({ email: 'user@example.com' });
 	});
 
 	it('rejects an invalid email-channel public token recipient', async () => {

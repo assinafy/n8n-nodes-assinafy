@@ -3,11 +3,13 @@ import {
 	assinafyApiRequest,
 	assinafyApiRequestAllItems,
 	CREDENTIALS_TYPE,
+	executeListOperation,
 	getAccountId,
 	getBaseUrl,
 	unwrapEnvelope,
 } from '../nodes/Assinafy/shared/transport';
 import { DEFAULT_BASE_URL } from '../nodes/Assinafy/shared/baseUrl';
+import { lastAuth, makeCtx } from './helpers';
 
 const createMockContext = (credentials: Record<string, unknown>) => ({
 	getCredentials: jest.fn().mockResolvedValue(credentials),
@@ -110,6 +112,14 @@ describe('shared/transport', () => {
 	});
 
 	describe('requests and pagination', () => {
+		it('maps a non-empty Return All page to n8n items', async () => {
+			const { ctx, requests } = makeCtx({ returnAll: true }, { response: [{ id: 'doc_1' }] });
+			await expect(executeListOperation(ctx as any, 0, { path: '/documents' })).resolves.toEqual([
+				{ json: { id: 'doc_1' } },
+			]);
+			expect(lastAuth(requests).qs).toEqual({ page: 1, 'per-page': 100 });
+		});
+
 		function requestContext(authenticatedRequest: jest.Mock) {
 			return {
 				getCredentials: jest.fn().mockResolvedValue({ baseUrl: DEFAULT_BASE_URL }),

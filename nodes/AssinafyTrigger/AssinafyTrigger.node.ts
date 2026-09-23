@@ -40,6 +40,7 @@ export class AssinafyTrigger implements INodeType {
 		defaults: {
 			name: 'Assinafy Trigger',
 		},
+		usableAsTool: undefined,
 		inputs: [],
 		outputs: [NodeConnectionTypes.Main],
 		credentials: [
@@ -255,7 +256,10 @@ async function getSubscriptionConfig(ctx: IHookFunctions): Promise<{
 	if (!assertEmail(email)) {
 		throw new NodeOperationError(ctx.getNode(), 'Invalid email address');
 	}
-	const events = ctx.getNodeParameter('events', []) as string[];
+	const events = ctx.getNodeParameter('events', []);
+	if (!Array.isArray(events) || events.some((event) => typeof event !== 'string' || !event.trim())) {
+		throw new NodeOperationError(ctx.getNode(), 'Events must be a list of non-empty event types');
+	}
 	return {
 		webhookUrl,
 		email,
@@ -297,9 +301,8 @@ function readSignatureHeader(
 
 function sameEventSet(actual: unknown, desired: string[]): boolean {
 	if (!Array.isArray(actual)) return false;
-	if (actual.length !== desired.length) return false;
 	const set = new Set(actual.map(String));
-	return desired.every((e) => set.has(e));
+	return set.size === new Set(desired).size && desired.every((e) => set.has(e));
 }
 
 function verifyHmac(secret: string, payload: Buffer, signature: string): boolean {

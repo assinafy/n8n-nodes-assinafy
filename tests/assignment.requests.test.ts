@@ -27,6 +27,19 @@ describe('assignment request construction', () => {
 		});
 	});
 
+	it('lets Assinafy infer WhatsApp notification from verification method', async () => {
+		const { ctx, requests } = makeCtx({
+			documentId: 'doc_1',
+			signers: {
+				signer: [{ id: 'sig_1', verification_method: 'Whatsapp', notification_methods: [] }],
+			},
+		});
+		await executeAssignment.call(ctx as any, 0, 'create');
+		expect(lastAuth(requests).body.signers).toEqual([
+			{ id: 'sig_1', verification_method: 'Whatsapp' },
+		]);
+	});
+
 	it('creates a collect assignment with entries JSON', async () => {
 		const { ctx, requests } = makeCtx({
 			documentId: 'doc_1',
@@ -92,6 +105,17 @@ describe('assignment request construction', () => {
 				step: 1,
 			},
 		]);
+	});
+
+	it('rejects two notification methods for one signer before making a request', async () => {
+		const { ctx, requests } = makeCtx({
+			documentId: 'doc_1',
+			signers: { signer: [{ id: 'sig_1', notification_methods: ['Email', 'Whatsapp'] }] },
+		});
+		await expect(executeAssignment.call(ctx as any, 0, 'create')).rejects.toThrow(
+			'at most one Notification Method',
+		);
+		expect(requests).toHaveLength(0);
 	});
 
 	it('rejects a Digital Certificate signer sharing a signing step', async () => {
@@ -256,15 +280,26 @@ describe('assignment request construction', () => {
 		expect(req.body).toEqual([{ itemId: 'i1', fieldId: 'f1', pageId: 'p1', value: 'X' }]);
 	});
 
-	it('rejects an empty sign-items array before making a request', async () => {
+	it('signs a virtual assignment with an empty items array', async () => {
 		const { ctx, requests } = makeCtx({
 			documentId: 'doc_1',
 			assignmentId: 'asg_1',
 			signerAccessCode: 'code123',
 			signItems: '[]',
 		});
+		await executeAssignment.call(ctx as any, 0, 'sign');
+		expect(lastPublic(requests).body).toEqual([]);
+	});
+
+	it('rejects a non-array sign payload before making a request', async () => {
+		const { ctx, requests } = makeCtx({
+			documentId: 'doc_1',
+			assignmentId: 'asg_1',
+			signerAccessCode: 'code123',
+			signItems: '{}',
+		});
 		await expect(executeAssignment.call(ctx as any, 0, 'sign')).rejects.toThrow(
-			'Items must be a non-empty JSON array',
+			'Items must be a JSON array',
 		);
 		expect(requests).toHaveLength(0);
 	});

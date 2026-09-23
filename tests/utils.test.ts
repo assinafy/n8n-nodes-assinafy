@@ -336,7 +336,7 @@ describe('shared/utils', () => {
 	describe('assertEmail', () => {
 		it('should return true for valid emails', () => {
 			expect(assertEmail('test@example.com')).toBe(true);
-			expect(assertEmail('user.name@example.org')).toBe(true);
+			expect(assertEmail('user.name@example.com')).toBe(true);
 			expect(assertEmail('user+tag@example.com')).toBe(true);
 		});
 

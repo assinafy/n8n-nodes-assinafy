@@ -142,12 +142,12 @@ describe('AssinafyTrigger lifecycle', () => {
 	function hookCtx(
 		existing: unknown,
 		calls: any[],
-		overrides: { webhookUrl?: string; email?: string } = {},
+		overrides: { webhookUrl?: string; email?: string; events?: unknown } = {},
 	) {
 		return {
 			getNodeWebhookUrl: () => overrides.webhookUrl ?? 'https://n8n.example.com/webhook/abc',
 			getNodeParameter: (name: string, def?: unknown) =>
-				name === 'email' ? (overrides.email ?? 'ops@example.com') : name === 'events' ? [] : def,
+				name === 'email' ? (overrides.email ?? 'ops@example.com') : name === 'events' ? (overrides.events ?? []) : def,
 			getCredentials: async () => ({
 				accountId: 'acc_123',
 				apiKey: API_KEY,
@@ -210,6 +210,17 @@ describe('AssinafyTrigger lifecycle', () => {
 		expect(calls).toHaveLength(0);
 	});
 
+	it.each(['document_ready', ['document_ready', '']])(
+		'create() rejects malformed event selections before making a request',
+		async (events) => {
+			const calls: any[] = [];
+			await expect(
+				node.webhookMethods.default.create.call(hookCtx(null, calls, { events })),
+			).rejects.toThrow('Events must be a list');
+			expect(calls).toHaveLength(0);
+		},
+	);
+
 	it('delete() inactivates the subscription', async () => {
 		const calls: any[] = [];
 		const ok = await node.webhookMethods.default.delete.call(
@@ -262,5 +273,21 @@ describe('AssinafyTrigger lifecycle', () => {
 			hookCtx({ events: [], url: null, email: null, is_active: true }, calls),
 		);
 		expect(exists).toBe(false);
+	});
+
+	it('checkExists() compares event types as a set', async () => {
+		const calls: any[] = [];
+		const exists = await node.webhookMethods.default.checkExists.call(
+			hookCtx(
+				{
+					url: securedUrl(),
+					email: 'ops@example.com',
+					events: [...DEFAULT_WEBHOOK_EVENTS, DEFAULT_WEBHOOK_EVENTS[0]],
+					is_active: true,
+				},
+				calls,
+			),
+		);
+		expect(exists).toBe(true);
 	});
 });

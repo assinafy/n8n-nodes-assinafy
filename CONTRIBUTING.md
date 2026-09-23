@@ -47,10 +47,10 @@ Include both `package.json` and `package-lock.json` when updating dependencies, 
 
 Use the unmodified n8n lint preset and test inside the supported official n8n runtime. Keep the marketplace-facing README and node UI text in English, and maintain the complete [Brazilian Portuguese guide](README.pt-BR.md) for the primary user audience. Update both guides together when installation, authentication, operations, or document flows change; retain the exact UI labels and API identifiers in translated examples. The node package uses n8n's helpers for HTTP requests and binary storage and does not access the host environment or filesystem. Consult n8n's [verification guidelines](https://docs.n8n.io/connect/create-nodes/build-your-node/reference/verification-guidelines) when preparing a submission.
 
-After publishing through the GitHub release workflow, run the official registry check and confirm that its reported result passes:
+After publishing through the GitHub release workflow, run the official registry check with the same pinned scanner used by `verify:package` and confirm that its reported result passes:
 
 ```bash
-npx --yes @n8n/scan-community-package@0.36.0 @assinafy/n8n-nodes-assinafy
+npm exec --yes --ignore-scripts --strict-peer-deps --package=@n8n/scan-community-package@0.28.1 -- scan-community-package @assinafy/n8n-nodes-assinafy
 ```
 
 This command checks the published artifact and the source recorded in its npm provenance. A local build cannot supply release provenance. Catalog availability still requires n8n's community-node review.
@@ -64,7 +64,7 @@ Examples must use `example.com` email addresses and unmistakable placeholders su
 The repository's Compose service loads only the built `dist` directory and package manifest into an isolated n8n instance. It binds to loopback port 5679 and keeps credentials/workflows in the `n8n_data` volume.
 
 ```bash
-npm ci
+npm ci --strict-peer-deps
 npm run build
 docker compose up -d
 ```

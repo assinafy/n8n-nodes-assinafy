@@ -5,6 +5,20 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.7.1] — 2026-09-23
+
+### Fixed
+
+- Public document email tokens use the API's email request field.
+- Assignment and template signer notifications can follow the verification method when no channel is selected; assignment creation rejects multiple channels for one signer.
+- Virtual assignments accept an empty array of signing items.
+- Webhook registration, signer-document declines, and resource picker pagination reject invalid inputs before sending requests.
+
+### Changed
+
+- OAuth setup explains how to request `webhooks:write` for action-node webhook changes.
+- Development types match the supported n8n release, and package verification scans source and compiled files.
+
 ## [1.7.0] — 2026-09-20
 
 ### Added
