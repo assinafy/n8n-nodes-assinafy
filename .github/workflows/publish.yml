@@ -150,7 +150,7 @@ jobs:
       - name: Publish with provenance
         run: npm publish assinafy-package.tgz --ignore-scripts --access public --provenance --registry=https://registry.npmjs.org
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
 
   github-packages:
     name: Mirror to GitHub Packages

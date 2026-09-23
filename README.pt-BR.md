@@ -369,9 +369,9 @@ A suíte de sandbox exige credenciais explícitas, rejeita endereços de produç
 
 ## Publicação de versões
 
-`npm run release` executa a verificação de código, compila e solicita o incremento da versão. Uma tag estável `vMAJOR.MINOR.PATCH` gera um único pacote imutável, executa a etapa protegida de testes de documentos e assinaturas no sandbox da Assinafy — incluindo o envio de solicitações que consomem créditos —, publica o pacote no npmjs com comprovação de origem e espelha os mesmos bytes no GitHub Packages. Consulte `.github/workflows/publish.yml`.
+Prepare um commit na main com a versão atualizada e uma tag estável `vMAJOR.MINOR.PATCH` correspondente. Ao enviar a tag ao GitHub, o fluxo gera um único pacote imutável, executa a etapa protegida de testes de documentos e assinaturas no sandbox da Assinafy — incluindo o envio de solicitações que consomem créditos —, publica o pacote no npmjs com comprovação de origem e espelha os mesmos bytes no GitHub Packages. Consulte `.github/workflows/publish.yml`. O comando direto `npm publish` é bloqueado, e este repositório não usa a publicação local do n8n CLI via `npm run release`.
 
-Na primeira publicação no npmjs, armazene um `NPM_TOKEN` granular de uso inicial no ambiente protegido `npm` do GitHub e publique apenas pelo fluxo automatizado. Depois, configure o recurso trusted publishing do npm para o repositório `assinafy/n8n-nodes-assinafy`, o arquivo `publish.yml` e o ambiente `npm`; revogue e remova o token inicial. As versões seguintes usam autenticação por GitHub OIDC e mantêm a comprovação de origem habilitada.
+Na primeira publicação no npmjs, armazene um token granular de uso inicial como `NODE_AUTH_TOKEN` no ambiente protegido `npm` do GitHub e publique apenas pelo fluxo automatizado. Depois, configure o recurso trusted publishing do npm para o repositório `assinafy/n8n-nodes-assinafy`, o arquivo `publish.yml` e o ambiente `npm`; revogue e remova o token inicial. As versões seguintes usam autenticação por GitHub OIDC e mantêm a comprovação de origem habilitada.
 
 Consulte [CONTRIBUTING.md](CONTRIBUTING.md) para o processo de verificação e testes no sandbox. Relate vulnerabilidades conforme [SECURITY.md](SECURITY.md). Nunca inclua chaves de API, códigos de signatários, dados pessoais ou conteúdo de documentos em uma issue pública.
 

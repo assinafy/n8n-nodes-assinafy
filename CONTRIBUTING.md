@@ -35,6 +35,8 @@ Mutation tests additionally require `ASSINAFY_LIVE_DESTRUCTIVE=1`. Assignment an
 
 The release workflow enables the destructive and credit-consuming document/signing gates and fails when their protected sandbox secrets or account credits are unavailable. Workspace/logo administration remains outside that release gate.
 
+Prepare a versioned main commit and matching Git tag for releases. The GitHub tag workflow performs package verification, sandbox tests, and provenance publishing. Direct `npm publish` is blocked; the n8n CLI's local `npm run release` command is not used for this repository's release path.
+
 Successful signer, social-login, password-reset, and verification flows require external tokens or inbox access. When those are unavailable, document the limitation and test request construction; do not describe an expected 401/404 route check as end-to-end success.
 
 Signer-side operations authenticate with a `signer-access-code` delivered in the signer's notification email or WhatsApp message. No endpoint returns this code, and an assignment's `signing_urls` do not contain it. Set `ASSINAFY_TEST_SIGNER_ACCESS_CODE` to the code received in a sandbox inbox to run the signer-side assertions; without it they skip.
