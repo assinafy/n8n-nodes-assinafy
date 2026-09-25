@@ -5,6 +5,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.7.6] — 2026-09-25
+
 ### Fixed
 
 - **OAuth → Exchange Code, Refresh Token and Revoke Token** send `application/x-www-form-urlencoded` bodies, as the Assinafy OAuth guide specifies.
