@@ -1,9 +1,4 @@
-import type {
-	IDataObject,
-	IExecuteFunctions,
-	INodeExecutionData,
-	INodeProperties,
-} from 'n8n-workflow';
+import type { IExecuteFunctions, INodeExecutionData, INodeProperties } from 'n8n-workflow';
 import { NodeOperationError } from 'n8n-workflow';
 import { assinafyApiRequest } from '../shared/transport';
 import { showOnly as showOnlyFor, wrap } from '../shared/utils';
@@ -185,7 +180,7 @@ export async function executeOAuth(
 		if (!value) throw new NodeOperationError(this.getNode(), `${label} is required`, { itemIndex });
 		return value;
 	};
-	const body: IDataObject = { client_id: required('clientId', 'Client ID') };
+	const body: Record<string, string> = { client_id: required('clientId', 'Client ID') };
 	const secret = String(this.getNodeParameter('clientSecret', itemIndex, '')).trim();
 	if (secret) body.client_secret = secret;
 	if (operation !== 'revokeToken') {
@@ -234,12 +229,25 @@ export async function executeOAuth(
 		}
 		if (hint) body.token_type_hint = hint;
 	}
+	// The OAuth guide specifies form-encoded token and revocation requests.
 	const result = await assinafyApiRequest(this, {
 		method: 'POST',
 		path: operation === 'revokeToken' ? '/oauth/revoke' : '/oauth/token',
-		body,
+		body: new URLSearchParams(body),
 		skipAuth: true,
 		retry: false,
 	});
+	// A refresh rotates the token: without a new one there is no usable token left to send.
+	const replacement = (result as { refresh_token?: unknown } | undefined)?.refresh_token;
+	if (
+		operation === 'refreshToken' &&
+		(typeof replacement !== 'string' || !replacement.trim() || replacement === body.refresh_token)
+	) {
+		throw new NodeOperationError(
+			this.getNode(),
+			'Assinafy did not return a new refresh token. Do not send the previous one again; reconnect to get a new token.',
+			{ itemIndex },
+		);
+	}
 	return wrap(operation === 'revokeToken' ? { revoked: true } : result);
 }

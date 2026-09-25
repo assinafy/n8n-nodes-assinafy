@@ -16,6 +16,13 @@ const codeParams = {
 	redirectUri: 'https://n8n.example.com/rest/oauth2-credential/callback',
 };
 
+/** Token and revocation requests are form-encoded, never JSON. */
+function formFields(request: { body: unknown; json?: boolean }): Record<string, string> {
+	expect(request.body).toBeInstanceOf(URLSearchParams);
+	expect(request.json).toBeUndefined();
+	return Object.fromEntries(request.body as URLSearchParams);
+}
+
 describe('OAuth connection and protocol', () => {
 	it('uses n8n PKCE and body authentication with production endpoints', () => {
 		const credential = new AssinafyOAuth2Api();
@@ -108,42 +115,60 @@ describe('OAuth connection and protocol', () => {
 		const { ctx, httpRequest } = makeCtx({ ...codeParams, clientSecret: 'example-secret' });
 		httpRequest.mockResolvedValue(response);
 		await expect(executeOAuth.call(ctx, 0, 'exchangeCode')).resolves.toEqual({ json: response });
-		expect(httpRequest).toHaveBeenCalledWith(
-			expect.objectContaining({
-				method: 'POST',
-				url: 'https://api.assinafy.com.br/v1/oauth/token',
-				body: {
-					grant_type: 'authorization_code',
-					client_id: 'example-client',
-					client_secret: 'example-secret',
-					code: 'example-code',
-					code_verifier: 'a'.repeat(43),
-					redirect_uri: codeParams.redirectUri,
-				},
-			}),
-		);
+		const request = httpRequest.mock.calls[0][0];
+		expect(request).toMatchObject({
+			method: 'POST',
+			url: 'https://api.assinafy.com.br/v1/oauth/token',
+		});
+		expect(formFields(request)).toEqual({
+			grant_type: 'authorization_code',
+			client_id: 'example-client',
+			client_secret: 'example-secret',
+			code: 'example-code',
+			code_verifier: 'a'.repeat(43),
+			redirect_uri: codeParams.redirectUri,
+		});
 	});
 
 	it('omits the client secret for public clients', async () => {
 		const { ctx, requests } = makeCtx(codeParams);
 		await executeOAuth.call(ctx, 0, 'exchangeCode');
-		expect(lastPublic(requests).body).not.toHaveProperty('client_secret');
+		const fields = formFields(lastPublic(requests));
+		expect(fields.client_id).toBe('example-client');
+		expect(fields).not.toHaveProperty('client_secret');
 	});
 
 	it('exchanges the current refresh token without owner authentication', async () => {
-		const { ctx, requests } = makeCtx({
-			clientId: 'example-client',
-			refreshToken: 'example-refresh',
-			resourceIndicator: 'https://api.assinafy.com.br',
-		});
+		const { ctx, requests } = makeCtx(
+			{
+				clientId: 'example-client',
+				refreshToken: 'example-refresh',
+				resourceIndicator: 'https://api.assinafy.com.br',
+			},
+			{ response: { access_token: 'next-access', refresh_token: 'next-refresh' } },
+		);
 		await executeOAuth.call(ctx, 0, 'refreshToken');
-		expect(lastPublic(requests).body).toEqual({
+		expect(formFields(lastPublic(requests))).toEqual({
 			grant_type: 'refresh_token',
 			client_id: 'example-client',
 			refresh_token: 'example-refresh',
 			resource: 'https://api.assinafy.com.br',
 		});
 	});
+
+	it.each([undefined, '', '  ', 'example-refresh'])(
+		'rejects a refresh success without a new refresh token: %j',
+		async (refreshToken) => {
+			const { ctx, httpRequest } = makeCtx(
+				{ clientId: 'example-client', refreshToken: 'example-refresh' },
+				{ response: { access_token: 'next-access', refresh_token: refreshToken } },
+			);
+			const failure = executeOAuth.call(ctx, 0, 'refreshToken');
+			await expect(failure).rejects.toThrow('did not return a new refresh token');
+			await expect(failure).rejects.not.toThrow('next-access');
+			expect(httpRequest).toHaveBeenCalledTimes(1);
+		},
+	);
 
 	it('handles empty revocation responses and the token type hint', async () => {
 		const { ctx, requests } = makeCtx(
@@ -156,11 +181,11 @@ describe('OAuth connection and protocol', () => {
 		expect(lastPublic(requests)).toMatchObject({
 			method: 'POST',
 			url: 'https://api.assinafy.com.br/v1/oauth/revoke',
-			body: {
-				token: 'example-token',
-				client_id: 'example-client',
-				token_type_hint: 'refresh_token',
-			},
+		});
+		expect(formFields(lastPublic(requests))).toEqual({
+			token: 'example-token',
+			client_id: 'example-client',
+			token_type_hint: 'refresh_token',
 		});
 	});
 

@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { NodeApiError } from 'n8n-workflow';
 import {
 	assinafyApiRequest,
 	assinafyApiRequestAllItems,
@@ -182,6 +183,49 @@ describe('shared/transport', () => {
 				}),
 			).rejects.toThrow('Assinafy API POST /documents/doc_1/assignments failed');
 			expect(request).toHaveBeenCalledTimes(4);
+		});
+
+		// httpRequestWithAuthentication wraps every failure in NodeApiError; the
+		// original error is its `cause`.
+		const wrapped = (cause: object) =>
+			new NodeApiError(
+				{ name: 'TestNode' } as any,
+				Object.assign(new Error('failed'), cause) as any,
+			);
+
+		it('never replays a token-endpoint 429 hit by n8n OAuth refresh', async () => {
+			// @n8n/client-oauth2 reports it with a status but no HTTP response.
+			const refreshRateLimited = wrapped({ status: 429, body: { status: 429 } });
+			expect(refreshRateLimited.httpCode).toBe('429');
+			const request = jest.fn().mockRejectedValue(refreshRateLimited);
+
+			await expect(
+				assinafyApiRequest(requestContext(request) as any, { method: 'GET', path: '/documents' }),
+			).rejects.toBe(refreshRateLimited);
+			expect(request).toHaveBeenCalledTimes(1);
+		});
+
+		it('replays a wrapped API 429 after its Retry-After delay', async () => {
+			jest.useFakeTimers();
+			try {
+				const request = jest
+					.fn()
+					.mockRejectedValueOnce(
+						wrapped({ response: { status: 429, headers: { 'retry-after': '0' } } }),
+					)
+					.mockResolvedValue({ status: 200, data: { id: 'doc_1' } });
+				const pending = assinafyApiRequest(requestContext(request) as any, {
+					method: 'GET',
+					path: '/documents/doc_1',
+				});
+
+				// Less than the 500 ms fallback backoff: only Retry-After: 0 fits.
+				await jest.advanceTimersByTimeAsync(100);
+				expect(request).toHaveBeenCalledTimes(2);
+				await expect(pending).resolves.toEqual({ id: 'doc_1' });
+			} finally {
+				jest.useRealTimers();
+			}
 		});
 
 		it('does not replay a mutating request after a non-429 failure', async () => {

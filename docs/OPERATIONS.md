@@ -45,7 +45,7 @@ The API error families are validation, unauthorized, not found, and server error
 }
 ```
 
-Requests have a 30-second timeout. HTTP 429 responses are retried at most three times, honoring `Retry-After` up to 30 seconds and otherwise using bounded exponential backoff. Other failures are not retried. OAuth code exchange, refresh, and revocation are never automatically replayed, including after HTTP 429. Avoid workflow-level retries of single-use tokens or mutations whose outcome is unknown.
+Requests have a 30-second timeout. HTTP 429 responses are retried at most three times, honoring `Retry-After` up to 30 seconds and otherwise using bounded exponential backoff. Other failures are not retried. OAuth code exchange, refresh, and revocation are never automatically replayed, including after HTTP 429 and including the refresh n8n performs for the OAuth2 credential. Avoid workflow-level retries of single-use tokens or mutations whose outcome is unknown.
 
 Binary endpoints do not use the JSON envelope in the node output. Their bytes are written to the configured n8n binary property and the JSON side contains only file metadata. Multipart endpoints describe their form parts rather than pretending they have a JSON request body.
 
@@ -84,7 +84,7 @@ Sections below show each operation-specific request and a representative respons
 | `Assignment`                | `resource:string`, `id:string`, `sender_email:string`, `method:string`, `expires_at:string / null`, `message:string / null`, `signers:AssignmentSigner[]`, `copy_receivers:object[]`, `items:AssignmentItem[]`, `summary:AssignmentSummary`, `signing_urls:SigningUrl[]`                                                                                                                                                                                                                                                                                                                       |
 | `Document`                  | `resource:string`, `id:string`, `account_id:string`, `template_id:string / null`, `name:string`, `status:string`, `artifacts:object`, `is_closed:boolean`, `signing_url:string`, `decline_reason:string / null`, `declined_by:Signer / null`, `tags:{id,name}[]`, `assignment:Assignment / null`, `pages:DocumentPage[]`, `created_at:string`, `updated_at:string`                                                                                                                                                                                                                             |
 | `DocumentStatus`            | `code:string`, `deletable:boolean`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `DocumentVerification`      | `hash:string`, `id:string / null`, `status:string / null`, `page_count:string / null`, `signer_count:string / null`, `completed_count:integer / null`, `completed_at:string / null`, `verified_at:string`, `is_valid:boolean`, `message:string`                                                                                                                                                                                                                                                                                                                                                |
+| `DocumentVerification`      | `hash:string`, `id:string / null`, `agreement_code:string / null`, `status:string / null`, `page_count:string / null`, `signer_count:string / null`, `completed_count:integer / null`, `completed_at:string / null`, `verified_at:string`, `is_valid:boolean`, `message:string`                                                                                                                                                                                                                                                                                                                |
 | `DocumentActivity`          | `id:integer`, `event:string`, `message:string`, `payload:object / null`, `origin:{ip,user-agent} / null`, `created_at:string`                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `DocumentStatsRow`          | `period:string`, `documents_uploaded:integer`, `documents_sent:integer`, `signature_requests:integer`, `signature_requests_notification_email:integer`, `signature_requests_notification_whatsapp:integer`, `signature_requests_notification_bypass:integer`, `signature_requests_verification_email:integer`, `signature_requests_verification_whatsapp:integer`, `signature_requests_verification_bypass:integer`, `signature_requests_verification_digital_certificate:integer`, `signature_requests_viewed:integer`, `signature_requests_completed:integer`, `documents_certified:integer` |
 | `CostEstimateBreakdownItem` | `code:string`, `name:string`, `cost:number`, `quantity:integer`, `unit_cost:number`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
@@ -705,6 +705,7 @@ Verifies a signed document's authenticity by its signature hash. Public endpoint
 {
 	"hash": "FE32EDDADE7CBDDCBB934E7402047450B0E59C02",
 	"id": null,
+	"agreement_code": null,
 	"status": null,
 	"page_count": null,
 	"signer_count": null,
@@ -715,6 +716,8 @@ Verifies a signed document's authenticity by its signature hash. Public endpoint
 	"message": "Documento não assinado ou não encontrado."
 }
 ```
+
+For a verified document, `agreement_code` is the agreement code printed on the document certificate.
 
 #### Get unauthenticated public document basics
 
@@ -3167,7 +3170,7 @@ The token endpoint accepts `authorization_code` and `refresh_token`. Confidentia
 
 #### Exchange Code
 
-**Endpoint:** `POST /oauth/token` — public transport; authenticates the OAuth client in the JSON body.
+**Endpoint:** `POST /oauth/token` — public transport; `application/x-www-form-urlencoded` body that also authenticates the OAuth client.
 
 | Node parameter | HTTP field | Requirement |
 | --- | --- | --- |
@@ -3180,18 +3183,16 @@ The token endpoint accepts `authorization_code` and `refresh_token`. Confidentia
 
 `grant_type` is set to `authorization_code`. No query parameters or workspace API key are sent.
 
-**Complete request body, including optional fields:**
+**Complete form body, including optional fields (decoded, one field per line; the node URL-encodes each value):**
 
-```json
-{
-  "grant_type": "authorization_code",
-  "client_id": "<client-id>",
-  "client_secret": "<client-secret>",
-  "code": "<authorization-code>",
-  "redirect_uri": "https://n8n.example.com/rest/oauth2-credential/callback",
-  "code_verifier": "<original-43-to-128-character-verifier>",
-  "resource": "https://api.assinafy.com.br"
-}
+```text
+grant_type=authorization_code
+client_id=<client-id>
+client_secret=<client-secret>
+code=<authorization-code>
+redirect_uri=https://n8n.example.com/rest/oauth2-credential/callback
+code_verifier=<original-43-to-128-character-verifier>
+resource=https://api.assinafy.com.br
 ```
 
 **Complete success shape (flat HTTP response and n8n JSON output):**
@@ -3211,39 +3212,35 @@ The token endpoint accepts `authorization_code` and `refresh_token`. Confidentia
 
 #### Refresh Token
 
-**Endpoint:** `POST /oauth/token` — public transport; client authentication in the JSON body.
+**Endpoint:** `POST /oauth/token` — public transport; `application/x-www-form-urlencoded` body with client authentication.
 
 **Node parameters:** Client ID, Client Secret (confidential clients), Refresh Token (required current token), and Resource Indicator (optional). No query parameters or API key are sent.
 
-**Complete request body, including optional fields:**
+**Complete form body, including optional fields (decoded):**
 
-```json
-{
-  "grant_type": "refresh_token",
-  "client_id": "<client-id>",
-  "client_secret": "<client-secret>",
-  "refresh_token": "<current-refresh-token>",
-  "resource": "https://api.assinafy.com.br"
-}
+```text
+grant_type=refresh_token
+client_id=<client-id>
+client_secret=<client-secret>
+refresh_token=<current-refresh-token>
+resource=https://api.assinafy.com.br
 ```
 
-**Response:** the same flat token shape as Exchange Code, containing the new access token and replacement refresh token. Persist the replacement before another refresh. Serialize refreshes across all workers using the connection; replaying a used refresh token revokes the entire grant. A grant has an absolute 30-day maximum lifetime. A timeout or ambiguous response must not be blindly retried: reconnect when the current token state cannot be established. Do not use this operation to refresh tokens belonging to an n8n-managed credential.
+**Response:** the same flat token shape as Exchange Code, containing the new access token and replacement refresh token. Persist the replacement before another refresh. Serialize refreshes across all workers using the connection; replaying a used refresh token revokes the entire grant. Each refresh token is valid for 30 days and every refresh returns a new one with a fresh 30 days, so the connection expires only after 30 days without a refresh. Treat a timeout or ambiguous response as possibly successful: re-read the saved token before retrying, never retry blindly with the old one, and reconnect when the current token state cannot be established. Do not use this operation to refresh tokens belonging to an n8n-managed credential.
 
 #### Revoke Token
 
-**Endpoint:** `POST /oauth/revoke` — public transport; client authentication in the JSON body.
+**Endpoint:** `POST /oauth/revoke` — public transport; `application/x-www-form-urlencoded` body with client authentication.
 
 **Node parameters:** Client ID, Client Secret (confidential clients), Token (required), and Token Type Hint (`access_token`, `refresh_token`, or Automatic/omitted).
 
-**Complete request body, including optional fields:**
+**Complete form body, including optional fields (decoded):**
 
-```json
-{
-  "client_id": "<client-id>",
-  "client_secret": "<client-secret>",
-  "token": "<token-to-revoke>",
-  "token_type_hint": "refresh_token"
-}
+```text
+client_id=<client-id>
+client_secret=<client-secret>
+token=<token-to-revoke>
+token_type_hint=refresh_token
 ```
 
 **HTTP response:** `200` with no required body. Unknown, malformed, expired, and already-revoked tokens also return success; this response does not prove the token existed. Failed client authentication returns `401`.
@@ -3313,7 +3310,7 @@ Token and revocation errors use a flat OAuth error object, surfaced as a node er
 | `400 unsupported_grant_type` | Use authorization code or refresh token. |
 | `401 invalid_client` | Client is unknown/disabled or client authentication failed. Check the client type and secret. |
 | `401` on an API request | Token is missing, expired, or invalid. Let the native credential renew or reconnect it. |
-| `403` on an API request | Scope, workspace, or endpoint is outside the grant. Additional scopes cannot enable owner-only administration. |
+| `403` on an API request | With `WWW-Authenticate: Bearer error="insufficient_scope", scope="…"`, add that scope to the credential and reconnect; do not retry. Otherwise the workspace, the user's role, or the endpoint is outside the grant; additional scopes cannot enable owner-only administration. |
 
 Exchange Code, Refresh Token, and Revoke Token never automatically retry, including after HTTP 429. Metadata and UserInfo use the shared bounded rate-limit retry behavior. All five preserve the selected environment and use the common request timeout.
 

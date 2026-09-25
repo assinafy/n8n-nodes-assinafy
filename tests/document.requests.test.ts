@@ -401,8 +401,14 @@ describe('document request construction', () => {
 	});
 
 	it('verifies a document by hash without authentication', async () => {
-		const { ctx, requests } = makeCtx({ signatureHash: ' hash/123?value ' });
-		await executeDocument.call(ctx as any, 0, 'verify');
+		const verification = { hash: 'hash', agreement_code: 'EXAMPLE-AGREEMENT', is_valid: true };
+		const { ctx, requests } = makeCtx(
+			{ signatureHash: ' hash/123?value ' },
+			{ response: verification },
+		);
+		await expect(executeDocument.call(ctx as any, 0, 'verify')).resolves.toEqual({
+			json: verification,
+		});
 		const req = lastPublic(requests);
 		expect(req.method).toBe('GET');
 		expect(req.url).toBe(`${BASE}/documents/hash%2F123%3Fvalue/verify`);

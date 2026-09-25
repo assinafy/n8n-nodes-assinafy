@@ -5,6 +5,18 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- **OAuth → Exchange Code, Refresh Token and Revoke Token** send `application/x-www-form-urlencoded` bodies, as the Assinafy OAuth guide specifies.
+- A token-endpoint HTTP 429 during n8n's automatic OAuth refresh is no longer retried by the node. Retried API 429s honor `Retry-After` when n8n wraps the error.
+- **OAuth → Refresh Token** fails when a successful response has no new refresh token, instead of returning an item that leaves no usable token.
+
+### Changed
+
+- OAuth documentation describes the sliding refresh-token lifetime: every refresh returns a refresh token valid for another 30 days, and a connection expires only after 30 days without a refresh. The guides explain how to disconnect and keep rarely used credentials connected.
+- Document verification output documents `agreement_code`.
+- Requirements state that Assinafy accepts only TLS 1.2 or higher.
+
 ## [1.7.5] — 2026-09-23
 
 ### Changed

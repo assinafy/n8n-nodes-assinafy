@@ -41,7 +41,7 @@ export interface AssinafyRequestOptions {
 	method: IHttpRequestMethods;
 	path: string;
 	qs?: IDataObject;
-	body?: IDataObject | IDataObject[] | Buffer | FormData;
+	body?: IDataObject | IDataObject[] | Buffer | FormData | URLSearchParams;
 	headers?: IDataObject;
 	/** Request binary response (full response with Buffer body). Used for artifact downloads. */
 	returnBinary?: boolean;
@@ -130,7 +130,7 @@ function buildHttpOptions(
 		const body = options.body;
 		if (body instanceof FormData) {
 			requestOptions.body = body as unknown as IDataObject;
-		} else if (Buffer.isBuffer(body)) {
+		} else if (Buffer.isBuffer(body) || body instanceof URLSearchParams) {
 			requestOptions.body = body;
 		} else {
 			requestOptions.body = body as unknown as IDataObject;
@@ -166,10 +166,17 @@ async function sendRequest(
 					)) as unknown);
 		} catch (error) {
 			// A 429 is refused before the handler runs, so the request had no effect:
-			// replaying it cannot duplicate a mutation, whatever the method. Every
-			// other failure stays single-shot, because an ambiguous response could
-			// mean the mutation was applied.
-			if (options.retry !== false && getHttpCode(error) === 429 && attempt < MAX_RETRIES) {
+			// replaying it cannot duplicate a mutation, whatever the method. A 429
+			// without an HTTP response came from n8n's own OAuth token refresh, and
+			// the token endpoint is never replayed. Every other failure stays
+			// single-shot, because an ambiguous response could mean the mutation was
+			// applied.
+			if (
+				options.retry !== false &&
+				getHttpCode(error) === 429 &&
+				httpResponse(error) !== undefined &&
+				attempt < MAX_RETRIES
+			) {
 				await sleep(retryDelayMs(error, attempt));
 				continue;
 			}
@@ -394,9 +401,16 @@ function getHttpCode(error: unknown): number | undefined {
 	return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+/** The HTTP response of a failed request, whether n8n rethrew or wrapped the HTTP error. */
+function httpResponse(error: unknown): { headers?: IDataObject } | undefined {
+	type WithResponse = { response?: { headers?: IDataObject } };
+	const failure = error as (WithResponse & { cause?: WithResponse }) | undefined;
+	return failure?.response ?? failure?.cause?.response;
+}
+
 /** Honor a `Retry-After` header (seconds or HTTP-date) when present. */
 function retryDelayMs(error: unknown, attempt: number): number {
-	const headers = (error as { response?: { headers?: IDataObject } })?.response?.headers;
+	const headers = httpResponse(error)?.headers;
 	const retryAfter = headers?.['retry-after'] ?? headers?.['Retry-After'];
 	if (retryAfter !== undefined) {
 		const value = String(Array.isArray(retryAfter) ? retryAfter[0] : retryAfter).trim();
