@@ -10,7 +10,6 @@ import { signerDocumentDescription } from '../nodes/Assinafy/resources/signerDoc
 import { authDescription } from '../nodes/Assinafy/resources/auth';
 import { tagDescription } from '../nodes/Assinafy/resources/tag';
 import type { INodeProperties } from 'n8n-workflow';
-import manifest from '../package.json';
 import actionMetadata from '../nodes/Assinafy/Assinafy.node.json';
 import triggerMetadata from '../nodes/AssinafyTrigger/AssinafyTrigger.node.json';
 
@@ -21,9 +20,9 @@ const getOperations = (description: INodeProperties[]): string[] => {
 };
 
 describe('Resource Descriptions', () => {
-	it('keeps both node metadata versions aligned with the package', () => {
-		expect(actionMetadata.nodeVersion).toBe(manifest.version);
-		expect(triggerMetadata.nodeVersion).toBe(manifest.version);
+	it('keeps both codex node versions at 1.0', () => {
+		expect(actionMetadata.nodeVersion).toBe('1.0');
+		expect(triggerMetadata.nodeVersion).toBe('1.0');
 	});
 
 	describe('documentDescription', () => {

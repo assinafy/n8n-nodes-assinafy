@@ -5,6 +5,13 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.7.7] — 2026-10-01
+
+### Fixed
+
+- Both node codex files use `nodeVersion: "1.0"`, independently of the package version.
+- The signer duplicate-email comment uses an English paraphrase of the API error.
+
 ## [1.7.6] — 2026-09-25
 
 ### Fixed

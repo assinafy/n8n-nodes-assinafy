@@ -416,7 +416,7 @@ async function createSigner(
 		});
 	} catch (error) {
 		// A duplicate email loses the lookup→create race; the API rejects it with
-		// HTTP 400 ("Um signatário com este e-mail já existe."). On a duplicate-style
+		// HTTP 400 ("A signer with this email already exists."). On a duplicate-style
 		// failure, re-resolve and return the existing
 		// signer rather than surfacing the conflict.
 		const code = String((error as { httpCode?: string | number }).httpCode ?? '');
