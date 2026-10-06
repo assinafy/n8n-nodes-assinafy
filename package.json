@@ -1,6 +1,6 @@
 {
 	"name": "@assinafy/n8n-nodes-assinafy",
-	"version": "1.7.7",
+	"version": "1.7.8",
 	"description": "n8n community nodes for the Assinafy electronic-signature API (documents, signers, assignments, templates, tags, webhooks).",
 	"license": "MIT",
 	"homepage": "https://github.com/assinafy/n8n-nodes-assinafy",
@@ -37,7 +37,7 @@
 		"test:ci": "jest --coverage --runInBand",
 		"test:watch": "jest --watch",
 		"test:coverage": "jest --coverage",
-		"audit:dev": "npm audit --audit-level=high",
+		"audit:dev": "node scripts/audit-dev.mjs --self-test && node scripts/audit-dev.mjs",
 		"audit:prod": "npm audit --omit=dev --audit-level=low",
 		"verify:package": "npm exec --yes --ignore-scripts --strict-peer-deps --package=@n8n/scan-community-package@0.28.1 -- node scripts/verify-package.mjs",
 		"verify:dependencies": "npm ls --all"

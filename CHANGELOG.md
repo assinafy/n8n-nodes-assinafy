@@ -5,6 +5,13 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.7.8] — 2026-10-05
+
+### Security
+
+- Update compatible transitive dependencies in the development lockfile.
+- Replace the release-tag audit bypass with expiring, advisory-specific development exceptions. Production auditing remains strict, and new or critical development advisories fail verification.
+
 ## [1.7.7] — 2026-10-01
 
 ### Fixed

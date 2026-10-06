@@ -116,3 +116,5 @@ docker compose exec -T -e N8N_RUNNERS_BROKER_PORT=5681 n8n \
 Use separate sending and completion workflows when a person must sign between steps. Before sending, require an unassigned document and an acceptable cost estimate. The completion workflow should read the current status and download only when `status` is `certificated` and `artifacts.certificated` is available. Repeating the completion workflow then performs only reads and downloads.
 
 `docker compose down` stops the instance while retaining its volume. Stop the tunnel process separately. Removing the volume destroys saved workflows and credentials and should be done only when that test instance is no longer needed.
+
+Development security exceptions are listed by package and advisory in `scripts/audit-dev-exceptions.json` and expire on 2026-11-05. They apply only to dependencies marked development-only in the lockfile. New high-severity advisories, all critical advisories, and expired exceptions fail verification. Production auditing remains strict. Remove each exception when the n8n toolchain permits a patched dependency.
