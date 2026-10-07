@@ -70,13 +70,13 @@
 		]
 	},
 	"devDependencies": {
-		"@n8n/node-cli": "^0.48.5",
+		"@n8n/node-cli": "^0.51.2",
 		"@types/jest": "^30.0.0",
 		"eslint": "9.39.4",
-		"ignore": "7.0.9",
+		"ignore": "7.0.12",
 		"jest": "^30.4.2",
 		"n8n-workflow": "2.42.2",
-		"prettier": "3.9.6",
+		"prettier": "3.9.9",
 		"ts-jest": "^29.4.12",
 		"typescript": "5.9.3"
 	},
