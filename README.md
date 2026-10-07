@@ -7,7 +7,7 @@ Community n8n nodes for [Assinafy](https://assinafy.com.br), the Brazilian elect
 This package ships:
 
 - **Assinafy** — an action node for `assignment`, `auth`, `document`, `field`, `oauth`, `signer`, `signerDocument`, `tag`, `template`, `webhook`, and `workspace` resources.
-- **Assinafy Trigger** — a webhook trigger with mandatory credential-derived URL authentication and optional HMAC-SHA256 payload verification.
+- **Assinafy Trigger** — a webhook trigger that registers its own webhook endpoint, with mandatory credential-derived URL authentication and optional Standard Webhooks signature verification.
 - **Assinafy OAuth2 API** — authorization code with PKCE, encrypted token storage and automatic refresh managed by n8n.
 - **Assinafy API** — a shared credential (X-Api-Key + account ID, with production/sandbox/custom base URLs).
 
@@ -33,12 +33,12 @@ For production hosting, use the supported official n8n image, a stable HTTPS hos
 
 ### OAuth for document workflows
 
-Use a current n8n release; the local setup in this repository pins n8n 2.40.5. Select **Authentication → OAuth2** in the Assinafy action node and create an **Assinafy OAuth2 API** credential.
+Use a current n8n release; the local setup in this repository pins n8n 2.42.4. Select **Authentication → OAuth2** in the Assinafy action node and create an **Assinafy OAuth2 API** credential.
 
 1. Copy the **OAuth Redirect URL** displayed by n8n. It must be a public HTTPS URL, normally `https://n8n.example.com/rest/oauth2-credential/callback`.
 2. In your Assinafy workspace, open **Integrations → OAuth Apps → New application**. Choose **Server application / Confidential**, enter the exact callback, and select the permissions your workflows need.
 3. Copy the issued Client ID and one-time Client Secret into the n8n credential. Store the secret in n8n credentials, never in workflow parameters or exported JSON.
-4. Set **Scope** to a space-separated subset of the permissions registered for the application. A document workflow uses `documents:read documents:write account:read offline_access`; add `templates:read` when using templates. To register or inactivate Assinafy webhooks through the action node, enable `webhooks:write` in the OAuth application and add it to the credential's **Scope** field. The credential default includes `templates:read`, so remove it if the application does not allow it.
+4. Set **Scope** to a space-separated subset of the permissions registered for the application. A document workflow uses `documents:read documents:write account:read offline_access`; add `templates:read` when using templates. To create, update, delete, register or inactivate Assinafy webhook endpoints through the action node, enable `webhooks:write` in the OAuth application and add it to the credential's **Scope** field. The credential default includes `templates:read`, so remove it if the application does not allow it.
 5. Leave **Account ID** empty to discover the single workspace selected during consent, or enter that workspace's ID explicitly. Click **Connect my account**, sign in to Assinafy, select the workspace, and approve the requested access.
 6. Test the connection with **Workspace → List**. OAuth returns only the consented workspace; a different workspace is forbidden. The credential's connection test also calls `GET /accounts`.
 
@@ -50,11 +50,11 @@ n8n performs Authorization Code with PKCE S256 and sends the confidential client
 | `documents:write` | Upload documents, manage signers, and request signatures |
 | `templates:read` | Read templates used to generate documents |
 | `account:read` | Read the selected workspace's permitted details |
-| `webhooks:write` | Register or inactivate a webhook subscription through the action node; add this scope only when needed |
+| `webhooks:write` | Create, update, delete, register or inactivate webhook endpoints through the action node; add this scope only when needed |
 | `offline_access` | Maintain the connection using rotating refresh tokens |
 | `openid`, `profile`, `email` | OAuth UserInfo: identity, name, and email, respectively; optional |
 
-OAuth does not authorize owner administration such as password/API-key changes, workspace lifecycle, billing, or membership. Use the API-key credential for those operations and for **Assinafy Trigger**. The action node's Webhook operations can use OAuth when the application grants the required scopes: `account:read` to get the subscription, `webhooks:write` to register or inactivate it, and `documents:read` to list event types or dispatches. Signer-side operations still require the signer's access code.
+OAuth does not authorize owner administration such as password/API-key changes, workspace lifecycle, billing, or membership. Use the API-key credential for those operations and for **Assinafy Trigger**. The action node's Webhook operations can use OAuth when the application grants the required scopes: `account:read` to read endpoints or the subscription, `webhooks:write` to change them, and `documents:read` to list event types or dispatches. Endpoint signing secrets are available only with the API key. Signer-side operations still require the signer's access code.
 
 **Each deployment registers its callback.** Self-hosted n8n and n8n Cloud use the URL shown by that instance. One application may serve multiple workflows and connections; separate deployments should use separate applications, or explicitly register each exact callback in an application they control. There is no shared client secret or desktop loopback callback in this package. Behind a reverse proxy, configure `N8N_EDITOR_BASE_URL`, `WEBHOOK_URL`, and `N8N_PROXY_HOPS` so n8n advertises the external HTTPS origin. A temporary tunnel URL changes when the tunnel is recreated, requiring a callback update and reconnection. OAuth currently uses Production; Sandbox remains available for API-key workflows.
 
@@ -68,9 +68,9 @@ Create an **Assinafy API** credential for account-scoped and API-key operations:
 | Custom Base URL | ✓ for `Custom`  | Must be absolute HTTPS and end in `/v1`, with no user info, query, or fragment. HTTP is allowed only for loopback development hosts.                      |
 | API Key         | ✓ in credential | Generated from the Assinafy dashboard. Sent as the `X-Api-Key` request header.                                                                            |
 | Account ID      | ✓ in credential | Default workspace (account) ID. Used by every account-scoped endpoint.                                                                                    |
-| Webhook Secret  | —               | Secret used for Trigger URL authentication and optional HMAC-SHA256 payload verification. When empty, URL authentication is derived from the API key.     |
+| Webhook Secret  | —               | Secret from which the Trigger derives its URL authentication token. When empty, the token is derived from the API key.                                    |
 
-The credential test calls `GET /accounts/{accountId}` to confirm the key and account are valid. Custom URLs are validated and normalized before either the Test request or any authenticated request can attach the API key. The **Assinafy** action credential is optional only for public, signer-access-code, and explicitly Bearer-authenticated operations. Without a selected credential those calls use the production base URL; if a selected credential cannot be loaded, the call fails instead of silently falling back to production. Select a Sandbox credential even for an unauthenticated call when you need the sandbox host. The **Assinafy Trigger** always requires a credential because subscription lifecycle calls are account-scoped.
+The credential test calls `GET /accounts/{accountId}` to confirm the key and account are valid. Custom URLs are validated and normalized before either the Test request or any authenticated request can attach the API key. The **Assinafy** action credential is optional only for public, signer-access-code, and explicitly Bearer-authenticated operations. Without a selected credential those calls use the production base URL; if a selected credential cannot be loaded, the call fails instead of silently falling back to production. Select a Sandbox credential even for an unauthenticated call when you need the sandbox host. The **Assinafy Trigger** always requires a credential because endpoint lifecycle calls are account-scoped.
 
 ## Document workflow
 
@@ -94,6 +94,7 @@ Receive:  Assinafy Trigger → deduplicate event → route by event → Download
    - **Signer 1 ID:** `={{ $('Create signer 1').first().json.id }}`
    - **Signer 2 ID:** `={{ $('Create signer 2').first().json.id }}`
    - Set each signer's verification method, notification method, and `step`. Equal steps run in parallel; increasing steps enforce sequence.
+   - Verification methods: `Email` (code by email; 0 credits), `Whatsapp` (code over WhatsApp; requires `whatsapp_phone_number` and a paid plan; 0.45 credits for the paired WhatsApp notification), and `DigitalCertificate` (the signer's own ICP-Brasil A1 or A3 certificate in the browser; requires the plan's Digital Certificate feature, a CPF in `government_id`, the signer alone in its step; 0.5 credits plus its notification). `Email` verification pairs with `Email` notification and `Whatsapp` with `Whatsapp`; `DigitalCertificate` accepts either. Send one notification method per signer.
    - Add `expires_at`, `message`, or `copy_receivers` only when needed. Attach tags with **Document → Append Tags** or **Replace Tags**.
 7. Persist the returned assignment ID together with the document ID in your application or data store. Do not use automatic workflow retries around Create Assignment unless your workflow first checks whether the assignment already exists; only explicit HTTP 429 failures are retried by the node; other failures are returned to the workflow.
 
@@ -121,12 +122,12 @@ For a template-based document, use **Template → List/Get** to obtain the role 
 ### Workflow B: receive completion and download the artifact
 
 1. Create a separate workflow beginning with **Assinafy Trigger**. Select `document_ready`, `signer_rejected_document`, and `document_processing_failed`; add `signer_signed_document` if intermediate signer progress is useful.
-2. Store `$json.body.id` as an idempotency key before side effects. Assinafy can redeliver an event.
+2. Store `$json.headers['webhook-id']` as an idempotency key before side effects. Assinafy can redeliver an event, and the header also tells deliveries of the same event to different endpoints apart.
 3. Add a Switch node on `={{ $json.event }}`.
 4. For `document_ready`, use `={{ $json.body.object.id }}` as **Document ID** in **Document → Get**. Continue to **Document → Download Artifact** with `certificated` only when the returned status is `certificated` and `artifacts.certificated` exists. Otherwise, use an IF node and a short Wait node to loop back to Get with a bounded retry count or workflow timeout; stop immediately on a failed, rejected, or expired status. The PDF is returned in the configured binary property (`data` by default) with JSON metadata containing `documentId`, filename, MIME type, and size.
 5. For rejection or processing failure, route `$json.body.object.id`, `$json.body.message`, and `$json.body.payload` to your notification or incident workflow.
 
-The Trigger owns the account's single Assinafy subscription. Use one trigger workflow per account and fan out inside n8n when multiple downstream processes need the same events. If you use OAuth without an API-key webhook connection, start the completion workflow from your own scheduler or application and poll **Document → Get** with bounded Wait/Get loops.
+Each active Trigger registers its own webhook endpoint, and a workspace holds 1 endpoint or up to 3 on paid plans. Fan out inside one workflow when more downstream processes need the same events than the plan allows. If you use OAuth without an API-key webhook connection, start the completion workflow from your own scheduler or application and poll **Document → Get** with bounded Wait/Get loops.
 
 Store the certified PDF binary in your chosen storage system. The `certificate-page` artifact contains the certificate, `bundle` is a ZIP, and `pades` is available when digital-certificate signing was used. **Get Signing Progress** provides counts when available, but downloading must still wait for the final status and artifact.
 
@@ -143,14 +144,13 @@ After an uncertain Upload or Create Assignment result, reconcile the saved docum
 
 ## Assinafy Trigger
 
-The trigger node registers or replaces the workspace-wide webhook subscription when the workflow is activated. The delivery URL must use HTTPS; HTTP is accepted only for `localhost`, `127.0.0.1`, or `::1` development URLs. The node adds an `assinafy-token` query parameter derived with HMAC-SHA256 from the credential's Webhook Secret, or from its API key when no secret is configured. Every delivery must present that token and is rejected on a missing or mismatched value. Reactivate the workflow after rotating either credential value so Assinafy receives the new URL.
+On activation the trigger creates a webhook endpoint named `n8n Assinafy Trigger` for the workflow's delivery URL, or updates the endpoint already registered for that URL; on deactivation it deletes that endpoint. Other endpoints in the workspace are not touched. A workspace holds 1 endpoint, or up to 3 on paid plans; activation in a full workspace fails with `403`. The delivery URL must use HTTPS; HTTP is accepted only for `localhost`, `127.0.0.1`, or `::1` development URLs. The node adds an `assinafy-token` query parameter derived with HMAC-SHA256 from the credential's Webhook Secret, or from its API key when no secret is configured. Every delivery must present that token and is rejected on a missing or mismatched value. Reactivate the workflow after rotating either credential value so Assinafy receives the new URL.
 
-On deactivation, the node reads the current subscription and calls `PUT /accounts/{accountId}/webhooks/inactivate` only after its secured URL, email, and event set match. Assinafy's inactivate endpoint is unconditional, so do not replace the account subscription concurrently with workflow deactivation. Each accepted delivery emits `{ event, headers, body }` as one n8n item; authentication, cookie, API-key, token, secret, and signature headers are redacted.
+Each accepted delivery emits `{ event, headers, body }` as one n8n item; authentication, cookie, API-key, token, secret, and signature headers are redacted. `headers['webhook-id']` identifies the delivery for deduplication.
 
-**Payload-signature verification is an additional opt-in check.** If your workspace signs deliveries, set **Webhook Secret** and enable **Verify Signature**. The node then requires `X-Assinafy-Signature`, computes HMAC-SHA256 over the raw request body, and fails closed when the signature or raw bytes are unavailable.
+**Signature verification.** Enable **Verify Signature** to create the endpoint with signing on. Every delivery must then carry a valid [Standard Webhooks](https://www.standardwebhooks.com) signature (`webhook-id`, `webhook-timestamp`, `webhook-signature`) computed over the raw body with the endpoint secret, and a timestamp within five minutes. The node reads the secret from the API on the first signed delivery, keeps it in the n8n process, and reads it again when a signature does not match, so **Webhook → Rotate Endpoint Signing Secret** takes effect without reactivation. Deliveries without the headers or the raw body are rejected.
 
-> [!IMPORTANT]
-> The Assinafy API supports a **single** webhook subscription per workspace. Activating this trigger replaces any existing subscription. Coordinate activation and deactivation changes for that account, and fan out inside one n8n workflow when multiple destinations need the same events.
+Where the API offers no webhook endpoints, the trigger falls back to the workspace's single subscription: activation replaces it, deactivation inactivates it only while it still matches this trigger, and **Verify Signature** is unavailable.
 
 The full event list (source of truth: `nodes/Assinafy/resources/webhookEvents.ts`, shown in the node's **Events** dropdown):
 `assignment_created`, `document_metadata_ready`, `document_prepared`, `document_processing_failed`, `document_ready`, `document_uploaded`, `signature_requested`, `signer_created`, `signer_data_confirmed`, `signer_email_verified`, `signer_rejected_document`, `signer_signed_document`, `signer_viewed_document`, `signer_whatsapp_verified`, `template_created`, `template_processed`, `template_processing_failed`, `user_rejected_document`. When no events are selected, the trigger subscribes to a sensible default set (`document_ready`, `document_prepared`, `signer_signed_document`, `signer_rejected_document`, `document_processing_failed`).
@@ -295,19 +295,25 @@ Use the native credential for ordinary workflows. Raw token operations return se
 
 ### Resource: Authentication
 
-User-account flows. Login operations return an access token used as `Authorization: Bearer …`. Operations that expose **Access Token** use it when provided and otherwise use the configured API key; public password-reset operations need neither.
+User-account flows. Login operations return an access token used as `Authorization: Bearer …`; for a user with two-factor authentication, Login returns an `mfa_token` for **Complete Two-Factor Login** instead. Operations that expose **Access Token** use it when provided and otherwise use the configured API key; public password-reset operations need neither.
 
-| Operation              | Endpoint                                     |
-| ---------------------- | -------------------------------------------- |
-| Login                  | `POST /login`                                |
-| Social Login           | `POST /authentication/social-login`          |
-| Link Social Login      | `POST /auth/link-social-login`               |
-| Create API Key         | `POST /users/api-keys`                       |
-| Get API Key (Masked)   | `GET /users/api-keys`                        |
-| Delete API Key         | `DELETE /users/api-keys`                     |
-| Change Password        | `PUT /authentication/change-password`        |
-| Request Password Reset | `PUT /authentication/request-password-reset` |
-| Reset Password         | `PUT /authentication/reset-password`         |
+| Operation                        | Endpoint                                     |
+| -------------------------------- | -------------------------------------------- |
+| Login                            | `POST /login`                                |
+| Complete Two-Factor Login        | `POST /authentication/mfa/verify`            |
+| List Two-Factor Methods          | `GET /users/self/mfa`                        |
+| Start Authenticator Enrollment   | `POST /users/self/mfa/totp`                  |
+| Confirm Authenticator Enrollment | `PUT /users/self/mfa/totp/confirm`           |
+| Regenerate Recovery Codes        | `POST /users/self/mfa/recovery-codes`        |
+| Remove Two-Factor Method         | `DELETE /users/self/mfa/{methodId}`          |
+| Social Login                     | `POST /authentication/social-login`          |
+| Link Social Login                | `POST /auth/link-social-login`               |
+| Create API Key                   | `POST /users/api-keys`                       |
+| Get API Key (Masked)             | `GET /users/api-keys`                        |
+| Delete API Key                   | `DELETE /users/api-keys`                     |
+| Change Password                  | `PUT /authentication/change-password`        |
+| Request Password Reset           | `PUT /authentication/request-password-reset` |
+| Reset Password                   | `PUT /authentication/reset-password`         |
 
 ### Resource: Workspace
 
@@ -332,14 +338,23 @@ User-account flows. Login operations return an access token used as `Authorizati
 
 ### Resource: Webhook
 
-| Operation               | Endpoint                                                 |
-| ----------------------- | -------------------------------------------------------- |
-| Register Subscription   | `PUT /accounts/{accountId}/webhooks/subscriptions`       |
-| Get Subscription        | `GET /accounts/{accountId}/webhooks/subscriptions`       |
-| Inactivate Subscription | `PUT /accounts/{accountId}/webhooks/inactivate`          |
-| List Event Types        | `GET /webhooks/event-types`                              |
-| List Dispatches         | `GET /accounts/{accountId}/webhooks`                     |
-| Retry Dispatch          | `POST /accounts/{accountId}/webhooks/{dispatchId}/retry` |
+| Operation                      | Endpoint                                                                 |
+| ------------------------------ | ------------------------------------------------------------------------ |
+| List Endpoints                 | `GET /accounts/{accountId}/webhooks/endpoints`                           |
+| Create Endpoint                | `POST /accounts/{accountId}/webhooks/endpoints`                          |
+| Get Endpoint                   | `GET /accounts/{accountId}/webhooks/endpoints/{endpointId}`              |
+| Update Endpoint                | `PUT /accounts/{accountId}/webhooks/endpoints/{endpointId}`              |
+| Delete Endpoint                | `DELETE /accounts/{accountId}/webhooks/endpoints/{endpointId}`           |
+| Get Endpoint Signing Secret    | `GET /accounts/{accountId}/webhooks/endpoints/{endpointId}/secret`       |
+| Rotate Endpoint Signing Secret | `POST /accounts/{accountId}/webhooks/endpoints/{endpointId}/secret/rotate` |
+| Register Subscription          | `PUT /accounts/{accountId}/webhooks/subscriptions`                       |
+| Get Subscription               | `GET /accounts/{accountId}/webhooks/subscriptions`                       |
+| Inactivate Subscription        | `PUT /accounts/{accountId}/webhooks/inactivate`                          |
+| List Event Types               | `GET /webhooks/event-types`                                              |
+| List Dispatches                | `GET /accounts/{accountId}/webhooks`                                     |
+| Retry Dispatch                 | `POST /accounts/{accountId}/webhooks/{dispatchId}/retry`                 |
+
+A workspace holds 1 endpoint, or up to 3 on paid plans. The subscription operations act on the oldest endpoint. Signing secrets require the API-key credential.
 
 See the [webhook delivery payload reference](docs/OPERATIONS.md#webhook-delivery-payloads) for the complete POST envelope, all 18 event-specific payload variants, success/retry/circuit-breaker behavior, and the trigger's n8n output shape.
 

@@ -1,6 +1,7 @@
 import type {
 	IDataObject,
 	IExecuteFunctions,
+	IHttpRequestMethods,
 	INodeExecutionData,
 	INodeProperties,
 	JsonObject,
@@ -20,6 +21,23 @@ import {
 
 const showOnly = showOnlyFor('webhook');
 
+const endpointNameField: INodeProperties = {
+	displayName: 'Name',
+	name: 'name',
+	type: 'string',
+	default: '',
+	description: 'Label that tells endpoints apart',
+};
+
+const signingEnabledField: INodeProperties = {
+	displayName: 'Signing Enabled',
+	name: 'signingEnabled',
+	type: 'boolean',
+	default: false,
+	description:
+		'Whether deliveries carry a Standard Webhooks signature (webhook-signature header). Enabling generates a signing secret; disabling discards it.',
+};
+
 export const webhookDescription: INodeProperties[] = [
 	{
 		displayName: 'Operation',
@@ -30,19 +48,44 @@ export const webhookDescription: INodeProperties[] = [
 		default: 'register',
 		options: [
 			{
+				name: 'Create Endpoint',
+				value: 'createEndpoint',
+				action: 'Create a webhook endpoint',
+			},
+			{
+				name: 'Delete Endpoint',
+				value: 'deleteEndpoint',
+				action: 'Delete a webhook endpoint',
+			},
+			{
+				name: 'Get Endpoint',
+				value: 'getEndpoint',
+				action: 'Get a webhook endpoint',
+			},
+			{
+				name: 'Get Endpoint Signing Secret',
+				value: 'getEndpointSecret',
+				action: 'Get the signing secret of a webhook endpoint',
+			},
+			{
 				name: 'Get Subscription',
 				value: 'get',
-				action: 'Get the current webhook subscription',
+				action: 'Get the oldest webhook endpoint as the subscription',
 			},
 			{
 				name: 'Inactivate Subscription',
 				value: 'inactivate',
-				action: 'Inactivate the webhook subscription',
+				action: 'Inactivate the oldest webhook endpoint',
 			},
 			{
 				name: 'List Dispatches',
 				value: 'listDispatches',
 				action: 'List webhook delivery history',
+			},
+			{
+				name: 'List Endpoints',
+				value: 'listEndpoints',
+				action: 'List the webhook endpoints',
 			},
 			{
 				name: 'List Event Types',
@@ -52,17 +95,27 @@ export const webhookDescription: INodeProperties[] = [
 			{
 				name: 'Register Subscription',
 				value: 'register',
-				action: 'Register or replace the webhook subscription',
+				action: 'Register or replace the oldest webhook endpoint',
 			},
 			{
 				name: 'Retry Dispatch',
 				value: 'retryDispatch',
 				action: 'Retry delivery of a specific webhook dispatch',
 			},
+			{
+				name: 'Rotate Endpoint Signing Secret',
+				value: 'rotateEndpointSecret',
+				action: 'Rotate the signing secret of a webhook endpoint',
+			},
+			{
+				name: 'Update Endpoint',
+				value: 'updateEndpoint',
+				action: 'Update a webhook endpoint',
+			},
 		],
 	},
 
-	// --- register ---
+	// --- register / create endpoint ---
 	{
 		displayName: 'URL',
 		name: 'url',
@@ -71,7 +124,7 @@ export const webhookDescription: INodeProperties[] = [
 		required: true,
 		placeholder: 'https://example.com/hooks/assinafy',
 		description: 'HTTPS delivery URL. HTTP is accepted only for loopback development hosts.',
-		displayOptions: { show: showOnly(['register']) },
+		displayOptions: { show: showOnly(['register', 'createEndpoint']) },
 	},
 	{
 		displayName: 'Notification Email',
@@ -81,7 +134,7 @@ export const webhookDescription: INodeProperties[] = [
 		default: '',
 		required: true,
 		description: 'Email contacted if webhook deliveries start failing',
-		displayOptions: { show: showOnly(['register']) },
+		displayOptions: { show: showOnly(['register', 'createEndpoint']) },
 	},
 	{
 		displayName: 'Events',
@@ -90,7 +143,7 @@ export const webhookDescription: INodeProperties[] = [
 		// Empty selection falls back to DEFAULT_WEBHOOK_EVENTS in registerWebhook(),
 		// matching the Trigger node's Events field.
 		default: [],
-		displayOptions: { show: showOnly(['register']) },
+		displayOptions: { show: showOnly(['register', 'createEndpoint']) },
 		options: WEBHOOK_EVENT_OPTIONS,
 	},
 	{
@@ -98,7 +151,68 @@ export const webhookDescription: INodeProperties[] = [
 		name: 'isActive',
 		type: 'boolean',
 		default: true,
-		displayOptions: { show: showOnly(['register']) },
+		displayOptions: { show: showOnly(['register', 'createEndpoint']) },
+	},
+	{
+		displayName: 'Additional Fields',
+		name: 'additionalFields',
+		type: 'collection',
+		placeholder: 'Add Field',
+		default: {},
+		displayOptions: { show: showOnly(['createEndpoint']) },
+		options: [endpointNameField, signingEnabledField],
+	},
+
+	// --- endpoint by ID ---
+	{
+		displayName: 'Endpoint ID',
+		name: 'endpointId',
+		type: 'string',
+		default: '',
+		required: true,
+		displayOptions: {
+			show: showOnly([
+				'getEndpoint',
+				'updateEndpoint',
+				'deleteEndpoint',
+				'getEndpointSecret',
+				'rotateEndpointSecret',
+			]),
+		},
+	},
+	{
+		displayName: 'Update Fields',
+		name: 'updateFields',
+		type: 'collection',
+		placeholder: 'Add Field',
+		default: {},
+		displayOptions: { show: showOnly(['updateEndpoint']) },
+		options: [
+			{
+				displayName: 'Events',
+				name: 'events',
+				type: 'multiOptions',
+				default: [],
+				options: WEBHOOK_EVENT_OPTIONS,
+			},
+			{ displayName: 'Is Active', name: 'isActive', type: 'boolean', default: true },
+			endpointNameField,
+			{
+				displayName: 'Notification Email',
+				name: 'email',
+				type: 'string',
+				placeholder: 'name@example.com',
+				default: '',
+			},
+			signingEnabledField,
+			{
+				displayName: 'URL',
+				name: 'url',
+				type: 'string',
+				default: '',
+				placeholder: 'https://example.com/hooks/assinafy',
+			},
+		],
 	},
 
 	// --- list dispatches ---
@@ -116,13 +230,6 @@ export const webhookDescription: INodeProperties[] = [
 		displayOptions: { show: showOnly(['listDispatches']) },
 		options: [
 			{
-				displayName: 'Event',
-				name: 'event',
-				type: 'options',
-				default: '',
-				options: [{ name: 'Any', value: '' }, ...WEBHOOK_EVENT_OPTIONS],
-			},
-			{
 				displayName: 'Delivered',
 				name: 'delivered',
 				type: 'options',
@@ -132,6 +239,20 @@ export const webhookDescription: INodeProperties[] = [
 					{ name: 'Delivered', value: 'true' },
 					{ name: 'Not Delivered', value: 'false' },
 				],
+			},
+			{
+				displayName: 'Endpoint ID',
+				name: 'endpoint_id',
+				type: 'string',
+				default: '',
+				description: 'Only deliveries sent to this webhook endpoint',
+			},
+			{
+				displayName: 'Event',
+				name: 'event',
+				type: 'options',
+				default: '',
+				options: [{ name: 'Any', value: '' }, ...WEBHOOK_EVENT_OPTIONS],
 			},
 			{
 				displayName: 'From (Unix Timestamp)',
@@ -177,6 +298,32 @@ export async function executeWebhook(
 			return listDispatches.call(this, itemIndex);
 		case 'retryDispatch':
 			return wrap(await retryDispatch.call(this, itemIndex));
+		case 'listEndpoints':
+			return asArray<IDataObject>(await endpointRequest(this, 'GET')).map((json) => ({ json }));
+		case 'createEndpoint':
+			return wrap(await endpointRequest(this, 'POST', '', createEndpointBody(this, itemIndex)));
+		case 'getEndpoint':
+			return wrap(await endpointRequest(this, 'GET', endpointPath(this, itemIndex)));
+		case 'updateEndpoint':
+			return wrap(
+				await endpointRequest(
+					this,
+					'PUT',
+					endpointPath(this, itemIndex),
+					updateEndpointBody(this, itemIndex),
+				),
+			);
+		case 'deleteEndpoint': {
+			const path = endpointPath(this, itemIndex);
+			await endpointRequest(this, 'DELETE', path);
+			return wrap({ deleted: true, id: decodeURIComponent(path.slice(1)) });
+		}
+		case 'getEndpointSecret':
+			return wrap(await endpointRequest(this, 'GET', `${endpointPath(this, itemIndex)}/secret`));
+		case 'rotateEndpointSecret':
+			return wrap(
+				await endpointRequest(this, 'POST', `${endpointPath(this, itemIndex)}/secret/rotate`),
+			);
 		default:
 			throw new NodeOperationError(this.getNode(), `Unknown webhook operation: ${operation}`, {
 				itemIndex,
@@ -185,43 +332,110 @@ export async function executeWebhook(
 }
 
 async function registerWebhook(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
-	const url = normalizeWebhookUrl(this.getNodeParameter('url', itemIndex));
-	if (!url) {
-		throw new NodeOperationError(
-			this.getNode(),
-			'Webhook URL must be a valid HTTPS URL (HTTP is allowed only for loopback hosts)',
-			{
-				itemIndex,
-			},
-		);
-	}
-	const email = String(this.getNodeParameter('email', itemIndex) ?? '').trim();
-	if (!assertEmail(email)) {
-		throw new NodeOperationError(this.getNode(), 'Invalid email address', { itemIndex });
-	}
-	const events = this.getNodeParameter('events', itemIndex, []);
-	if (
-		!Array.isArray(events) ||
-		events.some((event) => typeof event !== 'string' || !event.trim())
-	) {
-		throw new NodeOperationError(this.getNode(), 'Events must be an array of event types', {
-			itemIndex,
-		});
-	}
-	const isActive = this.getNodeParameter('isActive', itemIndex, true);
-	if (typeof isActive !== 'boolean') {
-		throw new NodeOperationError(this.getNode(), 'Is Active must be a boolean', { itemIndex });
-	}
+	const body = readDeliveryFields(this, itemIndex);
 	const accountId = await getAccountId(this);
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'PUT',
 		path: `/accounts/${accountId}/webhooks/subscriptions`,
-		body: {
-			url,
-			email,
-			events: events.length > 0 ? events : DEFAULT_WEBHOOK_EVENTS,
-			is_active: isActive,
-		},
+		body,
+	});
+}
+
+/** URL, email, events and active flag shared by Register Subscription and Create Endpoint. */
+function readDeliveryFields(ctx: IExecuteFunctions, itemIndex: number): IDataObject {
+	const events = validateEvents(ctx, ctx.getNodeParameter('events', itemIndex, []), itemIndex);
+	const isActive = ctx.getNodeParameter('isActive', itemIndex, true);
+	if (typeof isActive !== 'boolean') {
+		throw new NodeOperationError(ctx.getNode(), 'Is Active must be a boolean', { itemIndex });
+	}
+	return {
+		url: validateUrl(ctx, ctx.getNodeParameter('url', itemIndex), itemIndex),
+		email: validateEmail(ctx, ctx.getNodeParameter('email', itemIndex), itemIndex),
+		events: events.length > 0 ? events : DEFAULT_WEBHOOK_EVENTS,
+		is_active: isActive,
+	};
+}
+
+function validateUrl(ctx: IExecuteFunctions, value: unknown, itemIndex: number): string {
+	const url = normalizeWebhookUrl(value);
+	if (!url) {
+		throw new NodeOperationError(
+			ctx.getNode(),
+			'Webhook URL must be a valid HTTPS URL (HTTP is allowed only for loopback hosts)',
+			{ itemIndex },
+		);
+	}
+	return url;
+}
+
+function validateEmail(ctx: IExecuteFunctions, value: unknown, itemIndex: number): string {
+	const email = String(value ?? '').trim();
+	if (!assertEmail(email)) {
+		throw new NodeOperationError(ctx.getNode(), 'Invalid email address', { itemIndex });
+	}
+	return email;
+}
+
+function validateEvents(ctx: IExecuteFunctions, events: unknown, itemIndex: number): string[] {
+	if (
+		!Array.isArray(events) ||
+		events.some((event) => typeof event !== 'string' || !event.trim())
+	) {
+		throw new NodeOperationError(ctx.getNode(), 'Events must be an array of event types', {
+			itemIndex,
+		});
+	}
+	return events as string[];
+}
+
+function createEndpointBody(ctx: IExecuteFunctions, itemIndex: number): IDataObject {
+	const extra = ctx.getNodeParameter('additionalFields', itemIndex, {}) as IDataObject;
+	const body = readDeliveryFields(ctx, itemIndex);
+	const name = String(extra.name ?? '').trim();
+	if (name) body.name = name;
+	if (typeof extra.signingEnabled === 'boolean') body.signing_enabled = extra.signingEnabled;
+	return body;
+}
+
+/** Only the fields set are sent; the API keeps every other endpoint setting. */
+function updateEndpointBody(ctx: IExecuteFunctions, itemIndex: number): IDataObject {
+	const fields = ctx.getNodeParameter('updateFields', itemIndex, {}) as IDataObject;
+	const body: IDataObject = {};
+	if (fields.url !== undefined) body.url = validateUrl(ctx, fields.url, itemIndex);
+	if (fields.email !== undefined) body.email = validateEmail(ctx, fields.email, itemIndex);
+	if (fields.events !== undefined) {
+		const events = validateEvents(ctx, fields.events, itemIndex);
+		if (events.length === 0) {
+			throw new NodeOperationError(ctx.getNode(), 'Select at least one event', { itemIndex });
+		}
+		body.events = events;
+	}
+	if (fields.name !== undefined) body.name = String(fields.name).trim();
+	if (typeof fields.isActive === 'boolean') body.is_active = fields.isActive;
+	if (typeof fields.signingEnabled === 'boolean') body.signing_enabled = fields.signingEnabled;
+	if (Object.keys(body).length === 0) {
+		throw new NodeOperationError(ctx.getNode(), 'Add at least one field to update', {
+			itemIndex,
+		});
+	}
+	return body;
+}
+
+function endpointPath(ctx: IExecuteFunctions, itemIndex: number): string {
+	return `/${extractRequiredId(ctx, 'endpointId', 'Endpoint ID', itemIndex)}`;
+}
+
+async function endpointRequest(
+	ctx: IExecuteFunctions,
+	method: IHttpRequestMethods,
+	subPath = '',
+	body?: IDataObject,
+): Promise<IDataObject> {
+	const accountId = await getAccountId(ctx);
+	return assinafyApiRequest<IDataObject>(ctx, {
+		method,
+		path: `/accounts/${accountId}/webhooks/endpoints${subPath}`,
+		...(body ? { body } : {}),
 	});
 }
 

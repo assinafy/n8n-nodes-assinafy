@@ -99,7 +99,9 @@ Sections below show each operation-specific request and a representative respons
 | `TemplateRole`              | `id:string`, `name:string`, `assignment_type:string`, `created_at:string`, `updated_at:string`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `Template`                  | `resource:string`, `id:string`, `name:string`, `document_name:string / null`, `message:string / null`, `status:string`, `pages:TemplatePage[]`, `roles:TemplateRole[]`, `tags:{id,name}[]`, `default_document_tags:{id,name}[]`, `created_at:string`, `updated_at:string`                                                                                                                                                                                                                                                                                                                      |
 | `WebhookSubscription`       | `events:string[]`, `is_active:boolean`, `url:string / null`, `email:string / null`, `updated_at:string / null`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `WebhookDispatch`           | `resource:string`, `id:string`, `event:string`, `activity_id:integer`, `endpoint:string / null`, `payload:object / null`, `delivered:boolean`, `http_status:integer / null`, `response_body:string / null`, `error:string / null`, `created_at:string`, `updated_at:string`                                                                                                                                                                                                                                                                                                                    |
+| `WebhookEndpoint`           | `id:string`, `name:string / null`, `url:string`, `email:string`, `events:string[]`, `is_active:boolean`, `signing_enabled:boolean`, `created_at:string`, `updated_at:string`                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `WebhookEndpointSecret`     | `secret:string` (`whsec_` followed by the base64 key)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `WebhookDispatch`           | `resource:string`, `id:string`, `event:string`, `activity_id:integer`, `endpoint_id:string / null`, `endpoint:string / null`, `payload:object / null`, `delivered:boolean`, `http_status:integer / null`, `response_body:string / null`, `error:string / null`, `created_at:string`, `updated_at:string`                                                                                                                                                                                                                                                                                                                    |
 | `WebhookEventType`          | `id:string`, `description:string`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `WhatsappNotification`      | `sent_at:integer` (Unix seconds), `header:string`, `body:string`, `buttons:{text}[]`, `phone_number:string`, `signer_id:string`                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
@@ -2497,11 +2499,151 @@ When supplied, the access code is appended as `?signer-access-code=<signer-acces
 
 ### Webhook
 
-The Webhook resource manages the account's single webhook subscription (Assinafy allows exactly one subscription per account), inspects the available event catalog, and reviews/retries delivery history. All account-scoped paths use the Account ID from the credential. Action operations accept an API key or an OAuth Bearer token for the consented workspace. OAuth needs `account:read` to get the subscription, `webhooks:write` to register or inactivate it, and `documents:read` to list event types or dispatches. The **Assinafy Trigger** manages subscriptions with an API-key credential.
+The Webhook resource manages the account's webhook endpoints, inspects the event catalog, and reviews/retries delivery history. A workspace holds 1 webhook endpoint, or up to 3 on paid plans; each endpoint has its own URL, event list, contact email and signing setting, and every active endpoint subscribed to an event receives it. The subscription operations (**Register**, **Get**, **Inactivate Subscription**) act on the workspace's oldest endpoint. All account-scoped paths use the Account ID from the credential. Action operations accept an API key or an OAuth Bearer token for the consented workspace. OAuth needs `account:read` to read endpoints or the subscription, `webhooks:write` to create, update, delete, register or inactivate them, and `documents:read` to list event types or dispatches. The signing-secret operations are API-key only. The **Assinafy Trigger** manages its endpoint with an API-key credential.
+
+Webhook endpoint object (`WebhookEndpoint`) returned by the endpoint operations:
+
+| Field             | Type              | Description                                                     |
+| ----------------- | ----------------- | --------------------------------------------------------------- |
+| `id`              | string            | Endpoint ID                                                     |
+| `name`            | string \| null    | Label that tells endpoints apart                                |
+| `url`             | string            | URL receiving the events                                        |
+| `email`           | string            | Contact for delivery-failure notices                            |
+| `events`          | string[]          | Event types delivered to this endpoint                          |
+| `is_active`       | boolean           | Whether events are delivered                                    |
+| `signing_enabled` | boolean           | Whether deliveries carry a `webhook-signature` header           |
+| `created_at`      | string (ISO 8601) | Creation time                                                   |
+| `updated_at`      | string (ISO 8601) | Last change                                                     |
+
+#### List Endpoints
+
+Lists the workspace's webhook endpoints, oldest first, one n8n item per endpoint.
+
+**Endpoint:** `GET /accounts/{accountId}/webhooks/endpoints`
+
+**Node parameters:** none.
+
+**Example response (one item):**
+
+```json
+{
+	"id": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4",
+	"name": "CRM",
+	"url": "https://example.com/hooks/assinafy",
+	"email": "ops@example.com",
+	"events": ["document_ready", "signer_signed_document"],
+	"is_active": true,
+	"signing_enabled": true,
+	"created_at": "2026-10-01T12:00:00Z",
+	"updated_at": "2026-10-01T12:00:00Z"
+}
+```
+
+#### Create Endpoint
+
+Registers a new URL to receive the workspace's events. Creating an endpoint past the plan limit returns `403`; a URL already used by another endpoint of the workspace returns `400`. With signing enabled, a signing secret is generated; read it with **Get Endpoint Signing Secret**.
+
+**Endpoint:** `POST /accounts/{accountId}/webhooks/endpoints`
+
+**Node parameters:**
+
+- URL — string — required — HTTPS delivery URL (HTTP only for loopback hosts); relative URLs, user information and fragments are rejected.
+- Notification Email — string — required — contact for delivery-failure notices.
+- Events — multiOptions — optional — event types; empty selects the default set (`document_ready`, `document_prepared`, `signer_signed_document`, `signer_rejected_document`, `document_processing_failed`).
+- Is Active — boolean — optional — default `true`.
+- Additional Fields — collection — optional:
+  - Name — string — label for the endpoint.
+  - Signing Enabled — boolean — sign deliveries with a Standard Webhooks signature (API default `false`).
+
+**Example request:**
+
+```json
+{
+	"url": "https://example.com/hooks/assinafy",
+	"email": "ops@example.com",
+	"events": ["document_ready", "signer_signed_document"],
+	"is_active": true,
+	"name": "CRM",
+	"signing_enabled": true
+}
+```
+
+**Example response:** the created `WebhookEndpoint` (see **List Endpoints**).
+
+#### Get Endpoint
+
+**Endpoint:** `GET /accounts/{accountId}/webhooks/endpoints/{endpointId}`
+
+**Node parameters:** Endpoint ID — string — required.
+
+**Example response:** one `WebhookEndpoint`. Unknown IDs return `404`.
+
+#### Update Endpoint
+
+Changes only the fields set; every other setting is kept. Setting **Signing Enabled** to `true` generates a secret when the endpoint has none and keeps the current one otherwise; setting it to `false` discards the secret. A URL already used by another endpoint of the workspace returns `400`.
+
+**Endpoint:** `PUT /accounts/{accountId}/webhooks/endpoints/{endpointId}`
+
+**Node parameters:**
+
+- Endpoint ID — string — required.
+- Update Fields — collection — at least one of: Events (non-empty), Is Active, Name, Notification Email, Signing Enabled, URL. `false` values are sent.
+
+**Example request:**
+
+```json
+{ "events": ["document_ready"], "is_active": false, "signing_enabled": false }
+```
+
+**Example response:** the updated `WebhookEndpoint`.
+
+#### Delete Endpoint
+
+Stops delivering events to the endpoint and frees its slot.
+
+**Endpoint:** `DELETE /accounts/{accountId}/webhooks/endpoints/{endpointId}`
+
+**Node parameters:** Endpoint ID — string — required.
+
+**Example response:**
+
+```json
+{ "deleted": true, "id": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4" }
+```
+
+#### Get Endpoint Signing Secret
+
+Returns the secret used to sign deliveries to the endpoint. Returns `400` when signing is disabled. Not available to OAuth applications.
+
+**Endpoint:** `GET /accounts/{accountId}/webhooks/endpoints/{endpointId}/secret`
+
+**Node parameters:** Endpoint ID — string — required.
+
+**Example response:**
+
+```json
+{ "secret": "whsec_<base64-encoded key>" }
+```
+
+The output is a credential; keep it out of logs and shared executions.
+
+#### Rotate Endpoint Signing Secret
+
+Replaces the secret and returns the new one. The old secret stops working immediately; deliveries after the rotation are signed only with the new secret. Returns `400` when signing is disabled. Not available to OAuth applications.
+
+**Endpoint:** `POST /accounts/{accountId}/webhooks/endpoints/{endpointId}/secret/rotate`
+
+**Node parameters:** Endpoint ID — string — required. **Request body:** none.
+
+**Example response:**
+
+```json
+{ "secret": "whsec_<base64-encoded key>" }
+```
 
 #### Register Subscription
 
-Registers or replaces the account's webhook subscription. Assinafy supports only one subscription per account, so this `PUT` always overwrites the existing one.
+Updates the workspace's oldest webhook endpoint, creating it when the workspace has none. Workspaces with several endpoints should use **Update Endpoint**.
 
 **Endpoint:** `PUT /accounts/{accountId}/webhooks/subscriptions`
 
@@ -2539,7 +2681,7 @@ Available event values: `assignment_created`, `document_metadata_ready`, `docume
 
 #### Get Subscription
 
-Retrieves the account's current webhook subscription.
+Retrieves the workspace's oldest webhook endpoint in the subscription shape. Workspaces with several endpoints should use **List Endpoints**.
 
 **Endpoint:** `GET /accounts/{accountId}/webhooks/subscriptions`
 
@@ -2565,7 +2707,7 @@ If no subscription has ever been registered the API returns a sentinel (`{"event
 
 #### Inactivate Subscription
 
-Pauses the webhook subscription without deleting it. While inactive, no events are delivered.
+Deactivates the workspace's oldest webhook endpoint without deleting it. While inactive, no events are sent to it; other endpoints are unaffected.
 
 **Endpoint:** `PUT /accounts/{accountId}/webhooks/inactivate`
 
@@ -2585,7 +2727,7 @@ Pauses the webhook subscription without deleting it. While inactive, no events a
 }
 ```
 
-> To stop receiving events, use **Inactivate Subscription**. There is no separate delete operation for the subscription.
+> To remove an endpoint and free its slot, use **Delete Endpoint**.
 
 #### List Event Types
 
@@ -2627,8 +2769,9 @@ Lists the webhook delivery history (each delivery attempt, its payload, and the 
 - Return All — boolean — optional — return all results, paging automatically (default `false`).
 - Limit — number — optional — max results when Return All is off (default 50).
 - Filters — collection — optional, with options:
-  - Event — options — optional — filter by event type (`Any` / one of the catalog values).
   - Delivered — options — optional — `Any`, `Delivered` (`true`), or `Not Delivered` (`false`).
+  - Endpoint ID — string — optional — only deliveries sent to this endpoint (`endpoint_id`).
+  - Event — options — optional — filter by event type (`Any` / one of the catalog values).
   - From (Unix Timestamp) — number — optional — only dispatches after this time.
   - To (Unix Timestamp) — number — optional — only dispatches before this time.
 
@@ -2653,6 +2796,7 @@ Empty filter values are stripped; `from`/`to` are dropped when zero before being
 		"id": "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6",
 		"event": "document_ready",
 		"activity_id": 456,
+		"endpoint_id": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4",
 		"endpoint": "https://example.com/webhook",
 		"payload": {
 			"id": 456,
@@ -2707,6 +2851,7 @@ Retries delivery of a specific webhook dispatch entry without waiting for automa
 	"id": "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6",
 	"event": "document_ready",
 	"activity_id": 456,
+	"endpoint_id": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4",
 	"endpoint": "https://example.com/webhook",
 	"payload": {
 		"id": 456,
@@ -2738,22 +2883,35 @@ Retries delivery of a specific webhook dispatch entry without waiting for automa
 }
 ```
 
-Note: a retry fails with `404` if the entry does not belong to the account, or `400` if the subscription is inactive or the event type is not subscribed.
+`endpoint_id` is `null` once the endpoint is deleted. A retry is sent only to the endpoint of that entry; it fails with `404` if the entry does not belong to the account, or `400` if the endpoint is inactive or the event type is not subscribed.
 
 ### Webhook delivery payloads
 
-Assinafy sends each subscribed event to the registered URL with this delivery contract:
+Assinafy sends each event to every active endpoint subscribed to it, independently per endpoint, with this delivery contract:
 
 | Property              | Contract                                                                                                                                                  |
 | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Method and media type | `POST` with `Content-Type: application/json` and `Connection: close`                                                                                      |
+| `webhook-id`          | Message ID, identical on every attempt of the same event to the same endpoint                                                                             |
+| `webhook-timestamp`   | Unix timestamp (seconds) of the attempt                                                                                                                   |
+| `webhook-signature`   | Only when signing is enabled on the endpoint; see **Verifying signatures**                                                                                |
 | Success               | Any `2xx` response                                                                                                                                        |
 | Attempts              | At most two per event: the initial attempt plus one retry                                                                                                 |
 | Retry delay           | 3 seconds                                                                                                                                                 |
 | Circuit breaker       | After 10 consecutive failed events, normal delivery pauses and about 5% of events are probed until one succeeds. **Retry Dispatch** can force redelivery. |
 | Response capture      | The first 2,000 characters of the endpoint response body are stored in dispatch history.                                                                  |
 
-Non-`2xx` responses, connection failures, and timeouts count as failed deliveries. Use the top-level integer `id` as a deduplication key because an event can be delivered more than once.
+Non-`2xx` responses, connection failures, and timeouts count as failed deliveries. An event can be delivered more than once: deduplicate by the `webhook-id` header, which also tells deliveries of the same event to different endpoints apart. Where the header is unavailable, the body's integer `id` identifies the activity.
+
+#### Verifying signatures
+
+Signatures follow the [Standard Webhooks](https://www.standardwebhooks.com) specification:
+
+1. Take the raw request body exactly as received.
+2. Build `{webhook-id}.{webhook-timestamp}.{body}`.
+3. Base64-decode the part of the endpoint secret after `whsec_`, compute HMAC-SHA256 of the content with it, and base64-encode the result.
+4. `webhook-signature` holds one or more space-separated `v1,<signature>` entries; accept the request when any entry matches (constant-time comparison).
+5. Reject timestamps more than a few minutes from the receiver's clock.
 
 Every webhook body has this complete common envelope; only `payload`, `subject`, and `object` vary by event:
 
@@ -2832,7 +2990,9 @@ The event-specific contract is:
 
 The **Assinafy Trigger** registers an HTTPS delivery URL carrying a mandatory `assinafy-token` query parameter. HTTP is accepted only for loopback development hosts. The token is derived from the credential Webhook Secret, or from the API key when the Webhook Secret is empty; users do not enter it manually. Incoming requests without the matching token are rejected before workflow output is created.
 
-On workflow deactivation, the trigger reads the current subscription and requests inactivation only after its secured URL, notification email, active state, and event set match. Assinafy's inactivate endpoint is unconditional, so do not replace the account subscription concurrently with workflow deactivation.
+On activation the trigger creates a webhook endpoint named `n8n Assinafy Trigger` for its secured URL, or updates the endpoint already registered for that URL. It counts toward the plan's endpoint limit; a full workspace returns `403`. On deactivation it deletes the endpoint registered for its URL and leaves every other endpoint untouched. **Verify Signature** creates the endpoint with `signing_enabled: true`.
+
+Where the API has no webhook endpoints (`404`), the trigger uses the workspace subscription instead: activation replaces it, and deactivation requests inactivation only after the secured URL, notification email, active state and event set still match, because inactivation is unconditional. **Verify Signature** requires webhook endpoints and refuses activation in that case.
 
 After token authentication, the trigger emits one n8n item and does not reshape the delivery body. This compact output example abbreviates `body`; its complete schema is the envelope above:
 
@@ -2841,13 +3001,15 @@ After token authentication, the trigger emits one n8n item and does not reshape 
 	"event": "signer_signed_document",
 	"headers": {
 		"content-type": "application/json",
-		"x-assinafy-signature": "[REDACTED]"
+		"webhook-id": "msg_2mBp6Qf0aXg8kLr4",
+		"webhook-timestamp": "1787227200",
+		"webhook-signature": "[REDACTED]"
 	},
 	"body": { "event": "signer_signed_document", "payload": { "signer_full_name": "Example Signer" } }
 }
 ```
 
-The trigger resolves `event` from `body.event` (or `body.type`), redacts authentication, cookie, token, secret, API-key, and signature headers, and preserves the parsed `body`. Optional HMAC-SHA256 verification requires the credential Webhook Secret and validates `X-Assinafy-Signature` against the raw request body. It fails closed when the header, raw body, or matching secret is unavailable.
+The trigger resolves `event` from `body.event` (or `body.type`), redacts authentication, cookie, token, secret, API-key, and signature headers, and preserves the parsed `body`. With **Verify Signature**, it verifies the Standard Webhooks signature over the raw request body with the endpoint signing secret and rejects deliveries with missing headers, a timestamp more than five minutes away, an unavailable raw body, or no matching signature. The secret is read from **Get Endpoint Signing Secret** on the first signed delivery, cached in the n8n process, and read again when a signature does not match, so a rotated secret takes effect without reactivating the workflow.
 
 ---
 
@@ -3166,7 +3328,7 @@ Production authorization server: `https://auth.assinafy.com.br`. Its discovery d
 
 When managing authorization yourself, generate an unpredictable single-use state, validate the returned state and `iss` (`https://auth.assinafy.com.br`), and use PKCE S256 with an original 43–128-character unreserved verifier. Register an exact HTTPS callback and send the same `redirect_uri` when exchanging the code. The authorization code expires after 60 seconds and can be exchanged only once. The native n8n credential delegates its callback handling to n8n.
 
-The token endpoint accepts `authorization_code` and `refresh_token`. Confidential applications authenticate with `client_secret_post`; public applications omit the secret. Client-credentials and password grants are not supported by these OAuth operations. `resource`, when supplied, must equal the value published by protected-resource metadata and the value used during authorization.
+The token endpoint accepts `authorization_code` and `refresh_token`. Confidential applications authenticate with `client_secret_post`; public applications omit the secret. Client-credentials and password grants are not supported by these OAuth operations. The token-exchange grant (`urn:ietf:params:oauth:grant-type:token-exchange`) is reserved for Assinafy's internal service clients and returns `invalid_client` to any other application, so the node does not expose it. `resource`, when supplied, must equal the value published by protected-resource metadata and the value used during authorization.
 
 #### Exchange Code
 
@@ -3318,7 +3480,7 @@ Exchange Code, Refresh Token, and Revoke Token never automatically retry, includ
 
 ### Authentication
 
-Login, Social Login, Request Password Reset, and Reset Password are public and do not send the configured API key. Link Social Login and the API-key/password management routes accept the configured API key or an Access Token when the node exposes that field. A Bearer-only call can run without an action credential, in which case it uses the production base URL; select a Sandbox credential to target sandbox.
+Login, Social Login, Complete Two-Factor Login, Request Password Reset, and Reset Password are public and do not send the configured API key. Link Social Login and the API-key/password management routes accept the configured API key or an Access Token when the node exposes that field. A Bearer-only call can run without an action credential, in which case it uses the production base URL; select a Sandbox credential to target sandbox.
 
 #### Login
 
@@ -3367,6 +3529,8 @@ Exchanges an email and password for a JWT access token, returning the user profi
 	]
 }
 ```
+
+For a user with two-factor authentication enabled, the response carries an `mfa_token` to pass to **Complete Two-Factor Login** instead of an access token.
 
 #### Social Login
 
@@ -3598,6 +3762,144 @@ Sets a new password using the reset token received by email. No authentication r
 	"email": "john.smith@example.com"
 }
 ```
+
+#### Two-factor authentication
+
+When two-factor authentication is enabled for a user, **Login** returns an `mfa_token` instead of a session; **Complete Two-Factor Login** exchanges it for the access token. The user-scoped operations below use the optional **Access Token** (a JWT from Login or Complete Two-Factor Login) as `Authorization: Bearer`, or the configured credential when it is empty. Codes and secrets in their outputs are credentials; restrict execution retention and access.
+
+##### Complete Two-Factor Login
+
+**Endpoint:** `POST /authentication/mfa/verify` — public transport (no account authentication).
+
+**Node parameters:**
+
+- MFA Token (`mfaToken`) — string (password) — required — the `mfa_token` from Login; single-use, expires 5 minutes after login.
+- Code (`mfaCode`) — string (password) — required — a 6-digit authenticator code or a recovery code such as `ABCD-EFGH-JKMN`.
+
+**Example request:**
+
+```json
+{ "mfa_token": "<mfa-token>", "code": "123456" }
+```
+
+**Example response:** the same session shape as **Login** (`access_token`, `user`, `accounts`). Errors: `400` invalid or already-used code; `401` challenge expired, already used, or too many attempts.
+
+##### List Two-Factor Methods
+
+**Endpoint:** `GET /users/self/mfa`
+
+**Node parameters:** Access Token — optional.
+
+**Example response:**
+
+```json
+{
+	"methods": [
+		{
+			"id": "<method-id>",
+			"type": "totp",
+			"label": "Phone",
+			"confirmed_at": "2026-10-01T12:00:00Z",
+			"last_used_at": "2026-10-05T09:30:00Z"
+		}
+	],
+	"recovery_codes_remaining": 10
+}
+```
+
+##### Start Authenticator Enrollment
+
+Creates an unconfirmed authenticator method. The shared secret is returned only by this call. Two-factor authentication is not active until the enrollment is confirmed.
+
+**Endpoint:** `POST /users/self/mfa/totp`
+
+**Node parameters:** Access Token — optional; Label (`mfaLabel`) — string — optional.
+
+**Example request:**
+
+```json
+{ "label": "Phone" }
+```
+
+**Example response:**
+
+```json
+{
+	"id": "<method-id>",
+	"secret": "<base32-secret>",
+	"provisioning_uri": "otpauth://totp/Assinafy:user%40example.com?secret=<base32-secret>&issuer=Assinafy"
+}
+```
+
+##### Confirm Authenticator Enrollment
+
+Activates the method with a live code from the new device and returns the recovery codes, shown only once. From then on every login requires a second factor. Confirming while a method of the same type is already confirmed replaces it and reissues recovery codes, and then requires re-authentication by password or by a code from the current device or a recovery code.
+
+**Endpoint:** `PUT /users/self/mfa/totp/confirm`
+
+**Node parameters:**
+
+- Access Token — optional.
+- Method ID (`mfaMethodId`) — string — required — the `id` from Start Authenticator Enrollment.
+- Code (`mfaCode`) — string (password) — required — live code from the new device.
+- Re-Authentication Password (`reauthPassword`) — optional — sent as `password`.
+- Re-Authentication Code (`reauthCode`) — optional — sent as `reauth_code`.
+
+**Example request:**
+
+```json
+{ "id": "<method-id>", "code": "123456", "reauth_code": "654321" }
+```
+
+**Example response:**
+
+```json
+{ "recovery_codes": ["ABCD-EFGH-JKMN", "PQRS-TUVW-XYZ2"] }
+```
+
+Errors: `400` invalid enrollment code or missing/invalid re-authentication; `404` unknown method.
+
+##### Regenerate Recovery Codes
+
+Issues ten new recovery codes and invalidates the previous set.
+
+**Endpoint:** `POST /users/self/mfa/recovery-codes`
+
+**Node parameters:** Access Token — optional; Re-Authentication Password (`password`) or Re-Authentication Code (`code`, a live authenticator code or an existing recovery code, which is consumed) — at least one required.
+
+**Example request:**
+
+```json
+{ "password": "<password>" }
+```
+
+**Example response:**
+
+```json
+{ "recovery_codes": ["ABCD-EFGH-JKMN", "PQRS-TUVW-XYZ2"] }
+```
+
+##### Remove Two-Factor Method
+
+Removes an enrolled method. Removing the last method also discards the recovery codes.
+
+**Endpoint:** `DELETE /users/self/mfa/{methodId}` — JSON body.
+
+**Node parameters:** Access Token — optional; Method ID — required; Re-Authentication Password (`password`) or Re-Authentication Code (`code`) — at least one required.
+
+**Example request:**
+
+```json
+{ "code": "123456" }
+```
+
+**Example response:**
+
+```json
+{ "is_mfa_enabled": false }
+```
+
+Errors: `400` missing or invalid re-authentication; `404` unknown method.
 
 ---
 

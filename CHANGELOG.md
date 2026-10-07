@@ -5,6 +5,21 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.8.0] — 2026-10-07
+
+### Added
+
+- **Webhook → List, Create, Get, Update and Delete Endpoint** manage the workspace's webhook endpoints: 1 per workspace, or up to 3 on paid plans, each with its own URL, events, contact email and signing setting.
+- **Webhook → Get Endpoint Signing Secret** and **Rotate Endpoint Signing Secret** (API key only).
+- **Webhook → List Dispatches** filters by **Endpoint ID**.
+- **Authentication → Complete Two-Factor Login, List Two-Factor Methods, Start Authenticator Enrollment, Confirm Authenticator Enrollment, Regenerate Recovery Codes and Remove Two-Factor Method**.
+
+### Changed
+
+- **Assinafy Trigger** registers its own webhook endpoint on activation and deletes it on deactivation, leaving other endpoints untouched. Where the API offers no webhook endpoints, it keeps using the single workspace subscription.
+- **Assinafy Trigger → Verify Signature** enables signing on the endpoint and verifies the Standard Webhooks signature (`webhook-id`, `webhook-timestamp`, `webhook-signature`) over the raw body with the endpoint secret, rejecting timestamps more than five minutes away. A rotated secret is picked up without reactivating the workflow. The credential **Webhook Secret** now only derives the URL token.
+- Register, Get and Inactivate Subscription are documented as acting on the workspace's oldest endpoint.
+- Development and local runtime use n8n 2.42.4 and `n8n-workflow` 2.42.2; package verification uses `@n8n/scan-community-package` 0.38.0.
 ## [1.7.8] — 2026-10-05
 
 ### Security

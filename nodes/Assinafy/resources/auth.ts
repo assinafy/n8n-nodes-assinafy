@@ -1,6 +1,7 @@
 import type {
 	IDataObject,
 	IExecuteFunctions,
+	IHttpRequestMethods,
 	INodeExecutionData,
 	INodeProperties,
 } from 'n8n-workflow';
@@ -9,6 +10,14 @@ import { assinafyApiRequest } from '../shared/transport';
 import { assertEmail, showOnly as showOnlyFor, wrap } from '../shared/utils';
 
 const showOnly = showOnlyFor('auth');
+
+const MFA_USER_OPERATIONS = [
+	'listMfaMethods',
+	'startTotpEnrollment',
+	'confirmTotpEnrollment',
+	'regenerateRecoveryCodes',
+	'removeMfaMethod',
+];
 
 export const authDescription: INodeProperties[] = [
 	{
@@ -24,6 +33,16 @@ export const authDescription: INodeProperties[] = [
 				value: 'changePassword',
 				action: 'Change the authenticated user password',
 			},
+			{
+				name: 'Complete Two-Factor Login',
+				value: 'verifyMfa',
+				action: 'Exchange a two factor login challenge for an access token',
+			},
+			{
+				name: 'Confirm Authenticator Enrollment',
+				value: 'confirmTotpEnrollment',
+				action: 'Activate an authenticator app with a live code',
+			},
 			{ name: 'Create API Key', value: 'createApiKey', action: 'Generate a new API key' },
 			{ name: 'Delete API Key', value: 'deleteApiKey', action: 'Revoke the current API key' },
 			{
@@ -36,7 +55,22 @@ export const authDescription: INodeProperties[] = [
 				value: 'linkSocialLogin',
 				action: 'Link a social provider to the authenticated user',
 			},
+			{
+				name: 'List Two-Factor Methods',
+				value: 'listMfaMethods',
+				action: 'List the enrolled two factor methods',
+			},
 			{ name: 'Login', value: 'login', action: 'Exchange email and password for an access token' },
+			{
+				name: 'Regenerate Recovery Codes',
+				value: 'regenerateRecoveryCodes',
+				action: 'Issue a new set of two factor recovery codes',
+			},
+			{
+				name: 'Remove Two-Factor Method',
+				value: 'removeMfaMethod',
+				action: 'Remove an enrolled two factor method',
+			},
 			{
 				name: 'Request Password Reset',
 				value: 'requestPasswordReset',
@@ -51,6 +85,11 @@ export const authDescription: INodeProperties[] = [
 				name: 'Social Login',
 				value: 'socialLogin',
 				action: 'Trade a social provider token for an access token',
+			},
+			{
+				name: 'Start Authenticator Enrollment',
+				value: 'startTotpEnrollment',
+				action: 'Create an unconfirmed authenticator app method',
 			},
 		],
 	},
@@ -120,6 +159,7 @@ export const authDescription: INodeProperties[] = [
 				'getApiKey',
 				'deleteApiKey',
 				'changePassword',
+				...MFA_USER_OPERATIONS,
 			]),
 		},
 	},
@@ -154,6 +194,70 @@ export const authDescription: INodeProperties[] = [
 		description: 'Token received in the password-reset email',
 		displayOptions: { show: showOnly(['resetPassword']) },
 	},
+
+	// two-factor authentication
+	{
+		displayName: 'MFA Token',
+		name: 'mfaToken',
+		type: 'string',
+		typeOptions: { password: true },
+		default: '',
+		required: true,
+		description: 'The mfa_token returned by Login; single-use and valid for 5 minutes',
+		displayOptions: { show: showOnly(['verifyMfa']) },
+	},
+	{
+		displayName: 'Code',
+		name: 'mfaCode',
+		type: 'string',
+		typeOptions: { password: true },
+		default: '',
+		required: true,
+		description:
+			'A 6-digit authenticator code. Complete Two-Factor Login also accepts a recovery code; Confirm Authenticator Enrollment needs a code from the new device.',
+		displayOptions: { show: showOnly(['verifyMfa', 'confirmTotpEnrollment']) },
+	},
+	{
+		displayName: 'Method ID',
+		name: 'mfaMethodId',
+		type: 'string',
+		default: '',
+		required: true,
+		description: 'ID returned by Start Authenticator Enrollment or List Two-Factor Methods',
+		displayOptions: { show: showOnly(['confirmTotpEnrollment', 'removeMfaMethod']) },
+	},
+	{
+		displayName: 'Label',
+		name: 'mfaLabel',
+		type: 'string',
+		default: '',
+		description: 'Optional name for the authenticator app',
+		displayOptions: { show: showOnly(['startTotpEnrollment']) },
+	},
+	{
+		displayName: 'Re-Authentication Password',
+		name: 'reauthPassword',
+		type: 'string',
+		typeOptions: { password: true },
+		default: '',
+		description:
+			'Current password. Provide this or a re-authentication code; Confirm Authenticator Enrollment needs one only when replacing a confirmed method.',
+		displayOptions: {
+			show: showOnly(['confirmTotpEnrollment', 'regenerateRecoveryCodes', 'removeMfaMethod']),
+		},
+	},
+	{
+		displayName: 'Re-Authentication Code',
+		name: 'reauthCode',
+		type: 'string',
+		typeOptions: { password: true },
+		default: '',
+		description:
+			'A live code from the current authenticator, or an existing recovery code (which is consumed)',
+		displayOptions: {
+			show: showOnly(['confirmTotpEnrollment', 'regenerateRecoveryCodes', 'removeMfaMethod']),
+		},
+	},
 ];
 
 export async function executeAuth(
@@ -180,6 +284,60 @@ export async function executeAuth(
 			return wrap(await requestPasswordReset.call(this, itemIndex));
 		case 'resetPassword':
 			return wrap(await resetPassword.call(this, itemIndex));
+		case 'verifyMfa':
+			return wrap(
+				await assinafyApiRequest(this, {
+					method: 'POST',
+					path: '/authentication/mfa/verify',
+					body: {
+						mfa_token: requireParam(this, 'mfaToken', 'MFA Token', itemIndex).trim(),
+						code: requireParam(this, 'mfaCode', 'Code', itemIndex).trim(),
+					},
+					skipAuth: true,
+				}),
+			);
+		case 'listMfaMethods':
+			return wrap(await userRequest(this, itemIndex, 'GET', '/users/self/mfa'));
+		case 'startTotpEnrollment': {
+			const label = String(this.getNodeParameter('mfaLabel', itemIndex, '') ?? '').trim();
+			return wrap(
+				await userRequest(this, itemIndex, 'POST', '/users/self/mfa/totp', label ? { label } : {}),
+			);
+		}
+		case 'confirmTotpEnrollment': {
+			const { password, code } = readReauth(this, itemIndex, false);
+			const body: IDataObject = {
+				id: requireParam(this, 'mfaMethodId', 'Method ID', itemIndex).trim(),
+				code: requireParam(this, 'mfaCode', 'Code', itemIndex).trim(),
+			};
+			if (password) body.password = password;
+			if (code) body.reauth_code = code;
+			return wrap(await userRequest(this, itemIndex, 'PUT', '/users/self/mfa/totp/confirm', body));
+		}
+		case 'regenerateRecoveryCodes':
+			return wrap(
+				await userRequest(
+					this,
+					itemIndex,
+					'POST',
+					'/users/self/mfa/recovery-codes',
+					readReauth(this, itemIndex, true),
+				),
+			);
+		case 'removeMfaMethod': {
+			const id = encodeURIComponent(
+				requireParam(this, 'mfaMethodId', 'Method ID', itemIndex).trim(),
+			);
+			return wrap(
+				await userRequest(
+					this,
+					itemIndex,
+					'DELETE',
+					`/users/self/mfa/${id}`,
+					readReauth(this, itemIndex, true),
+				),
+			);
+		}
 		default:
 			throw new NodeOperationError(this.getNode(), `Unknown auth operation: ${operation}`, {
 				itemIndex,
@@ -334,6 +492,50 @@ async function resetPassword(this: IExecuteFunctions, itemIndex: number): Promis
 		body,
 		skipAuth: true,
 	});
+}
+
+/** A user-scoped call with the optional Access Token, else the configured credential. */
+async function userRequest(
+	ctx: IExecuteFunctions,
+	itemIndex: number,
+	method: IHttpRequestMethods,
+	path: string,
+	body?: IDataObject,
+): Promise<IDataObject> {
+	const accessToken = ctx.getNodeParameter('accessToken', itemIndex, '') as string;
+	return assinafyApiRequest<IDataObject>(ctx, {
+		method,
+		path,
+		...(body ? { body } : {}),
+		...optionalBearer(accessToken),
+	});
+}
+
+/** Password or code proving the user again before a two-factor change. */
+function readReauth(
+	ctx: IExecuteFunctions,
+	itemIndex: number,
+	required: boolean,
+): { password?: string; code?: string } {
+	const password = String(ctx.getNodeParameter('reauthPassword', itemIndex, '') ?? '');
+	const code = String(ctx.getNodeParameter('reauthCode', itemIndex, '') ?? '').trim();
+	if (required && !password && !code) {
+		throw new NodeOperationError(
+			ctx.getNode(),
+			'Provide the current password or a re-authentication code',
+			{ itemIndex },
+		);
+	}
+	return { ...(password ? { password } : {}), ...(code ? { code } : {}) };
+}
+
+function requireParam(
+	ctx: IExecuteFunctions,
+	name: string,
+	label: string,
+	itemIndex: number,
+): string {
+	return requireNonBlank(ctx, ctx.getNodeParameter(name, itemIndex, ''), label, itemIndex);
 }
 
 function requireEmail(ctx: IExecuteFunctions, itemIndex: number): string {

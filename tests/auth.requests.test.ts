@@ -152,3 +152,83 @@ describe('auth request construction (all unauthenticated / Bearer)', () => {
 		});
 	});
 });
+
+describe('two-factor authentication requests', () => {
+	it('completes a two-factor login without account authentication', async () => {
+		const { ctx, requests } = makeCtx({ mfaToken: ' mfa_tok ', mfaCode: ' ABCD-EFGH-JKMN ' });
+		await executeAuth.call(ctx as any, 0, 'verifyMfa');
+		const req = lastPublic(requests);
+		expect(req.method).toBe('POST');
+		expect(req.url).toBe(`${BASE}/authentication/mfa/verify`);
+		expect(req.body).toEqual({ mfa_token: 'mfa_tok', code: 'ABCD-EFGH-JKMN' });
+		expect(lastAuth(requests)).toBeUndefined();
+	});
+
+	it('lists methods with an explicit Bearer token', async () => {
+		const { ctx, requests } = makeCtx({ accessToken: ' jwt ' });
+		await executeAuth.call(ctx as any, 0, 'listMfaMethods');
+		const req = lastPublic(requests);
+		expect(req.method).toBe('GET');
+		expect(req.url).toBe(`${BASE}/users/self/mfa`);
+		expect(req.headers.Authorization).toBe('Bearer jwt');
+	});
+
+	it('starts enrollment with an optional label', async () => {
+		const { ctx, requests } = makeCtx({ mfaLabel: ' Phone ' });
+		await executeAuth.call(ctx as any, 0, 'startTotpEnrollment');
+		expect(lastAuth(requests)).toMatchObject({
+			method: 'POST',
+			url: `${BASE}/users/self/mfa/totp`,
+			body: { label: 'Phone' },
+		});
+	});
+
+	it('confirms enrollment, sending re-authentication only when given', async () => {
+		const first = makeCtx({ mfaMethodId: 'm1', mfaCode: '123456' });
+		await executeAuth.call(first.ctx as any, 0, 'confirmTotpEnrollment');
+		expect(lastAuth(first.requests)).toMatchObject({
+			method: 'PUT',
+			url: `${BASE}/users/self/mfa/totp/confirm`,
+			body: { id: 'm1', code: '123456' },
+		});
+
+		const replace = makeCtx({ mfaMethodId: 'm2', mfaCode: '654321', reauthCode: '111111' });
+		await executeAuth.call(replace.ctx as any, 0, 'confirmTotpEnrollment');
+		expect(lastAuth(replace.requests).body).toEqual({
+			id: 'm2',
+			code: '654321',
+			reauth_code: '111111',
+		});
+	});
+
+	it('regenerates recovery codes with the current password', async () => {
+		const { ctx, requests } = makeCtx({ reauthPassword: 'pw' });
+		await executeAuth.call(ctx as any, 0, 'regenerateRecoveryCodes');
+		expect(lastAuth(requests)).toMatchObject({
+			method: 'POST',
+			url: `${BASE}/users/self/mfa/recovery-codes`,
+			body: { password: 'pw' },
+		});
+	});
+
+	it('removes a method by encoded ID with a code', async () => {
+		const { ctx, requests } = makeCtx({ mfaMethodId: 'm/1', reauthCode: '123456' });
+		await executeAuth.call(ctx as any, 0, 'removeMfaMethod');
+		expect(lastAuth(requests)).toMatchObject({
+			method: 'DELETE',
+			url: `${BASE}/users/self/mfa/m%2F1`,
+			body: { code: '123456' },
+		});
+	});
+
+	it.each(['regenerateRecoveryCodes', 'removeMfaMethod'])(
+		'%s requires re-authentication before sending',
+		async (operation) => {
+			const { ctx, requests } = makeCtx({ mfaMethodId: 'm1' });
+			await expect(executeAuth.call(ctx as any, 0, operation)).rejects.toThrow(
+				'Provide the current password or a re-authentication code',
+			);
+			expect(requests).toHaveLength(0);
+		},
+	);
+});

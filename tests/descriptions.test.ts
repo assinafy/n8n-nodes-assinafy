@@ -174,12 +174,19 @@ describe('Resource Descriptions', () => {
 		it('should include all expected webhook operations', () => {
 			const operations = getOperations(webhookDescription);
 			expect(operations).toEqual([
+				'createEndpoint',
+				'deleteEndpoint',
+				'getEndpoint',
+				'getEndpointSecret',
 				'get',
 				'inactivate',
 				'listDispatches',
+				'listEndpoints',
 				'listEventTypes',
 				'register',
 				'retryDispatch',
+				'rotateEndpointSecret',
+				'updateEndpoint',
 			]);
 		});
 	});
@@ -256,18 +263,24 @@ describe('Resource Descriptions', () => {
 	});
 
 	describe('authDescription', () => {
-		it('should cover login + API key + password endpoints', () => {
+		it('should cover login, two-factor, API key and password endpoints', () => {
 			const operations = getOperations(authDescription);
 			expect(operations).toEqual([
 				'changePassword',
+				'verifyMfa',
+				'confirmTotpEnrollment',
 				'createApiKey',
 				'deleteApiKey',
 				'getApiKey',
 				'linkSocialLogin',
+				'listMfaMethods',
 				'login',
+				'regenerateRecoveryCodes',
+				'removeMfaMethod',
 				'requestPasswordReset',
 				'resetPassword',
 				'socialLogin',
+				'startTotpEnrollment',
 			]);
 		});
 	});

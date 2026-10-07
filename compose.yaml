@@ -1,6 +1,6 @@
 services:
   n8n:
-    image: docker.n8n.io/n8nio/n8n:2.40.5@sha256:9f693fd5565539efd5e75ad168526c8041a6af516d9e50bc4d9cb1c9c5031523
+    image: docker.n8n.io/n8nio/n8n:2.42.4@sha256:9c0862a08090c79122069e23131d27529c250b92e90c9d51a6ec406fe1527c4e
     restart: unless-stopped
     ports:
       - '127.0.0.1:5679:5678'

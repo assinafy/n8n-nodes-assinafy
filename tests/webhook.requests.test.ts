@@ -138,4 +138,98 @@ describe('webhook request construction', () => {
 		expect(req.method).toBe('POST');
 		expect(req.url).toBe(`${BASE}/accounts/acc_123/webhooks/disp_1/retry`);
 	});
+
+	describe('webhook endpoints', () => {
+		const ENDPOINTS = `${BASE}/accounts/acc_123/webhooks/endpoints`;
+
+		it('lists endpoints as one item each', async () => {
+			const { ctx, requests } = makeCtx({}, { response: [{ id: 'ep_1' }, { id: 'ep_2' }] });
+			const result = (await executeWebhook.call(ctx as any, 0, 'listEndpoints')) as any[];
+			expect(lastAuth(requests)).toMatchObject({ method: 'GET', url: ENDPOINTS });
+			expect(result.map((item) => item.json.id)).toEqual(['ep_1', 'ep_2']);
+		});
+
+		it('creates an endpoint with name and signing', async () => {
+			const { ctx, requests } = makeCtx({
+				url: 'https://example.com/hook',
+				email: 'ops@example.com',
+				events: ['document_ready'],
+				isActive: false,
+				additionalFields: { name: ' CRM ', signingEnabled: true },
+			});
+			await executeWebhook.call(ctx as any, 0, 'createEndpoint');
+			expect(lastAuth(requests)).toMatchObject({
+				method: 'POST',
+				url: ENDPOINTS,
+				body: {
+					url: 'https://example.com/hook',
+					email: 'ops@example.com',
+					events: ['document_ready'],
+					is_active: false,
+					name: 'CRM',
+					signing_enabled: true,
+				},
+			});
+		});
+
+		it('sends only the fields set when updating, keeping false values', async () => {
+			const { ctx, requests } = makeCtx({
+				endpointId: 'ep/1',
+				updateFields: { signingEnabled: false, isActive: false, events: ['document_ready'] },
+			});
+			await executeWebhook.call(ctx as any, 0, 'updateEndpoint');
+			const req = lastAuth(requests);
+			expect(req.method).toBe('PUT');
+			expect(req.url).toBe(`${ENDPOINTS}/ep%2F1`);
+			expect(req.body).toEqual({
+				events: ['document_ready'],
+				is_active: false,
+				signing_enabled: false,
+			});
+		});
+
+		it.each([
+			[{}, 'Add at least one field to update'],
+			[{ url: 'http://example.com/hook' }, 'valid HTTPS URL'],
+			[{ email: 'nope' }, 'Invalid email address'],
+			[{ events: [] }, 'Select at least one event'],
+		])('rejects an invalid update before sending: %j', async (updateFields, message) => {
+			const { ctx, requests } = makeCtx({ endpointId: 'ep_1', updateFields });
+			await expect(executeWebhook.call(ctx as any, 0, 'updateEndpoint')).rejects.toThrow(message);
+			expect(requests).toHaveLength(0);
+		});
+
+		it.each([
+			['getEndpoint', 'GET', ''],
+			['getEndpointSecret', 'GET', '/secret'],
+			['rotateEndpointSecret', 'POST', '/secret/rotate'],
+		])('%s calls %s on the endpoint', async (operation, method, suffix) => {
+			const { ctx, requests } = makeCtx({ endpointId: 'ep_1' });
+			await executeWebhook.call(ctx as any, 0, operation);
+			expect(lastAuth(requests)).toMatchObject({ method, url: `${ENDPOINTS}/ep_1${suffix}` });
+		});
+
+		it('deletes an endpoint and reports its ID', async () => {
+			const { ctx, requests } = makeCtx({ endpointId: 'ep_1' }, { response: [] });
+			const result = (await executeWebhook.call(ctx as any, 0, 'deleteEndpoint')) as any;
+			expect(lastAuth(requests)).toMatchObject({ method: 'DELETE', url: `${ENDPOINTS}/ep_1` });
+			expect(result.json).toEqual({ deleted: true, id: 'ep_1' });
+		});
+
+		it('requires an endpoint ID', async () => {
+			const { ctx } = makeCtx({ endpointId: ' ' });
+			await expect(executeWebhook.call(ctx as any, 0, 'getEndpoint')).rejects.toThrow(
+				'Endpoint ID is required',
+			);
+		});
+
+		it('filters dispatches by endpoint', async () => {
+			const { ctx, requests } = makeCtx(
+				{ returnAll: false, limit: 10, filters: { endpoint_id: 'ep_1' } },
+				{ response: [] },
+			);
+			await executeWebhook.call(ctx as any, 0, 'listDispatches');
+			expect(lastAuth(requests).qs).toEqual({ endpoint_id: 'ep_1', 'per-page': 10 });
+		});
+	});
 });

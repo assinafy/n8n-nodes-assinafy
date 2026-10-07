@@ -90,7 +90,7 @@ export class AssinafyApi implements ICredentialType {
 			typeOptions: { password: true },
 			default: '',
 			description:
-				'Optional secret used to authenticate Trigger webhook URLs and verify HMAC-SHA256 signatures. When empty, the Trigger derives its URL token from the API key.',
+				'Optional secret from which the Trigger derives the authentication token in its webhook URL. When empty, the token is derived from the API key. Delivery signatures use the endpoint signing secret instead.',
 		},
 	];
 

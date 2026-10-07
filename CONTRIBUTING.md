@@ -59,7 +59,7 @@ Use the unmodified n8n lint preset and test inside the supported official n8n ru
 After publishing through the GitHub release workflow, run the official registry check with the same pinned scanner used by `verify:package` and confirm that its reported result passes:
 
 ```bash
-npm exec --yes --ignore-scripts --strict-peer-deps --package=@n8n/scan-community-package@0.28.1 -- scan-community-package @assinafy/n8n-nodes-assinafy
+npm exec --yes --ignore-scripts --strict-peer-deps --package=@n8n/scan-community-package@0.38.0 -- scan-community-package @assinafy/n8n-nodes-assinafy
 ```
 
 This command checks the published artifact and the source recorded in its npm provenance. A local build cannot supply release provenance. Catalog availability still requires n8n's community-node review.

@@ -7,7 +7,7 @@ Nós da comunidade para integrar o n8n à [Assinafy](https://assinafy.com.br), p
 O pacote inclui:
 
 - **Assinafy** — nó de ação com os recursos `assignment`, `auth`, `document`, `field`, `oauth`, `signer`, `signerDocument`, `tag`, `template`, `webhook` e `workspace`.
-- **Assinafy Trigger** — gatilho de webhook com autenticação obrigatória na URL, derivada da credencial, e verificação opcional do conteúdo por HMAC-SHA256.
+- **Assinafy Trigger** — gatilho de webhook que registra o próprio endpoint de webhook, com autenticação obrigatória na URL, derivada da credencial, e verificação opcional da assinatura Standard Webhooks.
 - **Assinafy OAuth2 API** — credencial OAuth com código de autorização e PKCE, armazenamento criptografado dos tokens e renovação automática pelo n8n.
 - **Assinafy API** — credencial compartilhada com chave de API (`X-Api-Key`), ID da conta e ambientes de produção, sandbox e URL personalizada.
 
@@ -35,12 +35,12 @@ Em produção, use a imagem oficial compatível do n8n, um endereço HTTPS está
 
 ### OAuth para fluxos de documentos
 
-Use uma versão atual do n8n; a configuração local deste repositório fixa a versão 2.40.5. No nó de ação Assinafy, selecione **Authentication → OAuth2** e crie uma credencial **Assinafy OAuth2 API**.
+Use uma versão atual do n8n; a configuração local deste repositório fixa a versão 2.42.4. No nó de ação Assinafy, selecione **Authentication → OAuth2** e crie uma credencial **Assinafy OAuth2 API**.
 
 1. Copie a **OAuth Redirect URL** exibida pelo n8n. Ela deve ser uma URL HTTPS pública, normalmente `https://n8n.example.com/rest/oauth2-credential/callback`.
 2. No seu workspace da Assinafy, acesse **Integrações → Apps OAuth → Novo aplicativo**. Escolha **Aplicação no servidor / Confidential**, informe exatamente a URL de callback e selecione as permissões necessárias para os seus fluxos.
 3. Copie o Client ID e o Client Secret, exibido uma única vez, para a credencial do n8n. Guarde o segredo nas credenciais do n8n, nunca nos parâmetros do fluxo ou em arquivos JSON exportados.
-4. Em **Scope**, informe as permissões separadas por espaços, usando apenas as que foram habilitadas no aplicativo. Um fluxo de documentos usa `documents:read documents:write account:read offline_access`; adicione `templates:read` se usar modelos. Para registrar ou inativar webhooks da Assinafy pelo nó de ação, habilite `webhooks:write` no aplicativo OAuth e adicione esse escopo ao campo **Scope** da credencial. A configuração padrão da credencial já inclui `templates:read`; remova esse escopo se o aplicativo não o permitir.
+4. Em **Scope**, informe as permissões separadas por espaços, usando apenas as que foram habilitadas no aplicativo. Um fluxo de documentos usa `documents:read documents:write account:read offline_access`; adicione `templates:read` se usar modelos. Para criar, atualizar, excluir, registrar ou inativar endpoints de webhook da Assinafy pelo nó de ação, habilite `webhooks:write` no aplicativo OAuth e adicione esse escopo ao campo **Scope** da credencial. A configuração padrão da credencial já inclui `templates:read`; remova esse escopo se o aplicativo não o permitir.
 5. Deixe **Account ID** vazio para descobrir automaticamente o único workspace selecionado no consentimento, ou informe explicitamente o ID desse workspace. Clique em **Connect my account**, entre na Assinafy, selecione o workspace e autorize o acesso solicitado.
 6. Teste a conexão com **Workspace → List**. O OAuth retorna apenas o workspace autorizado; o acesso a outro workspace é proibido. O teste de conexão da própria credencial também chama `GET /accounts`.
 
@@ -52,11 +52,11 @@ O n8n executa o fluxo Authorization Code com PKCE S256 e envia o segredo do clie
 | `documents:write` | Enviar documentos, gerenciar signatários e solicitar assinaturas |
 | `templates:read` | Consultar os modelos usados para gerar documentos |
 | `account:read` | Consultar os dados permitidos do workspace selecionado |
-| `webhooks:write` | Registrar ou inativar uma assinatura de webhook pelo nó de ação; adicione apenas quando necessário |
+| `webhooks:write` | Criar, atualizar, excluir, registrar ou inativar endpoints de webhook pelo nó de ação; adicione apenas quando necessário |
 | `offline_access` | Manter a conexão com tokens de renovação com rotação |
 | `openid`, `profile`, `email` | Acessar identidade, nome e e-mail, respectivamente, pelo OAuth UserInfo; são opcionais |
 
-O OAuth não autoriza operações administrativas do proprietário, como alteração de senha ou chave de API, criação e exclusão de workspaces, cobrança ou membros. Use a credencial de chave de API para essas operações e para o **Assinafy Trigger**. As operações Webhook do nó de ação aceitam OAuth quando o aplicativo tem os escopos necessários: `account:read` para consultar a assinatura, `webhooks:write` para registrar ou inativar e `documents:read` para listar tipos de eventos ou entregas. As operações executadas em nome do signatário continuam exigindo o código de acesso dele.
+O OAuth não autoriza operações administrativas do proprietário, como alteração de senha ou chave de API, criação e exclusão de workspaces, cobrança ou membros. Use a credencial de chave de API para essas operações e para o **Assinafy Trigger**. As operações Webhook do nó de ação aceitam OAuth quando o aplicativo tem os escopos necessários: `account:read` para consultar endpoints ou a assinatura, `webhooks:write` para alterá-los e `documents:read` para listar tipos de eventos ou entregas. Os segredos de assinatura dos endpoints exigem a chave de API. As operações executadas em nome do signatário continuam exigindo o código de acesso dele.
 
 **Cada implantação registra seu próprio callback.** Tanto o n8n em infraestrutura própria quanto o n8n Cloud usam a URL exibida pela respectiva instância. Um aplicativo pode atender a vários fluxos e conexões. Implantações separadas devem usar aplicativos separados ou registrar explicitamente cada callback exato em um aplicativo que controlem. O pacote não fornece um segredo de cliente compartilhado nem um callback local de aplicativo desktop. Ao usar um proxy reverso, configure `N8N_EDITOR_BASE_URL`, `WEBHOOK_URL` e `N8N_PROXY_HOPS` para que o n8n anuncie o endereço HTTPS externo. A URL de um túnel temporário muda quando ele é recriado, exigindo atualização do callback e nova conexão. Atualmente, o OAuth usa o ambiente de produção; o sandbox continua disponível para fluxos com chave de API.
 
@@ -70,9 +70,9 @@ Crie uma credencial **Assinafy API** para operações da conta que usam chave de
 | Custom Base URL | Quando `Custom` | URL HTTPS absoluta terminada em `/v1`, sem dados de usuário, parâmetros de consulta ou fragmento. HTTP é permitido apenas em endereços de loopback para desenvolvimento. |
 | API Key | Sim, na credencial | Gerada no painel da Assinafy. Enviada no cabeçalho `X-Api-Key`. |
 | Account ID | Sim, na credencial | ID padrão do workspace (conta), usado pelos endpoints vinculados à conta. |
-| Webhook Secret | Não | Segredo usado na autenticação da URL do Trigger e na verificação opcional do conteúdo por HMAC-SHA256. Quando vazio, a autenticação da URL é derivada da chave de API. |
+| Webhook Secret | Não | Segredo do qual o Trigger deriva o token de autenticação da URL. Quando vazio, o token é derivado da chave de API. |
 
-O teste da credencial chama `GET /accounts/{accountId}` para confirmar a chave e a conta. URLs personalizadas são validadas e normalizadas antes que o teste ou qualquer requisição autenticada possa incluir a chave de API. A credencial do nó de ação **Assinafy** só é opcional em operações públicas, com código de acesso do signatário ou com autenticação Bearer explícita. Sem uma credencial selecionada, essas chamadas usam a URL de produção. Se uma credencial selecionada não puder ser carregada, a chamada falha, sem mudar silenciosamente para produção. Selecione uma credencial Sandbox mesmo em chamadas sem autenticação quando precisar usar esse ambiente. O **Assinafy Trigger** sempre exige uma credencial, pois o gerenciamento da assinatura do webhook depende da conta.
+O teste da credencial chama `GET /accounts/{accountId}` para confirmar a chave e a conta. URLs personalizadas são validadas e normalizadas antes que o teste ou qualquer requisição autenticada possa incluir a chave de API. A credencial do nó de ação **Assinafy** só é opcional em operações públicas, com código de acesso do signatário ou com autenticação Bearer explícita. Sem uma credencial selecionada, essas chamadas usam a URL de produção. Se uma credencial selecionada não puder ser carregada, a chamada falha, sem mudar silenciosamente para produção. Selecione uma credencial Sandbox mesmo em chamadas sem autenticação quando precisar usar esse ambiente. O **Assinafy Trigger** sempre exige uma credencial, pois o gerenciamento do endpoint de webhook depende da conta.
 
 ## Fluxo de documentos
 
@@ -96,6 +96,7 @@ Recebimento: Assinafy Trigger → eliminar eventos duplicados → encaminhar por
    - **Signer 1 ID:** `={{ $('Create signer 1').first().json.id }}`
    - **Signer 2 ID:** `={{ $('Create signer 2').first().json.id }}`
    - Defina o método de verificação, o método de notificação e o `step` de cada signatário. Signatários na mesma etapa assinam em paralelo; etapas crescentes impõem uma sequência.
+   - Métodos de verificação: `Email` (código por e-mail; 0 crédito), `Whatsapp` (código pelo WhatsApp; exige `whatsapp_phone_number` e plano pago; 0,45 crédito pela notificação por WhatsApp associada) e `DigitalCertificate` (certificado ICP-Brasil A1 ou A3 do próprio signatário no navegador; exige o recurso Certificado Digital do plano, CPF em `government_id` e o signatário sozinho na etapa; 0,5 crédito mais a notificação). A verificação `Email` combina com a notificação `Email` e `Whatsapp` com `Whatsapp`; `DigitalCertificate` aceita qualquer uma. Envie um único método de notificação por signatário.
    - Inclua `expires_at`, `message` ou `copy_receivers` apenas quando necessário. Associe tags com **Document → Append Tags** ou **Replace Tags**.
 7. Salve o ID da solicitação de assinatura retornada junto com o ID do documento na sua aplicação ou banco de dados. Só configure tentativas automáticas em torno de Create Assignment se o fluxo primeiro verificar se a solicitação já existe. O nó repete apenas falhas HTTP 429 explícitas; as demais falhas são devolvidas ao fluxo.
 
@@ -123,12 +124,12 @@ Para gerar um documento a partir de um modelo, use **Template → List/Get** par
 ### Fluxo B: receber a conclusão e baixar o arquivo
 
 1. Crie um fluxo separado começando com **Assinafy Trigger**. Selecione `document_ready`, `signer_rejected_document` e `document_processing_failed`; inclua `signer_signed_document` se precisar acompanhar o progresso individual dos signatários.
-2. Armazene `$json.body.id` como chave de idempotência antes de executar ações que alterem dados ou enviem notificações. A Assinafy pode entregar o mesmo evento novamente.
+2. Armazene `$json.headers['webhook-id']` como chave de idempotência antes de executar ações que alterem dados ou enviem notificações. A Assinafy pode entregar o mesmo evento novamente, e esse cabeçalho também diferencia entregas do mesmo evento para endpoints distintos.
 3. Adicione um nó Switch usando `={{ $json.event }}`.
 4. Para `document_ready`, use `={{ $json.body.object.id }}` como **Document ID** em **Document → Get**. Prossiga para **Document → Download Artifact** com `certificated` somente quando o status retornado for `certificated` e `artifacts.certificated` existir. Caso contrário, use um nó IF e um nó Wait com espera curta para voltar a Get, com um limite de tentativas ou de duração do fluxo. Interrompa imediatamente se o status indicar falha, rejeição ou expiração. O PDF é retornado na propriedade binária configurada (`data` por padrão), acompanhado de metadados JSON com `documentId`, nome do arquivo, tipo MIME e tamanho.
 5. Em caso de rejeição ou falha de processamento, encaminhe `$json.body.object.id`, `$json.body.message` e `$json.body.payload` para o seu fluxo de notificações ou tratamento de incidentes.
 
-O Trigger gerencia a única assinatura de webhook da conta na Assinafy. Use um fluxo com esse gatilho por conta e distribua os eventos dentro do n8n quando vários processos precisarem deles. Se usar OAuth sem uma conexão de webhook por chave de API, inicie o fluxo de conclusão pelo seu agendador ou aplicação e consulte **Document → Get** com ciclos Wait/Get limitados.
+Cada Trigger ativo registra o próprio endpoint de webhook, e um workspace comporta 1 endpoint, ou até 3 em planos pagos. Distribua os eventos dentro de um único fluxo quando mais processos precisarem deles do que o plano permite. Se usar OAuth sem uma conexão de webhook por chave de API, inicie o fluxo de conclusão pelo seu agendador ou aplicação e consulte **Document → Get** com ciclos Wait/Get limitados.
 
 Salve o PDF certificado no sistema de armazenamento escolhido. O artefato `certificate-page` contém o certificado, `bundle` é um ZIP e `pades` fica disponível quando houve assinatura com certificado digital. **Get Signing Progress** fornece contagens quando disponíveis, mas o download deve aguardar o status final e a disponibilidade do artefato.
 
@@ -145,14 +146,13 @@ Se o resultado de Upload ou Create Assignment for incerto, consulte os registros
 
 ## Assinafy Trigger
 
-O gatilho registra ou substitui a assinatura de webhook de todo o workspace quando o fluxo é ativado. A URL de entrega deve usar HTTPS; HTTP é aceito apenas em URLs de desenvolvimento com `localhost`, `127.0.0.1` ou `::1`. O nó adiciona o parâmetro de consulta `assinafy-token`, derivado por HMAC-SHA256 do Webhook Secret da credencial ou, quando não há segredo configurado, da chave de API. Toda entrega deve apresentar esse token e é rejeitada se ele estiver ausente ou incorreto. Reative o fluxo após trocar qualquer um desses valores para que a Assinafy receba a nova URL.
+Ao ativar o fluxo, o gatilho cria um endpoint de webhook chamado `n8n Assinafy Trigger` para a URL de entrega do fluxo, ou atualiza o endpoint já registrado para essa URL; ao desativar, exclui esse endpoint. Os demais endpoints do workspace não são alterados. Um workspace comporta 1 endpoint, ou até 3 em planos pagos; a ativação em um workspace sem vagas falha com `403`. A URL de entrega deve usar HTTPS; HTTP é aceito apenas em URLs de desenvolvimento com `localhost`, `127.0.0.1` ou `::1`. O nó adiciona o parâmetro de consulta `assinafy-token`, derivado por HMAC-SHA256 do Webhook Secret da credencial ou, quando não há segredo configurado, da chave de API. Toda entrega deve apresentar esse token e é rejeitada se ele estiver ausente ou incorreto. Reative o fluxo após trocar qualquer um desses valores para que a Assinafy receba a nova URL.
 
-Ao desativar o fluxo, o nó lê a assinatura de webhook atual e só chama `PUT /accounts/{accountId}/webhooks/inactivate` se a URL protegida, o e-mail e o conjunto de eventos corresponderem à sua configuração. O endpoint de inativação da Assinafy é incondicional; portanto, não substitua a assinatura de webhook da conta ao mesmo tempo que desativa o fluxo. Cada entrega aceita gera um item do n8n com `{ event, headers, body }`; cabeçalhos de autenticação, cookies, chaves de API, tokens, segredos e assinaturas são ocultados.
+Cada entrega aceita gera um item do n8n com `{ event, headers, body }`; cabeçalhos de autenticação, cookies, chaves de API, tokens, segredos e assinaturas são ocultados. `headers['webhook-id']` identifica a entrega para eliminar duplicidades.
 
-**A verificação da assinatura do conteúdo é uma proteção adicional opcional.** Se o seu workspace assina as entregas, configure **Webhook Secret** e ative **Verify Signature**. O nó passa a exigir `X-Assinafy-Signature`, calcula HMAC-SHA256 sobre os bytes originais do corpo da requisição e rejeita a entrega se a assinatura ou esses bytes não estiverem disponíveis.
+**Verificação da assinatura.** Ative **Verify Signature** para criar o endpoint com assinatura habilitada. Toda entrega passa a exigir uma assinatura [Standard Webhooks](https://www.standardwebhooks.com) válida (`webhook-id`, `webhook-timestamp`, `webhook-signature`), calculada sobre os bytes originais do corpo com o segredo do endpoint, e um horário com diferença máxima de cinco minutos. O nó lê o segredo pela API na primeira entrega assinada, mantém o valor no processo do n8n e o lê novamente quando uma assinatura não confere; assim, **Webhook → Rotate Endpoint Signing Secret** vale sem reativar o fluxo. Entregas sem esses cabeçalhos ou sem os bytes originais são rejeitadas.
 
-> [!IMPORTANT]
-> A API da Assinafy permite **uma única** assinatura de webhook por workspace. Ativar este gatilho substitui qualquer assinatura de webhook existente. Coordene a ativação e a desativação nessa conta e distribua os eventos dentro de um único fluxo do n8n quando houver vários destinos.
+Quando a API não oferece endpoints de webhook, o gatilho usa a assinatura única do workspace: a ativação a substitui, a desativação só a inativa enquanto ela ainda corresponde a este gatilho, e **Verify Signature** fica indisponível.
 
 A lista completa de eventos é definida em `nodes/Assinafy/resources/webhookEvents.ts` e aparece no campo **Events** do nó:
 `assignment_created`, `document_metadata_ready`, `document_prepared`, `document_processing_failed`, `document_ready`, `document_uploaded`, `signature_requested`, `signer_created`, `signer_data_confirmed`, `signer_email_verified`, `signer_rejected_document`, `signer_signed_document`, `signer_viewed_document`, `signer_whatsapp_verified`, `template_created`, `template_processed`, `template_processing_failed`, `user_rejected_document`. Quando nenhum evento é selecionado, o gatilho usa o conjunto padrão: `document_ready`, `document_prepared`, `signer_signed_document`, `signer_rejected_document` e `document_processing_failed`.
@@ -298,11 +298,17 @@ Use a credencial nativa nos fluxos comuns. As operações diretas de token retor
 
 ### Recurso: Authentication (autenticação)
 
-Operações da conta de usuário. As operações de login retornam um token de acesso usado em `Authorization: Bearer …`. As operações que oferecem **Access Token** usam esse valor quando preenchido; caso contrário, usam a chave de API configurada. As operações públicas de recuperação de senha não exigem nenhum dos dois.
+Operações da conta de usuário. As operações de login retornam um token de acesso usado em `Authorization: Bearer …`; para um usuário com autenticação em dois fatores, o Login retorna um `mfa_token` para **Complete Two-Factor Login**. As operações que oferecem **Access Token** usam esse valor quando preenchido; caso contrário, usam a chave de API configurada. As operações públicas de recuperação de senha não exigem nenhum dos dois.
 
 | Operação | Endpoint |
 | --- | --- |
 | Login | `POST /login` |
+| Complete Two-Factor Login | `POST /authentication/mfa/verify` |
+| List Two-Factor Methods | `GET /users/self/mfa` |
+| Start Authenticator Enrollment | `POST /users/self/mfa/totp` |
+| Confirm Authenticator Enrollment | `PUT /users/self/mfa/totp/confirm` |
+| Regenerate Recovery Codes | `POST /users/self/mfa/recovery-codes` |
+| Remove Two-Factor Method | `DELETE /users/self/mfa/{methodId}` |
 | Social Login | `POST /authentication/social-login` |
 | Link Social Login | `POST /auth/link-social-login` |
 | Create API Key | `POST /users/api-keys` |
@@ -337,12 +343,21 @@ Operações da conta de usuário. As operações de login retornam um token de a
 
 | Operação | Endpoint |
 | --- | --- |
+| List Endpoints | `GET /accounts/{accountId}/webhooks/endpoints` |
+| Create Endpoint | `POST /accounts/{accountId}/webhooks/endpoints` |
+| Get Endpoint | `GET /accounts/{accountId}/webhooks/endpoints/{endpointId}` |
+| Update Endpoint | `PUT /accounts/{accountId}/webhooks/endpoints/{endpointId}` |
+| Delete Endpoint | `DELETE /accounts/{accountId}/webhooks/endpoints/{endpointId}` |
+| Get Endpoint Signing Secret | `GET /accounts/{accountId}/webhooks/endpoints/{endpointId}/secret` |
+| Rotate Endpoint Signing Secret | `POST /accounts/{accountId}/webhooks/endpoints/{endpointId}/secret/rotate` |
 | Register Subscription | `PUT /accounts/{accountId}/webhooks/subscriptions` |
 | Get Subscription | `GET /accounts/{accountId}/webhooks/subscriptions` |
 | Inactivate Subscription | `PUT /accounts/{accountId}/webhooks/inactivate` |
 | List Event Types | `GET /webhooks/event-types` |
 | List Dispatches | `GET /accounts/{accountId}/webhooks` |
 | Retry Dispatch | `POST /accounts/{accountId}/webhooks/{dispatchId}/retry` |
+
+Um workspace comporta 1 endpoint, ou até 3 em planos pagos. As operações de assinatura atuam sobre o endpoint mais antigo. Os segredos de assinatura exigem a credencial de chave de API.
 
 Consulte a [referência do conteúdo das entregas de webhook](docs/OPERATIONS.md#webhook-delivery-payloads), em inglês, para ver o envelope completo do POST, as variantes dos 18 eventos, o comportamento de sucesso, novas tentativas e interrupção temporária após falhas, além do formato de saída do gatilho no n8n.
 
