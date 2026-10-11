@@ -3,7 +3,7 @@
 	"version": "1.8.0",
 	"description": "n8n community nodes for the Assinafy electronic-signature API (documents, signers, assignments, templates, tags, webhooks).",
 	"license": "MIT",
-	"homepage": "https://github.com/assinafy/n8n-nodes-assinafy",
+	"homepage": "https://www.assinafy.com.br",
 	"keywords": [
 		"n8n-community-node-package",
 		"assinafy",
