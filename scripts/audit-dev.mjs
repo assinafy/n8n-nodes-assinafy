@@ -19,14 +19,11 @@ function verify(report, lock, today = new Date().toISOString().slice(0, 10)) {
 			if (typeof advisory === 'string' || !['high', 'critical'].includes(advisory.severity))
 				continue;
 			const id = advisory.url.split('/').at(-1);
-			if (
-				advisory.severity === 'critical' ||
-				today >= policy.expires ||
-				!policy.advisories[name]?.includes(id)
-			) {
+			const rule = advisory.severity === 'critical' ? policy.critical : policy;
+			if (!rule || today >= rule.expires || !rule.advisories[name]?.includes(id)) {
 				throw new Error(`Unaccepted or expired advisory: ${name} ${id}`);
 			}
-			console.warn(`Development exception until ${policy.expires}: ${name} ${id}`);
+			console.warn(`Development exception until ${rule.expires}: ${name} ${id}`);
 		}
 	}
 }
@@ -53,6 +50,20 @@ if (process.argv.includes('--self-test')) {
 		url: `https://github.com/advisories/${id}`,
 	};
 	assert.throws(() => verify(report, lock, '2026-10-05'), /Unaccepted/);
+	const [criticalName, [criticalId]] = Object.entries(policy.critical.advisories)[0];
+	const critical = {
+		vulnerabilities: {
+			[criticalName]: {
+				severity: 'critical',
+				nodes: [`node_modules/${criticalName}`],
+				via: [{ severity: 'critical', url: `https://github.com/advisories/${criticalId}` }],
+			},
+		},
+	};
+	const criticalLock = { packages: { [`node_modules/${criticalName}`]: { dev: true } } };
+	verify(critical, criticalLock, '2026-10-11');
+	assert.throws(() => verify(critical, criticalLock, policy.critical.expires), /expired advisory/);
+	assert.throws(() => verify(critical, { packages: {} }, '2026-10-11'), /Production dependency/);
 	console.log('Development audit exception checks passed');
 } else {
 	const result = spawnSync('npm', ['audit', '--json'], {
