@@ -430,7 +430,7 @@ describe('document request construction', () => {
 		const req = lastPublic(requests);
 		expect(req.method).toBe('PUT');
 		expect(req.url).toBe(`${BASE}/public/documents/doc_pub/send-token`);
-		expect(req.body).toEqual({ email: 'user@example.com' });
+		expect(req.body).toEqual({ channel: 'email', recipient: 'user@example.com' });
 	});
 
 	it('rejects an invalid email-channel public token recipient', async () => {
@@ -440,22 +440,27 @@ describe('document request construction', () => {
 			channel: 'email',
 		});
 		await expect(executeDocument.call(ctx as any, 0, 'sendPublicToken')).rejects.toThrow(
-			'Invalid recipient email address',
+			'Recipient must be the signer email address',
 		);
 		expect(requests).toHaveLength(0);
 	});
 
-	it('accepts a WhatsApp public token recipient', async () => {
+	it('rejects a saved WhatsApp public token channel before calling the API', async () => {
 		const { ctx, requests } = makeCtx({
 			publicDocumentId: 'doc_pub',
 			recipient: '+5511999990001',
 			channel: 'whatsapp',
 		});
+		await expect(executeDocument.call(ctx as any, 0, 'sendPublicToken')).rejects.toThrow(
+			'supports only the Email channel (got "whatsapp")',
+		);
+		expect(requests).toHaveLength(0);
+	});
+
+	it('defaults a missing public token channel to email', async () => {
+		const { ctx, requests } = makeCtx({ publicDocumentId: 'doc_pub', recipient: 'a@example.com' });
 		await executeDocument.call(ctx as any, 0, 'sendPublicToken');
-		expect(lastPublic(requests).body).toEqual({
-			recipient: '+5511999990001',
-			channel: 'whatsapp',
-		});
+		expect(lastPublic(requests).body).toEqual({ channel: 'email', recipient: 'a@example.com' });
 	});
 
 	it('lists document statuses', async () => {

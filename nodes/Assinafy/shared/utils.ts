@@ -138,6 +138,37 @@ export function requireAccessCode(ctx: IExecuteFunctions, itemIndex: number): st
 	return code;
 }
 
+export type SignerRouteAuth = 'signerAccessCode' | 'workspaceCredentials';
+
+/**
+ * Resolve the explicit `authenticateWith` choice of a route that accepts either
+ * a signer access code or the workspace credentials. The access-code mode sends
+ * only the (required, non-empty) code; it never falls back to the credentials.
+ */
+export function resolveSignerRouteAuth(
+	ctx: IExecuteFunctions,
+	itemIndex: number,
+	defaultMode: SignerRouteAuth,
+): { qs: IDataObject; skipAuth: boolean } {
+	const mode = ctx.getNodeParameter('authenticateWith', itemIndex, defaultMode) as SignerRouteAuth;
+	if (mode === 'workspaceCredentials') return { qs: {}, skipAuth: false };
+	return { qs: { 'signer-access-code': requireAccessCode(ctx, itemIndex) }, skipAuth: true };
+}
+
+/** Read the required `declineReason` parameter (API limit: 2000 characters). */
+export function requireDeclineReason(ctx: IExecuteFunctions, itemIndex: number): string {
+	const reason = String(ctx.getNodeParameter('declineReason', itemIndex, '') ?? '').trim();
+	if (!reason) {
+		throw new NodeOperationError(ctx.getNode(), 'Decline Reason is required', { itemIndex });
+	}
+	if ([...reason].length > 2000) {
+		throw new NodeOperationError(ctx.getNode(), 'Decline Reason must be at most 2000 characters', {
+			itemIndex,
+		});
+	}
+	return reason;
+}
+
 /**
  * Parse an n8n `json`-typed parameter that may arrive as a string or an already
  * parsed value. Throws a NodeOperationError naming the field when the string is

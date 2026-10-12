@@ -228,6 +228,39 @@ describe('shared/transport', () => {
 			}
 		});
 
+		it('surfaces the rate-limit headers once the 429 retry budget is spent', async () => {
+			const request = jest.fn().mockRejectedValue({
+				httpCode: 429,
+				response: {
+					headers: {
+						'x-rate-limit-limit': '120',
+						'X-Rate-Limit-Remaining': '0',
+						'x-rate-limit-reset': '42',
+						'retry-after': '0',
+					},
+				},
+			});
+			const error = await assinafyApiRequest(requestContext(request) as any, {
+				method: 'GET',
+				path: '/documents/doc_1',
+			}).catch((caught: unknown) => caught as NodeApiError);
+			expect(error).toBeInstanceOf(NodeApiError);
+			expect(error.description).toContain(
+				'Rate limited (X-Rate-Limit-Limit: 120, X-Rate-Limit-Remaining: 0, X-Rate-Limit-Reset: 42, Retry-After: 0).',
+			);
+		});
+
+		it('adds rate-limit details to an error n8n already wrapped', async () => {
+			const rateLimited = wrapped({
+				response: { status: 429, headers: { 'retry-after': '0', 'x-rate-limit-limit': '120' } },
+			});
+			const request = jest.fn().mockRejectedValue(rateLimited);
+			await expect(
+				assinafyApiRequest(requestContext(request) as any, { method: 'GET', path: '/x' }),
+			).rejects.toBe(rateLimited);
+			expect(rateLimited.description).toContain('X-Rate-Limit-Limit: 120, Retry-After: 0');
+		});
+
 		it('does not replay a mutating request after a non-429 failure', async () => {
 			const request = jest.fn().mockRejectedValue({ httpCode: 500 });
 			const ctx = requestContext(request);

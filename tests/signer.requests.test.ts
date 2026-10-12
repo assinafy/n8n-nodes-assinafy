@@ -22,6 +22,29 @@ describe('signer request construction', () => {
 		});
 	});
 
+	it('creates a signer with a sanitized government ID', async () => {
+		const { ctx, requests } = makeCtx({
+			fullName: 'Jane Doe',
+			additionalFields: { government_id: '390.533.447-05' },
+		});
+		await executeSigner.call(ctx as any, 0, 'create');
+		expect(lastAuth(requests).body).toEqual({ full_name: 'Jane Doe', government_id: '39053344705' });
+	});
+
+	it('uploadSignature accepts only PNG images', async () => {
+		const { ctx, requests } = makeCtx(
+			{ signerAccessCode: 'code123', signatureType: 'signature', binaryPropertyName: 'data' },
+			{
+				binaryBuffer: Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00]),
+				binaryMeta: { fileName: 'sig.jpg', mimeType: 'image/jpeg' },
+			},
+		);
+		await expect(executeSigner.call(ctx as any, 0, 'uploadSignature')).rejects.toThrow(
+			'Signature image must be PNG',
+		);
+		expect(requests).toHaveLength(0);
+	});
+
 	it('creates a contactless signer when only the required full name is supplied', async () => {
 		const { ctx, requests } = makeCtx({
 			fullName: ' No Contact ',
@@ -201,8 +224,26 @@ describe('signer request construction', () => {
 			full_name: 'Jane Doe',
 			email: 'jane@example.com',
 			government_id: '12345678900',
-			has_accepted_terms: true,
 		});
+		// A saved Accept Terms toggle is honored through the accept-terms route.
+		const publicCalls = requests.filter((r) => !r.auth).map((r) => r.options);
+		expect(publicCalls.map((o) => `${o.method} ${o.url}`)).toEqual([
+			`PUT ${BASE}/signers/accept-terms`,
+			`PUT ${BASE}/documents/doc_1/signers/confirm-data`,
+		]);
+		expect(requests.every((r) => !r.auth)).toBe(true);
+	});
+
+	it('confirmData rejects a saved WhatsApp number, which the route does not accept', async () => {
+		const { ctx, requests } = makeCtx({
+			signerAccessCode: 'code123',
+			confirmDocumentId: 'doc_1',
+			confirmFields: { whatsapp_phone_number: '+5548999990000' },
+		});
+		await expect(executeSigner.call(ctx as any, 0, 'confirmData')).rejects.toThrow(
+			'Confirm Data accepts only Full Name, Email and Government ID',
+		);
+		expect(requests).toHaveLength(0);
 	});
 
 	it('uploadSignature posts the image buffer with code, type, and reuse query', async () => {

@@ -196,6 +196,32 @@ describe('assignment request construction', () => {
 		expect(requests).toHaveLength(0);
 	});
 
+	it('clears the expiration by sending a JSON null', async () => {
+		const { ctx, requests } = makeCtx({
+			documentId: 'doc_1',
+			assignmentId: 'asg_1',
+			clearExpiration: true,
+			expiresAt: '2027-01-01T00:00:00Z',
+		});
+		await executeAssignment.call(ctx as any, 0, 'resetExpiration');
+		const req = lastAuth(requests);
+		expect(req.body).toEqual({ expires_at: null });
+		expect(JSON.stringify(req.body)).toBe('{"expires_at":null}');
+	});
+
+	it('rejects a decline reason over 2000 characters', async () => {
+		const { ctx, requests } = makeCtx({
+			documentId: 'doc_1',
+			assignmentId: 'asg_1',
+			signerAccessCode: 'code123',
+			declineReason: 'x'.repeat(2001),
+		});
+		await expect(executeAssignment.call(ctx as any, 0, 'decline')).rejects.toThrow(
+			'at most 2000 characters',
+		);
+		expect(requests).toHaveLength(0);
+	});
+
 	it('resends a notification to a signer', async () => {
 		const { ctx, requests } = makeCtx({
 			documentId: 'doc_1',

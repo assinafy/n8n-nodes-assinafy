@@ -209,6 +209,17 @@ describe('webhook request construction', () => {
 			expect(lastAuth(requests)).toMatchObject({ method, url: `${ENDPOINTS}/ep_1${suffix}` });
 		});
 
+		it.each(['getEndpointSecret', 'rotateEndpointSecret'])(
+			'%s refuses OAuth authentication before calling the API',
+			async (operation) => {
+				const { ctx, requests } = makeCtx({ authentication: 'oAuth2', endpointId: 'ep_1' });
+				await expect(executeWebhook.call(ctx as any, 0, operation)).rejects.toThrow(
+					'not available to OAuth applications',
+				);
+				expect(requests).toHaveLength(0);
+			},
+		);
+
 		it('deletes an endpoint and reports its ID', async () => {
 			const { ctx, requests } = makeCtx({ endpointId: 'ep_1' }, { response: [] });
 			const result = (await executeWebhook.call(ctx as any, 0, 'deleteEndpoint')) as any;

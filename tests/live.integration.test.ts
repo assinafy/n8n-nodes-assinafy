@@ -935,6 +935,27 @@ d('LIVE sandbox integration (real SDK code paths)', () => {
 				)) as any;
 				expect(reset.json).toEqual(expect.any(Object));
 
+				const cleared = (await executeAssignment.call(
+					liveCtx({ documentId, assignmentId, clearExpiration: true }),
+					0,
+					'resetExpiration',
+				)) as any;
+				expect(cleared.json.expires_at).toBeNull();
+
+				// The signer-document list also accepts the workspace credentials, but
+				// only when that mode is explicitly selected.
+				const workspaceView = (await executeSignerDocument.call(
+					liveCtx({
+						authenticateWith: 'workspaceCredentials',
+						signerId: signerIds[0],
+						returnAll: false,
+						limit: 100,
+					}),
+					0,
+					'list',
+				)) as any[];
+				expect(workspaceView.some((item) => item.json.id === documentId)).toBe(true);
+
 				const publicInfo = (await executeDocument.call(
 					liveCtx({ publicDocumentId: documentId }),
 					0,
@@ -942,7 +963,7 @@ d('LIVE sandbox integration (real SDK code paths)', () => {
 				)) as any;
 				expect(publicInfo.json.id).toBe(documentId);
 
-				// Public artifact route: the signer access code is optional here.
+				// Public artifact route: no credentials or access code are sent.
 				const signerCopy = (await executeSignerDocument.call(
 					liveCtx({
 						signerId: signerIds[0],
@@ -964,8 +985,11 @@ d('LIVE sandbox integration (real SDK code paths)', () => {
 					0,
 					'sendPublicToken',
 				)) as any;
-				expect(tokenDelivery.json).toEqual(expect.any(Object));
-				expect(Array.isArray(tokenDelivery.json)).toBe(false);
+				expect(tokenDelivery.json).toMatchObject({
+					channel: 'email',
+					recipient: TEST_EMAIL_PRIMARY,
+					document: { id: documentId },
+				});
 
 			} finally {
 				try {

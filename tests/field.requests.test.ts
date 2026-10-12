@@ -70,16 +70,54 @@ describe('field request construction', () => {
 		expect(req.qs).toBeUndefined();
 	});
 
-	it('validates with API-key auth while forwarding the optional signer access code', async () => {
+	it('ignores a leftover access code when workspace credentials are selected', async () => {
 		const { ctx, requests } = makeCtx({
 			fieldId: 'fld_1',
 			validateValue: 'hi',
 			signerAccessCode: 'code123',
 		});
 		await executeField.call(ctx as any, 0, 'validate');
-		const req = lastAuth(requests);
-		expect(req.qs).toEqual({ 'signer-access-code': 'code123' });
+		expect(requests).toHaveLength(1);
+		expect(lastAuth(requests).qs).toBeUndefined();
 	});
+
+	it.each(['validate', 'validateMultiple'])(
+		'%s with a signer access code sends only the code',
+		async (operation) => {
+			const { ctx, requests } = makeCtx(
+				{
+					authenticateWith: 'signerAccessCode',
+					signerAccessCode: ' code123 ',
+					fieldId: 'fld_1',
+					validateValue: 'hi',
+					validateItems: '[{"field_id":"fld_1","value":"x"}]',
+				},
+				{ response: operation === 'validate' ? { success: true } : [] },
+			);
+			await executeField.call(ctx as any, 0, operation);
+			expect(requests).toHaveLength(1);
+			expect(requests[0].auth).toBe(false);
+			expect(requests[0].options.qs).toEqual({ 'signer-access-code': 'code123' });
+			expect(requests[0].options.headers).not.toHaveProperty('X-Api-Key');
+		},
+	);
+
+	it.each(['validate', 'validateMultiple'])(
+		'%s rejects a blank signer access code instead of falling back to credentials',
+		async (operation) => {
+			const { ctx, requests } = makeCtx({
+				authenticateWith: 'signerAccessCode',
+				signerAccessCode: '  ',
+				fieldId: 'fld_1',
+				validateValue: 'hi',
+				validateItems: '[{"field_id":"fld_1","value":"x"}]',
+			});
+			await expect(executeField.call(ctx as any, 0, operation)).rejects.toThrow(
+				'Signer Access Code is required',
+			);
+			expect(requests).toHaveLength(0);
+		},
+	);
 
 	it('validates multiple values from a JSON array', async () => {
 		const { ctx, requests } = makeCtx(

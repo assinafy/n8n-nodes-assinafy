@@ -6,7 +6,7 @@ import type {
 } from 'n8n-workflow';
 import { NodeOperationError } from 'n8n-workflow';
 import { assinafyApiRequest, executeListOperation } from '../shared/transport';
-import { limitField, returnAllField } from '../shared/descriptions';
+import { authenticateWithField, limitField, returnAllField } from '../shared/descriptions';
 import {
 	asArray,
 	cleanQs,
@@ -14,6 +14,8 @@ import {
 	parseBinaryResponse,
 	parseStringList,
 	requireAccessCode,
+	requireDeclineReason,
+	resolveSignerRouteAuth,
 	showOnly as showOnlyFor,
 	wrap,
 } from '../shared/utils';
@@ -67,7 +69,11 @@ export const signerDocumentDescription: INodeProperties[] = [
 		displayOptions: { show: { ...showOnly(['list']), returnAll: [false] } },
 	},
 
-	// signer-link operations
+	// list/search accept either a signer access code or the workspace credentials
+	{
+		...authenticateWithField('signerAccessCode'),
+		displayOptions: { show: showOnly(['list', 'search']) },
+	},
 	{
 		displayName: 'Signer Access Code',
 		name: 'signerAccessCode',
@@ -75,9 +81,10 @@ export const signerDocumentDescription: INodeProperties[] = [
 		typeOptions: { password: true },
 		default: '',
 		required: true,
-		description: 'Per-signer access code (from the email/WhatsApp link)',
+		description:
+			'Per-signer access code (from the signer notification). Sent as the signer-access-code query parameter, without the API key or OAuth token.',
 		displayOptions: {
-			show: showOnly(['getCurrent', 'list', 'search', 'signMultiple', 'declineMultiple']),
+			show: showOnly(['getCurrent', 'signMultiple', 'declineMultiple']),
 		},
 	},
 	{
@@ -86,8 +93,12 @@ export const signerDocumentDescription: INodeProperties[] = [
 		type: 'string',
 		typeOptions: { password: true },
 		default: '',
-		description: 'Optional signer access code sent with the public artifact request',
-		displayOptions: { show: showOnly(['download']) },
+		required: true,
+		description:
+			'Per-signer access code (from the signer notification). Sent as the signer-access-code query parameter, without the API key or OAuth token.',
+		displayOptions: {
+			show: { ...showOnly(['list', 'search']), authenticateWith: ['signerAccessCode'] },
+		},
 	},
 
 	// shared signer id (except for sign/decline multiple which use a code-only path)
@@ -214,14 +225,14 @@ export async function executeSignerDocument(
 }
 
 async function searchDocuments(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject[]> {
-	const code = requireAccessCode(this, itemIndex);
+	const { qs, skipAuth } = resolveSignerRouteAuth(this, itemIndex, 'signerAccessCode');
 	const signerId = extractRequiredId(this, 'signerId', 'Signer ID', itemIndex);
 	const search = (this.getNodeParameter('search', itemIndex, '') as string).trim();
 	const response = await assinafyApiRequest<IDataObject[]>(this, {
 		method: 'GET',
 		path: `/signers/${signerId}/documents/search`,
-		qs: { 'signer-access-code': code, ...(search ? { search } : {}) },
-		skipAuth: true,
+		qs: { ...qs, ...(search ? { search } : {}) },
+		skipAuth,
 	});
 	return asArray<IDataObject>(response);
 }
@@ -241,14 +252,13 @@ async function listDocuments(
 	this: IExecuteFunctions,
 	itemIndex: number,
 ): Promise<INodeExecutionData[]> {
-	const code = requireAccessCode(this, itemIndex);
+	const { qs, skipAuth } = resolveSignerRouteAuth(this, itemIndex, 'signerAccessCode');
 	const signerId = extractRequiredId(this, 'signerId', 'Signer ID', itemIndex);
 	const filters = this.getNodeParameter('filters', itemIndex, {}) as IDataObject;
-	const qs = { 'signer-access-code': code, ...cleanQs(filters) };
 	return executeListOperation(this, itemIndex, {
 		path: `/signers/${signerId}/documents`,
-		qs,
-		skipAuth: true,
+		qs: { ...qs, ...cleanQs(filters) },
+		skipAuth,
 	});
 }
 
@@ -273,21 +283,13 @@ async function signMultiple(this: IExecuteFunctions, itemIndex: number): Promise
 async function declineMultiple(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const code = requireAccessCode(this, itemIndex);
 	const csv = this.getNodeParameter('documentIds', itemIndex) as string;
-	const reason = String(this.getNodeParameter('declineReason', itemIndex) ?? '').trim();
 	const ids = parseStringList(csv);
 	if (ids.length === 0) {
 		throw new NodeOperationError(this.getNode(), 'At least one document ID is required', {
 			itemIndex,
 		});
 	}
-	if (!reason) {
-		throw new NodeOperationError(this.getNode(), 'Decline Reason is required', { itemIndex });
-	}
-	if ([...reason].length > 2000) {
-		throw new NodeOperationError(this.getNode(), 'Decline Reason must be at most 2000 characters', {
-			itemIndex,
-		});
-	}
+	const reason = requireDeclineReason(this, itemIndex);
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'PUT',
 		path: '/signers/documents/decline-multiple',
@@ -298,7 +300,6 @@ async function declineMultiple(this: IExecuteFunctions, itemIndex: number): Prom
 }
 
 async function download(this: IExecuteFunctions, itemIndex: number): Promise<INodeExecutionData> {
-	const code = (this.getNodeParameter('signerAccessCode', itemIndex, '') as string).trim();
 	const signerId = extractRequiredId(this, 'signerId', 'Signer ID', itemIndex);
 	const documentId = extractRequiredId(this, 'documentId', 'Document ID', itemIndex);
 	const artifact = extractRequiredId(this, 'artifact', 'Artifact', itemIndex, 'certificated');
@@ -306,7 +307,6 @@ async function download(this: IExecuteFunctions, itemIndex: number): Promise<INo
 	const response = (await assinafyApiRequest<unknown>(this, {
 		method: 'GET',
 		path: `/signers/${signerId}/documents/${documentId}/download/${artifact}`,
-		qs: code ? { 'signer-access-code': code } : undefined,
 		returnBinary: true,
 		skipAuth: true,
 	})) as { body?: Buffer | ArrayBuffer; headers?: IDataObject };

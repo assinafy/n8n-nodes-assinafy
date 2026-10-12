@@ -6,11 +6,13 @@ import type {
 } from 'n8n-workflow';
 import { NodeOperationError } from 'n8n-workflow';
 import { assinafyApiRequest, getAccountId } from '../shared/transport';
+import { authenticateWithField } from '../shared/descriptions';
 import {
 	asArray,
 	cleanQs,
 	extractRequiredId,
 	parseJsonParam,
+	resolveSignerRouteAuth,
 	showOnly as showOnlyFor,
 	wrap,
 } from '../shared/utils';
@@ -151,14 +153,24 @@ export const fieldDescription: INodeProperties[] = [
 
 	// --- validate / validateMultiple shared ---
 	{
+		...authenticateWithField('workspaceCredentials'),
+		displayOptions: { show: showOnly(['validate', 'validateMultiple']) },
+	},
+	{
 		displayName: 'Signer Access Code',
 		name: 'signerAccessCode',
 		type: 'string',
 		typeOptions: { password: true },
 		default: '',
+		required: true,
 		description:
-			'Optional signer access code forwarded with the authenticated validation request',
-		displayOptions: { show: showOnly(['validate', 'validateMultiple']) },
+			'Per-signer access code for validation during signing. Sent as the signer-access-code query parameter, without the API key or OAuth token.',
+		displayOptions: {
+			show: {
+				...showOnly(['validate', 'validateMultiple']),
+				authenticateWith: ['signerAccessCode'],
+			},
+		},
 	},
 
 	// --- validate ---
@@ -168,7 +180,8 @@ export const fieldDescription: INodeProperties[] = [
 		type: 'string',
 		default: '',
 		required: true,
-		description: 'Value to validate against the field definition',
+		description:
+			'Value to validate against the field definition. Request body: { "value": "..." }. Response: { type, success, error_message }.',
 		displayOptions: { show: showOnly(['validate']) },
 	},
 
@@ -179,7 +192,8 @@ export const fieldDescription: INodeProperties[] = [
 		type: 'json',
 		default: '[]',
 		required: true,
-		description: 'Array of {field_id, value} objects: [{ "field_id": "...", "value": "..." }, ...]',
+		description:
+			'Request body: [{ "field_id": "...", "value": "..." }, ...]. Response: one { field_id, type, success, error_message } per entry, returned as { results: [...] }.',
 		displayOptions: { show: showOnly(['validateMultiple']) },
 	},
 ];
@@ -280,11 +294,12 @@ async function validateField(this: IExecuteFunctions, itemIndex: number): Promis
 	const accountId = await getAccountId(this);
 	const fieldId = extractRequiredId(this, 'fieldId', 'Field ID', itemIndex);
 	const value = this.getNodeParameter('validateValue', itemIndex) as string;
-	const signerCode = (this.getNodeParameter('signerAccessCode', itemIndex, '') as string).trim();
+	const { qs, skipAuth } = resolveSignerRouteAuth(this, itemIndex, 'workspaceCredentials');
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'POST',
 		path: `/accounts/${accountId}/fields/${fieldId}/validate`,
-		qs: signerCode ? { 'signer-access-code': signerCode } : undefined,
+		qs,
+		skipAuth,
 		body: { value },
 	});
 }
@@ -294,7 +309,7 @@ async function validateMultiple(
 	itemIndex: number,
 ): Promise<IDataObject[]> {
 	const accountId = await getAccountId(this);
-	const signerCode = (this.getNodeParameter('signerAccessCode', itemIndex, '') as string).trim();
+	const { qs, skipAuth } = resolveSignerRouteAuth(this, itemIndex, 'workspaceCredentials');
 	const raw = this.getNodeParameter('validateItems', itemIndex, '[]') as unknown;
 	const items = parseJsonParam(this, raw, 'Items', itemIndex);
 	if (!Array.isArray(items) || items.length === 0) {
@@ -305,7 +320,8 @@ async function validateMultiple(
 	const response = await assinafyApiRequest<IDataObject[]>(this, {
 		method: 'POST',
 		path: `/accounts/${accountId}/fields/validate-multiple`,
-		qs: signerCode ? { 'signer-access-code': signerCode } : undefined,
+		qs,
+		skipAuth,
 		body: items as IDataObject[],
 	});
 	return asArray<IDataObject>(response);

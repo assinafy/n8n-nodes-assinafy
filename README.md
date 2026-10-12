@@ -140,7 +140,7 @@ After an uncertain Upload or Create Assignment result, reconcile the saved docum
 - Binary downloads emit one item with JSON metadata and the file in the selected binary property.
 - **Get Signing Progress** sets `available: false` and returns null counts when the document response does not include assignment details; it never reports a synthetic `0/0` as known progress.
 - OAuth code exchange, refresh, and revocation are never automatically retried. HTTP requests have a 30-second timeout.
-- HTTP 429 responses are retried with a bounded budget for every method, honoring `Retry-After`. A rate limit is refused before the request is handled, so replaying it cannot duplicate a document, signer, assignment, notification, or webhook action. Every other failure is surfaced after a single attempt, because an ambiguous response may mean the mutation was applied.
+- HTTP 429 responses are retried with a bounded budget for every method, honoring `Retry-After`. A rate limit is refused before the request is handled, so replaying it cannot duplicate a document, signer, assignment, notification, or webhook action. When the retries are exhausted, the error lists the `X-Rate-Limit-*` and `Retry-After` values. Every other failure is surfaced after a single attempt, because an ambiguous response may mean the mutation was applied.
 
 ## Assinafy Trigger
 
@@ -188,7 +188,7 @@ Drive these operations only when a code enters the workflow through a step you c
 | Estimate Cost From Template | `POST /accounts/{accountId}/templates/{templateId}/documents/estimate-cost`                                   |
 | Verify                      | `GET /documents/{hash}/verify` — public; verifies a certificated document by its signature hash               |
 | Get Public Info             | `GET /public/documents/{id}` — public                                                                         |
-| Send Public Token           | `PUT /public/documents/{id}/send-token` — emails/whatsapps the 6-digit access token                           |
+| Send Public Token           | `PUT /public/documents/{id}/send-token` — emails a one-time access token to a pending signer (email channel only) |
 | List Statuses               | `GET /documents/statuses` — enumerates document status codes and deletability                                 |
 | List Tags                   | `GET /accounts/{accountId}/documents/{documentId}/tags`                                                       |
 | Replace Tags                | `PUT /accounts/{accountId}/documents/{documentId}/tags`                                                       |
@@ -222,7 +222,7 @@ Signer creation follows the published request body: only **Full Name** is requir
 | --------------------------- | ------------------------------------------------------------------------------------------------- |
 | Create                      | `POST /documents/{documentId}/assignments`                                                        |
 | Estimate Cost               | `POST /documents/{documentId}/assignments/estimate-cost`                                          |
-| Reset Expiration            | `PUT /documents/{documentId}/assignments/{assignmentId}/reset-expiration`                         |
+| Reset Expiration            | `PUT /documents/{documentId}/assignments/{assignmentId}/reset-expiration` — new date, or Remove Expiration sends `null` |
 | Resend Notification         | `PUT /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/resend`                |
 | Estimate Resend Cost        | `POST /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/estimate-resend-cost` |
 | List WhatsApp Notifications | `GET /documents/{documentId}/assignments/{assignmentId}/whatsapp-notifications`                   |
@@ -262,8 +262,8 @@ Tags are workspace-scoped labels. They can be managed directly through the Tag r
 | Get               | `GET /accounts/{accountId}/fields/{fieldId}`                                         |
 | Update            | `PUT /accounts/{accountId}/fields/{fieldId}`                                         |
 | Delete            | `DELETE /accounts/{accountId}/fields/{fieldId}`                                      |
-| Validate          | `POST /accounts/{accountId}/fields/{fieldId}/validate` — supports signer-access-code |
-| Validate Multiple | `POST /accounts/{accountId}/fields/validate-multiple` — supports signer-access-code  |
+| Validate          | `POST /accounts/{accountId}/fields/{fieldId}/validate` — workspace credentials, or only a signer access code via Authenticate With |
+| Validate Multiple | `POST /accounts/{accountId}/fields/validate-multiple` — workspace credentials, or only a signer access code via Authenticate With |
 | List Types        | `GET /field-types`                                                                   |
 
 ### Resource: Signer Document (Signer Side)
@@ -273,11 +273,11 @@ These signer-link endpoints do not use the workspace API key. Get Current, List,
 | Operation        | Endpoint                                                                                            |
 | ---------------- | --------------------------------------------------------------------------------------------------- |
 | Get Current      | `GET /signers/{signerId}/document?signer-access-code=…`                                             |
-| List             | `GET /signers/{signerId}/documents?signer-access-code=…`                                            |
-| Search           | `GET /signers/{signerId}/documents/search?signer-access-code=…&search=…`                            |
+| List             | `GET /signers/{signerId}/documents` — signer access code, or workspace credentials via Authenticate With |
+| Search           | `GET /signers/{signerId}/documents/search?search=…` — signer access code, or workspace credentials via Authenticate With |
 | Sign Multiple    | `PUT /signers/documents/sign-multiple?signer-access-code=…`                                         |
 | Decline Multiple | `PUT /signers/documents/decline-multiple?signer-access-code=…`                                      |
-| Download         | `GET /signers/{signerId}/documents/{documentId}/download/{artifact}` — public; optional access code |
+| Download         | `GET /signers/{signerId}/documents/{documentId}/download/{artifact}` — public; no credentials or access code |
 
 Signer-side Download supports the same `original`, `certificated`, `certificate-page`, `pades`, and `bundle` artifacts as the authenticated document download. List supports pagination plus `status`, `method`, `search`, and `sort` filters.
 

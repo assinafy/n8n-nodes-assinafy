@@ -7,7 +7,13 @@ import type {
 	JsonObject,
 } from 'n8n-workflow';
 import { NodeApiError, NodeOperationError } from 'n8n-workflow';
-import { assinafyApiRequest, executeListOperation, getAccountId } from '../shared/transport';
+import {
+	assinafyApiRequest,
+	DELEGATED_CREDENTIAL_TYPE,
+	executeListOperation,
+	getAccountId,
+	getCredentialsType,
+} from '../shared/transport';
 import { limitField, returnAllField } from '../shared/descriptions';
 import { DEFAULT_WEBHOOK_EVENTS, WEBHOOK_EVENT_OPTIONS } from './webhookEvents';
 import {
@@ -258,12 +264,14 @@ export const webhookDescription: INodeProperties[] = [
 				displayName: 'From (Unix Timestamp)',
 				name: 'from',
 				type: 'number',
+				typeOptions: { minValue: 0, numberPrecision: 0 },
 				default: 0,
 			},
 			{
 				displayName: 'To (Unix Timestamp)',
 				name: 'to',
 				type: 'number',
+				typeOptions: { minValue: 0, numberPrecision: 0 },
 				default: 0,
 			},
 		],
@@ -319,11 +327,20 @@ export async function executeWebhook(
 			return wrap({ deleted: true, id: decodeURIComponent(path.slice(1)) });
 		}
 		case 'getEndpointSecret':
-			return wrap(await endpointRequest(this, 'GET', `${endpointPath(this, itemIndex)}/secret`));
 		case 'rotateEndpointSecret':
-			return wrap(
-				await endpointRequest(this, 'POST', `${endpointPath(this, itemIndex)}/secret/rotate`),
-			);
+			if (getCredentialsType(this) === DELEGATED_CREDENTIAL_TYPE) {
+				throw new NodeOperationError(
+					this.getNode(),
+					'Endpoint signing secrets are not available to OAuth applications; use API Key authentication',
+					{ itemIndex },
+				);
+			}
+			if (operation === 'rotateEndpointSecret') {
+				return wrap(
+					await endpointRequest(this, 'POST', `${endpointPath(this, itemIndex)}/secret/rotate`),
+				);
+			}
+			return wrap(await endpointRequest(this, 'GET', `${endpointPath(this, itemIndex)}/secret`));
 		default:
 			throw new NodeOperationError(this.getNode(), `Unknown webhook operation: ${operation}`, {
 				itemIndex,

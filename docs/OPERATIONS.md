@@ -45,7 +45,7 @@ The API error families are validation, unauthorized, not found, and server error
 }
 ```
 
-Requests have a 30-second timeout. HTTP 429 responses are retried at most three times, honoring `Retry-After` up to 30 seconds and otherwise using bounded exponential backoff. Other failures are not retried. OAuth code exchange, refresh, and revocation are never automatically replayed, including after HTTP 429 and including the refresh n8n performs for the OAuth2 credential. Avoid workflow-level retries of single-use tokens or mutations whose outcome is unknown.
+Requests have a 30-second timeout. HTTP 429 responses are retried at most three times, honoring `Retry-After` up to 30 seconds and otherwise using bounded exponential backoff. When the retries are exhausted, the error description lists the response's `X-Rate-Limit-Limit`, `X-Rate-Limit-Remaining`, `X-Rate-Limit-Reset` and `Retry-After` values. Other failures are not retried. OAuth code exchange, refresh, and revocation are never automatically replayed, including after HTTP 429 and including the refresh n8n performs for the OAuth2 credential. Avoid workflow-level retries of single-use tokens or mutations whose outcome is unknown.
 
 Binary endpoints do not use the JSON envelope in the node output. Their bytes are written to the configured n8n binary property and the JSON side contains only file metadata. Multipart endpoints describe their form parts rather than pretending they have a JSON request body.
 
@@ -744,25 +744,25 @@ The node returns the unwrapped document information without reshaping it. The pa
 }
 ```
 
-#### Send a 6 digit access token to a signer via email or whatsapp
+#### Email a one time access token to a pending signer
 
-Sends a 6-digit signing access token to a recipient. Public endpoint — no API key is sent. The recipient must already be assigned to the document. Email delivery uses the API's `email` request field. Existing WhatsApp workflows retain the `recipient` and `channel` request fields.
+Emails a one-time access token to a signer of a public document so they can view it. Public endpoint — no API key or OAuth token is sent. The document must be pending signature, and the recipient must be the email address of a signer who has not signed yet. The API supports only the `email` channel; a workflow saved with the former WhatsApp channel fails before any request with an error asking to switch Channel to Email.
 
 **Endpoint:** `PUT /public/documents/{publicDocumentId}/send-token`
 
 **Node parameters:**
 
 - Document ID — string — required — public document ID.
-- Recipient — string — required — email or WhatsApp phone number, matching Channel.
-- Channel — options — required — `email` or `whatsapp` (default `email`).
+- Recipient — string — required — the signer's email address.
+- Channel — options — `email` (the only value the API accepts; default `email`).
 
 **Example request:**
 
 ```json
-{ "email": "signer@example.com" }
+{ "channel": "email", "recipient": "signer@example.com" }
 ```
 
-For an existing WhatsApp workflow, the node sends `{ "recipient": "<telephone>", "channel": "whatsapp" }`.
+**Errors:** `400` when the document is not pending signature or the recipient is not a pending signer; `404` when the document does not exist.
 
 **Example response:**
 
@@ -945,9 +945,10 @@ Creates a signer in the account. Only `full_name` is required; email and WhatsAp
 - Email — string — optional — signer email.
 - Additional Fields — collection — optional:
   - Reuse If Exists — boolean (default `true`) — when true and an email is provided, looks up an existing signer with that email and returns it instead of creating a duplicate.
+  - Government ID — string — CPF or CNPJ, sent as `government_id` with non-digits stripped; required later for Digital Certificate verification.
   - WhatsApp Phone Number — string — E.164 format (e.g. `+55` followed by the area code and subscriber number).
 
-Signer Create sends only `full_name`, `email`, and `whatsapp_phone_number`. CPF/CNPJ is set later through Signer Update as `government_id`; create-time `cpf` and `metadata` keys are not sent.
+Signer Create sends `full_name`, `email`, `whatsapp_phone_number` and `government_id`; create-time `cpf` and `metadata` keys are not sent.
 
 **Example request:**
 
@@ -1232,7 +1233,7 @@ Signer-side flow: verifies the OTP delivered to the signer (via email or WhatsAp
 
 #### Signer confirms identity data before signing
 
-Signer-side flow: confirms the signer's identity data for a specific document before signing. The node can send full name, email, government ID, WhatsApp number, and `has_accepted_terms: true`. Digital-certificate signers must accept terms before opening the sign page. The access code is sent as a query parameter and only selected fields are included in the JSON body. The dedicated **Accept Terms** operation is also available.
+Signer-side flow: confirms the signer's identity data for a specific document before signing. The request body accepts `full_name`, `email` and `government_id`; only selected fields are sent. Digital-certificate signers must accept terms before opening the sign page: use the **Accept Terms** operation. A workflow saved with the former Accept Terms toggle enabled calls `PUT /signers/accept-terms` first; one saved with a WhatsApp number fails before any request (update the number with **Signer → Update**). The access code is sent as a query parameter.
 
 **Endpoint:** `PUT /documents/{documentId}/signers/confirm-data`
 
@@ -1244,8 +1245,6 @@ Signer-side flow: confirms the signer's identity data for a specific document be
   - Full Name — string — optional — sent as `full_name`.
   - Email — string — optional — sent as `email`; must match an existing email if already set.
   - Government ID — string — optional — sent as `government_id`.
-  - WhatsApp Phone Number — string — optional — sent as `whatsapp_phone_number` in E.164 format.
-  - Accept Terms — boolean — optional — sends `has_accepted_terms: true` only when enabled.
 
 **Example request:**
 
@@ -1275,7 +1274,7 @@ Signer-side flow: confirms the signer's identity data for a specific document be
 
 #### Upload a signer signature or initial image
 
-Signer-side flow: uploads the signer's signature or initials image as the raw request body. The node accepts a non-empty PNG or JPEG and rejects contradictory or unsupported MIME types. A missing or generic `application/octet-stream` MIME type is accepted only when PNG/JPEG magic bytes identify an allowed image. The access code, signature `type`, and optional `reuse` preference are query parameters.
+Signer-side flow: uploads the signer's signature or initials image as the raw request body. The API accepts `image/png`; the node requires a non-empty PNG and rejects other or contradictory MIME types. A missing or generic `application/octet-stream` MIME type is accepted only when the PNG signature bytes are present. The access code, signature `type`, and optional `reuse` preference are query parameters.
 
 **Endpoint:** `POST /signature`
 
@@ -1283,7 +1282,7 @@ Signer-side flow: uploads the signer's signature or initials image as the raw re
 
 - Signer Access Code — string (password) — required — per-signer access code.
 - Signature Type — options (`signature` | `initial`, default `signature`) — which image is being uploaded.
-- Binary Property — string (default `data`) — required — name of the binary property on the incoming item holding the PNG/JPEG image.
+- Binary Property — string (default `data`) — required — name of the binary property on the incoming item holding the PNG image.
 - Signature Options > Reuse in Future Processes — boolean — optional — sends `reuse=true` or `reuse=false` when present; omit the option to preserve the existing preference.
 
 **Example request (query + raw image body):**
@@ -1292,7 +1291,7 @@ Signer-side flow: uploads the signer's signature or initials image as the raw re
 {
 	"query": { "signer-access-code": "<signer-access-code>", "type": "signature", "reuse": true },
 	"headers": { "Content-Type": "image/png" },
-	"body": "<raw PNG/JPEG bytes>"
+	"body": "<raw PNG bytes>"
 }
 ```
 
@@ -1614,7 +1613,7 @@ Estimates the credit cost of resending a notification to one signer without rese
 
 #### Signer reads document data for the signing flow
 
-Signer-side read: retrieves the document and embedded assignment details using only a per-signer access code (no account auth). The SDK calls this with `skipAuth`. For `DigitalCertificate`, first confirm the signer data and accept terms through **Confirm Data** with `has_accepted_terms: true`, or call **Accept Terms** separately; otherwise this route returns 400. Its own `has_accepted_terms` query parameter is processed too late to open that DC gate.
+Signer-side read: retrieves the document and embedded assignment details using only a per-signer access code (no account auth). The SDK calls this with `skipAuth`. For `DigitalCertificate`, first confirm the signer data with **Confirm Data** and accept terms with **Accept Terms**; otherwise this route returns 400. Its own `has_accepted_terms` query parameter is processed too late to open that DC gate.
 
 **Endpoint:** `GET /sign`
 
@@ -1781,7 +1780,7 @@ Resends the signing-request notification (link) to one signer, using the notific
 
 #### Update the expiration date of an assignment
 
-Sets a new expiration date for an assignment.
+Sets a new expiration date for an assignment, or removes it. `expires_at` is always sent: a date at least one hour in the future, or `null` to clear the expiration.
 
 **Endpoint:** `PUT /documents/{documentId}/assignments/{assignmentId}/reset-expiration`
 
@@ -1789,7 +1788,8 @@ Sets a new expiration date for an assignment.
 
 - Document — resource locator — required.
 - Assignment ID — string — required.
-- Expires At — dateTime — required — new ISO8601 expiration date.
+- Remove Expiration — boolean — optional (default `false`) — sends `{ "expires_at": null }` so the assignment no longer expires.
+- Expires At — dateTime — required unless Remove Expiration is enabled — new ISO 8601 expiration date.
 
 **Example request:**
 
@@ -1798,6 +1798,8 @@ Sets a new expiration date for an assignment.
 	"expires_at": "2030-08-03T21:00:00Z"
 }
 ```
+
+With Remove Expiration enabled the body is `{ "expires_at": null }` and the response has `"expires_at": null`.
 
 **Example response:**
 
@@ -2422,14 +2424,15 @@ Updates one or more attributes of an existing field definition. At least one upd
 
 #### Validate a value against a field definition
 
-Validates a single value against a field definition using the configured account authentication. A signer access code may additionally be sent as the `signer-access-code` query parameter; providing it does not remove the configured API authentication.
+Validates a single value against a field definition. **Authenticate With** selects the credentials explicitly: **Workspace Credentials** (default) sends the selected Assinafy credential; **Signer Access Code** sends only the code as the `signer-access-code` query parameter, with no API key or OAuth token, and rejects a blank code. The Account ID in the path still comes from the credential.
 
 **Endpoint:** `POST /accounts/{accountId}/fields/{fieldId}/validate`
 
 **Node parameters:**
 
 - Field ID — string — required — ID of the field definition to validate against.
-- Signer Access Code — string (password) — optional — adds signer context through the query string.
+- Authenticate With — options — `workspaceCredentials` (default) or `signerAccessCode`.
+- Signer Access Code — string (password) — required when Authenticate With is Signer Access Code.
 - Value — string — required — Value to validate against the field definition.
 
 **Example request:**
@@ -2440,7 +2443,7 @@ Validates a single value against a field definition using the configured account
 }
 ```
 
-When supplied, the access code is appended as `?signer-access-code=<signer-access-code>` while account authentication is retained.
+In Signer Access Code mode the request is `POST …/validate?signer-access-code=<signer-access-code>` without credentials.
 
 **Example response:**
 
@@ -2454,13 +2457,14 @@ When supplied, the access code is appended as `?signer-access-code=<signer-acces
 
 #### Validate multiple values at once
 
-Validates multiple `{field_id, value}` pairs in a single request. It uses the same authenticated request plus optional `signer-access-code` behavior as Validate. The node returns the results wrapped under a `results` key.
+Validates multiple `{field_id, value}` pairs in a single request. It uses the same **Authenticate With** choice as Validate. The node returns the results wrapped under a `results` key.
 
 **Endpoint:** `POST /accounts/{accountId}/fields/validate-multiple`
 
 **Node parameters:**
 
-- Signer Access Code — string (password) — optional — adds signer context through the query string.
+- Authenticate With — options — `workspaceCredentials` (default) or `signerAccessCode`.
+- Signer Access Code — string (password) — required when Authenticate With is Signer Access Code.
 - Items (JSON) — json — required — Array of `{ "field_id": "...", "value": "..." }` objects (must be a non-empty array).
 
 **Example request:**
@@ -2472,7 +2476,7 @@ Validates multiple `{field_id, value}` pairs in a single request. It uses the sa
 ]
 ```
 
-When supplied, the access code is appended as `?signer-access-code=<signer-access-code>` and account authentication is retained. The request body is the bare JSON array (not wrapped in an object).
+The request body is the bare JSON array (not wrapped in an object).
 
 **Example response:**
 
@@ -2613,7 +2617,7 @@ Stops delivering events to the endpoint and frees its slot.
 
 #### Get Endpoint Signing Secret
 
-Returns the secret used to sign deliveries to the endpoint. Returns `400` when signing is disabled. Not available to OAuth applications.
+Returns the secret used to sign deliveries to the endpoint. Returns `400` when signing is disabled. Not available to OAuth applications; with OAuth2 authentication the node fails before sending the request.
 
 **Endpoint:** `GET /accounts/{accountId}/webhooks/endpoints/{endpointId}/secret`
 
@@ -2629,7 +2633,7 @@ The output is a credential; keep it out of logs and shared executions.
 
 #### Rotate Endpoint Signing Secret
 
-Replaces the secret and returns the new one. The old secret stops working immediately; deliveries after the rotation are signed only with the new secret. Returns `400` when signing is disabled. Not available to OAuth applications.
+Replaces the secret and returns the new one. The old secret stops working immediately; deliveries after the rotation are signed only with the new secret. Returns `400` when signing is disabled. Not available to OAuth applications; with OAuth2 authentication the node fails before sending the request.
 
 **Endpoint:** `POST /accounts/{accountId}/webhooks/endpoints/{endpointId}/secret/rotate`
 
@@ -3015,7 +3019,7 @@ The trigger resolves `event` from `body.event` (or `body.type`), redacts authent
 
 ### Signer Document (signer-side)
 
-Signer-link operations never send the workspace API key (`skipAuth`). Get Current, List, Search, Sign Multiple, and Decline Multiple require the per-signer access code from the email/WhatsApp link as the `signer-access-code` query parameter. Download is public; its optional access code is omitted when blank.
+Get Current, Sign Multiple and Decline Multiple require the per-signer access code as the `signer-access-code` query parameter and never send the API key or OAuth token. List and Search accept either credential, chosen explicitly with **Authenticate With**: **Signer Access Code** (default) sends only the code and rejects a blank one; **Workspace Credentials** sends the selected Assinafy credential, and the signer must belong to that workspace. Download is a public route and sends neither credentials nor an access code.
 
 #### Signer reads the document tied to the active access code
 
@@ -3095,7 +3099,8 @@ Lists the documents visible to the signer and returns one n8n item per document.
 
 **Node parameters:**
 
-- Signer Access Code — string (password) — required — per-signer access code.
+- Authenticate With — options — `signerAccessCode` (default) or `workspaceCredentials`.
+- Signer Access Code — string (password) — required when Authenticate With is Signer Access Code.
 - Signer ID — string — required — the signer ID.
 - Return All — boolean — optional — fetch every response page.
 - Limit — number — optional (shown when Return All is off) — maximum documents to return.
@@ -3180,13 +3185,14 @@ Lists the documents visible to the signer and returns one n8n item per document.
 
 #### Search signer-visible documents
 
-Performs the dedicated lightweight search for documents visible to one signer. The access code authorizes the signer-facing route; the search term is optional. The node emits one n8n item per result.
+Performs the dedicated lightweight search for documents visible to one signer. The access code, or the workspace credentials when explicitly selected, authorizes the route; the search term is optional. The node emits one n8n item per result.
 
 **Endpoint:** `GET /signers/{signerId}/documents/search`
 
 **Node parameters:**
 
-- Signer Access Code — string (password) — required — per-signer code from the email/WhatsApp link.
+- Authenticate With — options — `signerAccessCode` (default) or `workspaceCredentials`.
+- Signer Access Code — string (password) — required when Authenticate With is Signer Access Code.
 - Signer ID — string — required — signer whose visible documents are searched.
 - Search — string — optional — text matched by the API against signer-visible documents.
 
@@ -3285,25 +3291,18 @@ Query: `?signer-access-code=<signer-access-code>`
 
 #### Signer downloads a document artifact
 
-Downloads one artifact of a signer's document as a binary file. This public route has no required security parameter.
+Downloads one artifact of a signer's document as a binary file. This is a public route: the node sends neither credentials nor an access code.
 
 **Endpoint:** `GET /signers/{signerId}/documents/{documentId}/download/{artifact}`
 
 **Node parameters:**
 
-- Signer Access Code — string (password) — optional — sent as `signer-access-code` only when supplied.
 - Signer ID — string — required — the signer ID.
 - Document ID — string — required — the document ID.
 - Artifact — options — optional — defaults to `certificated`. One of `original` (Original / Uploaded File), `certificated` (Certificated / Signed PDF), `certificate-page` (Certificate Page), `pades` (Digital Certificate PDF), or `bundle` (Bundle / ZIP). `pades` contains the signers' ICP-Brasil signatures plus the platform certification box and exists only for documents with digital-certificate signers.
 - Put Output In Field — string — optional — name of the binary output property (defaults to `data`).
 
-**Example request:** no query is required. An access code may be supplied:
-
-```json
-{
-	"signer-access-code": "<signer-access-code>"
-}
-```
+**Example request:** no query string and no body.
 
 **Example response:** binary output (no JSON payload). The artifact bytes are placed in the configured binary property (default `data`). The MIME type is taken from the response `Content-Type`; the fallback is `application/zip` for `bundle` and `application/pdf` otherwise. A bundle contains `original`, `certificated`, and `certificate-page`, plus `pades` when present. The file is named `{documentId}-{artifact}.zip` for `bundle` or `{documentId}-{artifact}.pdf` otherwise. The item's `json` carries metadata only:
 

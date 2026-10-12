@@ -193,3 +193,19 @@ export const sortField: INodeProperties = {
 	placeholder: 'e.g. -created_at',
 	description: 'Sort expression (prefix with `-` for descending)',
 };
+
+/** Explicit credential choice for routes that accept a signer access code or workspace credentials. */
+export const authenticateWithField = (
+	defaultMode: 'signerAccessCode' | 'workspaceCredentials',
+): INodeProperties => ({
+	displayName: 'Authenticate With',
+	name: 'authenticateWith',
+	type: 'options',
+	default: defaultMode,
+	description:
+		'Signer Access Code sends only the code (no API key or OAuth token). Workspace Credentials sends the selected Assinafy credential instead.',
+	options: [
+		{ name: 'Signer Access Code', value: 'signerAccessCode' },
+		{ name: 'Workspace Credentials', value: 'workspaceCredentials' },
+	],
+});

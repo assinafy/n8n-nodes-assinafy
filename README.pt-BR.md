@@ -142,7 +142,7 @@ Se o resultado de Upload ou Create Assignment for incerto, consulte os registros
 - Downloads binários geram um item com metadados JSON e o arquivo na propriedade binária selecionada.
 - **Get Signing Progress** define `available: false` e retorna contagens nulas quando a resposta do documento não inclui os detalhes da solicitação de assinatura; nunca apresenta um `0/0` inventado como progresso conhecido.
 - A troca de código, a renovação e a revogação de tokens OAuth nunca são repetidas automaticamente. As requisições HTTP têm um tempo limite de 30 segundos.
-- Respostas HTTP 429 são repetidas com um limite de tentativas para todos os métodos, respeitando `Retry-After`. A limitação de taxa recusa a requisição antes do processamento; repetir essa requisição não duplica documentos, signatários, solicitações de assinatura, notificações ou ações de webhook. Qualquer outra falha é devolvida após uma única tentativa, pois uma resposta ambígua pode indicar que a alteração já foi aplicada.
+- Respostas HTTP 429 são repetidas com um limite de tentativas para todos os métodos, respeitando `Retry-After`. A limitação de taxa recusa a requisição antes do processamento; repetir essa requisição não duplica documentos, signatários, solicitações de assinatura, notificações ou ações de webhook. Esgotadas as tentativas, o erro informa os valores de `X-Rate-Limit-*` e `Retry-After`. Qualquer outra falha é devolvida após uma única tentativa, pois uma resposta ambígua pode indicar que a alteração já foi aplicada.
 
 ## Assinafy Trigger
 
@@ -191,7 +191,7 @@ Execute essas operações somente quando o código chegar ao fluxo por uma etapa
 | Estimate Cost From Template | `POST /accounts/{accountId}/templates/{templateId}/documents/estimate-cost` |
 | Verify | `GET /documents/{hash}/verify` — público; verifica um documento certificado pelo hash da assinatura |
 | Get Public Info | `GET /public/documents/{id}` — público |
-| Send Public Token | `PUT /public/documents/{id}/send-token` — envia o token de acesso de 6 dígitos por e-mail/WhatsApp |
+| Send Public Token | `PUT /public/documents/{id}/send-token` — envia por e-mail um token de acesso de uso único a um signatário pendente (somente canal e-mail) |
 | List Statuses | `GET /documents/statuses` — lista os códigos de status e a possibilidade de exclusão |
 | List Tags | `GET /accounts/{accountId}/documents/{documentId}/tags` |
 | Replace Tags | `PUT /accounts/{accountId}/documents/{documentId}/tags` |
@@ -225,7 +225,7 @@ O cadastro de signatário segue o corpo de requisição publicado: apenas **Full
 | --- | --- |
 | Create | `POST /documents/{documentId}/assignments` |
 | Estimate Cost | `POST /documents/{documentId}/assignments/estimate-cost` |
-| Reset Expiration | `PUT /documents/{documentId}/assignments/{assignmentId}/reset-expiration` |
+| Reset Expiration | `PUT /documents/{documentId}/assignments/{assignmentId}/reset-expiration` — nova data, ou Remove Expiration envia `null` |
 | Resend Notification | `PUT /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/resend` |
 | Estimate Resend Cost | `POST /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/estimate-resend-cost` |
 | List WhatsApp Notifications | `GET /documents/{documentId}/assignments/{assignmentId}/whatsapp-notifications` |
@@ -265,8 +265,8 @@ As tags são etiquetas do workspace. Você pode gerenciá-las pelo recurso Tag e
 | Get | `GET /accounts/{accountId}/fields/{fieldId}` |
 | Update | `PUT /accounts/{accountId}/fields/{fieldId}` |
 | Delete | `DELETE /accounts/{accountId}/fields/{fieldId}` |
-| Validate | `POST /accounts/{accountId}/fields/{fieldId}/validate` — aceita signer-access-code |
-| Validate Multiple | `POST /accounts/{accountId}/fields/validate-multiple` — aceita signer-access-code |
+| Validate | `POST /accounts/{accountId}/fields/{fieldId}/validate` — credenciais do workspace, ou somente o código de acesso do signatário via Authenticate With |
+| Validate Multiple | `POST /accounts/{accountId}/fields/validate-multiple` — credenciais do workspace, ou somente o código de acesso do signatário via Authenticate With |
 | List Types | `GET /field-types` |
 
 ### Recurso: Signer Document (documentos do signatário — Signer Side)
@@ -276,11 +276,11 @@ Esses endpoints acessados pelo link do signatário não usam a chave de API do w
 | Operação | Endpoint |
 | --- | --- |
 | Get Current | `GET /signers/{signerId}/document?signer-access-code=…` |
-| List | `GET /signers/{signerId}/documents?signer-access-code=…` |
-| Search | `GET /signers/{signerId}/documents/search?signer-access-code=…&search=…` |
+| List | `GET /signers/{signerId}/documents` — código de acesso do signatário, ou credenciais do workspace via Authenticate With |
+| Search | `GET /signers/{signerId}/documents/search?search=…` — código de acesso do signatário, ou credenciais do workspace via Authenticate With |
 | Sign Multiple | `PUT /signers/documents/sign-multiple?signer-access-code=…` |
 | Decline Multiple | `PUT /signers/documents/decline-multiple?signer-access-code=…` |
-| Download | `GET /signers/{signerId}/documents/{documentId}/download/{artifact}` — público; código de acesso opcional |
+| Download | `GET /signers/{signerId}/documents/{documentId}/download/{artifact}` — público; sem credenciais nem código de acesso |
 
 O Download do signatário aceita os mesmos artefatos `original`, `certificated`, `certificate-page`, `pades` e `bundle` do download autenticado de documentos. List oferece paginação e filtros por `status`, `method`, `search` e `sort`.
 

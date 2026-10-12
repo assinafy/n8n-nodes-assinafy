@@ -49,6 +49,43 @@ describe('signerDocument request construction (signer-side, no auth)', () => {
 		expect(result[0].json).toEqual({ id: 'd1' });
 	});
 
+	it.each(['list', 'search'])(
+		'%s uses workspace credentials only when explicitly selected',
+		async (operation) => {
+			const { ctx, requests } = makeCtx(
+				{
+					authenticateWith: 'workspaceCredentials',
+					signerAccessCode: 'code123',
+					signerId: 'sig_1',
+					search: 'contract',
+					returnAll: false,
+					limit: 10,
+				},
+				{ response: [{ id: 'd1' }] },
+			);
+			await executeSignerDocument.call(ctx as any, 0, operation);
+			expect(requests).toHaveLength(1);
+			expect(requests[0].auth).toBe(true);
+			expect(requests[0].options.qs).not.toHaveProperty('signer-access-code');
+		},
+	);
+
+	it.each(['list', 'search'])(
+		'%s rejects a blank access code instead of falling back to credentials',
+		async (operation) => {
+			const { ctx, requests } = makeCtx({
+				signerAccessCode: ' ',
+				signerId: 'sig_1',
+				returnAll: false,
+				limit: 10,
+			});
+			await expect(executeSignerDocument.call(ctx as any, 0, operation)).rejects.toThrow(
+				'Signer Access Code is required',
+			);
+			expect(requests).toHaveLength(0);
+		},
+	);
+
 	it('signs multiple documents', async () => {
 		const { ctx, requests } = makeCtx(
 			{
@@ -123,7 +160,9 @@ describe('signerDocument request construction (signer-side, no auth)', () => {
 		const result = (await executeSignerDocument.call(ctx as any, 0, 'download')) as any;
 		const req = lastPublic(requests);
 		expect(req.url).toBe(`${BASE}/signers/sig_1/documents/doc_1/download/certificated`);
-		expect(req.qs).toEqual({ 'signer-access-code': 'code123' });
+		// Public route: no credentials and no access code are sent.
+		expect(req.qs).toBeUndefined();
+		expect(requests.every((r) => !r.auth)).toBe(true);
 		expect(result.binary.data).toBeDefined();
 	});
 

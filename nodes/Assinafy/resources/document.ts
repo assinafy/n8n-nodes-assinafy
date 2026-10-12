@@ -128,7 +128,7 @@ export const documentDescription: INodeProperties[] = [
 			{
 				name: 'Send Public Token',
 				value: 'sendPublicToken',
-				action: 'Send a 6 digit access token to a signer via email or whatsapp',
+				action: 'Email a one time access token to a pending signer',
 			},
 			{ name: 'Upload', value: 'upload', action: 'Upload a new document' },
 			{ name: 'Verify', value: 'verify', action: 'Verify a document by its signature hash' },
@@ -444,8 +444,9 @@ export const documentDescription: INodeProperties[] = [
 		type: 'string',
 		default: '',
 		required: true,
-		placeholder: 'name@example.com or +5511999990001',
-		description: 'Email or WhatsApp phone number to send the token to',
+		placeholder: 'signer@example.com',
+		description:
+			'Email address of a signer of this document who has not signed yet. Request body: { "channel": "email", "recipient": "signer@example.com" }. Response: the document summary (ID, name, page count, creator), channel and recipient.',
 		displayOptions: { show: showOnly(['sendPublicToken']) },
 	},
 	{
@@ -453,10 +454,8 @@ export const documentDescription: INodeProperties[] = [
 		name: 'channel',
 		type: 'options',
 		default: 'email',
-		options: [
-			{ name: 'Email', value: 'email' },
-			{ name: 'WhatsApp', value: 'whatsapp' },
-		],
+		description: 'The API delivers public access tokens by email only',
+		options: [{ name: 'Email', value: 'email' }],
 		displayOptions: { show: showOnly(['sendPublicToken']) },
 	},
 
@@ -994,17 +993,27 @@ async function getPublicInfo(this: IExecuteFunctions, itemIndex: number): Promis
 async function sendPublicToken(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const id = extractRequiredId(this, 'publicDocumentId', 'Document ID', itemIndex);
 	const recipient = (this.getNodeParameter('recipient', itemIndex) as string).trim();
-	const channel = this.getNodeParameter('channel', itemIndex, 'email') as string;
+	const channel = String(this.getNodeParameter('channel', itemIndex, 'email') || 'email');
+	if (channel !== 'email') {
+		// Saved workflows may still select the former WhatsApp channel.
+		throw new NodeOperationError(
+			this.getNode(),
+			`Send Public Token supports only the Email channel (got "${channel}"); set Channel to Email and Recipient to the signer's email address`,
+			{ itemIndex },
+		);
+	}
 	if (!recipient) {
 		throw new NodeOperationError(this.getNode(), 'Recipient is required', { itemIndex });
 	}
-	if (channel === 'email' && !assertEmail(recipient)) {
-		throw new NodeOperationError(this.getNode(), 'Invalid recipient email address', { itemIndex });
+	if (!assertEmail(recipient)) {
+		throw new NodeOperationError(this.getNode(), 'Recipient must be the signer email address', {
+			itemIndex,
+		});
 	}
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'PUT',
 		path: `/public/documents/${id}/send-token`,
-		body: channel === 'email' ? { email: recipient } : { recipient, channel },
+		body: { channel: 'email', recipient },
 		skipAuth: true,
 	});
 }

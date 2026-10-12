@@ -5,6 +5,28 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.8.1] - 2026-10-12
+
+### Fixed
+
+- **Document → Send Public Token** sends `{ "channel": "email", "recipient": "<signer email>" }`, as the API requires; the previous request was rejected with HTTP 400. The API delivers these tokens by email only, so the WhatsApp channel is gone: a workflow saved with it fails with an error asking to switch Channel to Email.
+- **Signer → Upload Signature** accepts PNG images only, the format the API accepts.
+- **Signer → Confirm Data** sends only `full_name`, `email` and `government_id`. A saved Accept Terms toggle is applied through the accept-terms route; a saved WhatsApp number fails with an error pointing to **Signer → Update**.
+- **Signer Document → Download** no longer sends a signer access code to this public route.
+- **Assignment → Decline** rejects reasons longer than 2000 characters before calling the API.
+
+### Added
+
+- **Assignment → Reset Expiration → Remove Expiration** sends `expires_at: null`, so the assignment no longer expires.
+- **Signer → Create → Government ID** (CPF or CNPJ).
+- **Authenticate With** on **Signer Document → List and Search** and **Field Definition → Validate and Validate Multiple**: choose the signer access code (only the code is sent) or the workspace credentials. A blank access code is rejected instead of falling back to the credentials. Validation defaults to the workspace credentials and no longer forwards a leftover access code alongside them.
+- After the HTTP 429 retries are exhausted, the error lists the `X-Rate-Limit-Limit`, `X-Rate-Limit-Remaining`, `X-Rate-Limit-Reset` and `Retry-After` values.
+
+### Changed
+
+- **Webhook → Get and Rotate Endpoint Signing Secret** fail before sending the request under OAuth2 authentication, which the API does not allow for these routes.
+- **Webhook → List Dispatches** accepts only whole, non-negative From/To timestamps.
+
 ## [1.8.0] — 2026-10-07
 
 ### Added

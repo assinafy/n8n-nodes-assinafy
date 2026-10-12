@@ -134,6 +134,15 @@ export const signerDescription: INodeProperties[] = [
 		displayOptions: { show: showOnly(['create']) },
 		options: [
 			{
+				displayName: 'Government ID',
+				name: 'government_id',
+				type: 'string',
+				default: '',
+				placeholder: '390.533.447-05',
+				description:
+					'Brazilian CPF or CNPJ. Required for Digital Certificate verification. Non-digit characters are stripped before sending.',
+			},
+			{
 				displayName: 'Reuse If Exists',
 				name: 'reuseIfExists',
 				type: 'boolean',
@@ -258,15 +267,9 @@ export const signerDescription: INodeProperties[] = [
 		placeholder: 'Add Field',
 		default: {},
 		displayOptions: { show: showOnly(['confirmData']) },
+		description:
+			'Request body: { full_name?, email?, government_id? }. Response: the updated signer (ID, full name, email, WhatsApp number, government ID, terms acceptance).',
 		options: [
-			{
-				displayName: 'Accept Terms',
-				name: 'has_accepted_terms',
-				type: 'boolean',
-				default: false,
-				description:
-					'Whether to include terms acceptance in this data-confirmation request. The dedicated Accept Terms operation is also available.',
-			},
 			{
 				displayName: 'Email',
 				name: 'email',
@@ -281,14 +284,6 @@ export const signerDescription: INodeProperties[] = [
 				type: 'string',
 				default: '',
 				description: 'Government-issued identifier to confirm for this signer',
-			},
-			{
-				displayName: 'WhatsApp Phone Number',
-				name: 'whatsapp_phone_number',
-				type: 'string',
-				default: '',
-				placeholder: '+5548999990000',
-				description: 'WhatsApp number to confirm for this signer in E.164 format',
 			},
 		],
 	},
@@ -311,7 +306,7 @@ export const signerDescription: INodeProperties[] = [
 		type: 'string',
 		default: 'data',
 		required: true,
-		description: 'PNG/JPEG image binary on the incoming item (uploadSignature)',
+		description: 'PNG image binary on the incoming item (uploadSignature)',
 		displayOptions: { show: showOnly(['uploadSignature']) },
 	},
 	{
@@ -407,6 +402,7 @@ async function createSigner(
 	if (email) body.email = email;
 	if (additional.whatsapp_phone_number)
 		body.whatsapp_phone_number = additional.whatsapp_phone_number;
+	if (additional.government_id) body.government_id = sanitizeCpf(String(additional.government_id));
 
 	try {
 		return await assinafyApiRequest<IDataObject>(this, {
@@ -573,12 +569,20 @@ async function confirmData(this: IExecuteFunctions, itemIndex: number): Promise<
 	const code = requireAccessCode(this, itemIndex);
 	const documentId = extractRequiredId(this, 'confirmDocumentId', 'Document ID', itemIndex);
 	const fields = this.getNodeParameter('confirmFields', itemIndex, {}) as IDataObject;
+	if (fields.whatsapp_phone_number) {
+		throw new NodeOperationError(
+			this.getNode(),
+			'Confirm Data accepts only Full Name, Email and Government ID; update the WhatsApp number with Signer → Update',
+			{ itemIndex },
+		);
+	}
 	const body: IDataObject = {};
 	if (fields.full_name) body.full_name = fields.full_name;
 	if (fields.email) body.email = fields.email;
 	if (fields.government_id) body.government_id = fields.government_id;
-	if (fields.whatsapp_phone_number) body.whatsapp_phone_number = fields.whatsapp_phone_number;
-	if (fields.has_accepted_terms) body.has_accepted_terms = true;
+	// Saved workflows may still carry the former Accept Terms toggle; the API
+	// accepts terms through its own route, so honor it there.
+	if (fields.has_accepted_terms === true) await acceptTerms.call(this, itemIndex);
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'PUT',
 		path: `/documents/${documentId}/signers/confirm-data`,
@@ -601,7 +605,7 @@ async function uploadSignature(this: IExecuteFunctions, itemIndex: number): Prom
 		this,
 		buffer,
 		binary.mimeType || 'application/octet-stream',
-		['png', 'jpeg'],
+		['png'],
 		'Signature image',
 		itemIndex,
 	);

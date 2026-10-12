@@ -180,9 +180,14 @@ async function sendRequest(
 				await sleep(retryDelayMs(error, attempt));
 				continue;
 			}
-			throw new NodeApiError(ctx.getNode(), error as JsonObject, {
+			const apiError = new NodeApiError(ctx.getNode(), error as JsonObject, {
 				message: `Assinafy API ${options.method} ${options.path} failed`,
 			});
+			const rateLimit = getHttpCode(error) === 429 ? describeRateLimit(error) : undefined;
+			if (rateLimit) {
+				apiError.description = [apiError.description, rateLimit].filter(Boolean).join(' ');
+			}
+			throw apiError;
 		}
 	}
 }
@@ -377,14 +382,19 @@ function normalizeBaseUrl(ctx: AssinafyContext, value: string): string {
 	return result.url;
 }
 
-function readPaginationHeader(headers: IDataObject | undefined, name: string): number | undefined {
+/** Read a response header case-insensitively, taking the first value of a repeated header. */
+function readHeader(headers: IDataObject | undefined, name: string): string | undefined {
 	if (!headers) return undefined;
 	const raw = Object.entries(headers).find(
 		([key]) => key.toLowerCase() === name.toLowerCase(),
 	)?.[1];
 	if (raw === undefined || raw === null) return undefined;
-	const value = Array.isArray(raw) ? raw[0] : raw;
-	if (!/^\d+$/.test(String(value).trim())) return undefined;
+	return String(Array.isArray(raw) ? raw[0] : raw).trim();
+}
+
+function readPaginationHeader(headers: IDataObject | undefined, name: string): number | undefined {
+	const value = readHeader(headers, name);
+	if (value === undefined || !/^\d+$/.test(value)) return undefined;
 	const parsed = Number(value);
 	return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
 }
@@ -410,14 +420,30 @@ function httpResponse(error: unknown): { headers?: IDataObject } | undefined {
 
 /** Honor a `Retry-After` header (seconds or HTTP-date) when present. */
 function retryDelayMs(error: unknown, attempt: number): number {
-	const headers = httpResponse(error)?.headers;
-	const retryAfter = headers?.['retry-after'] ?? headers?.['Retry-After'];
-	if (retryAfter !== undefined) {
-		const value = String(Array.isArray(retryAfter) ? retryAfter[0] : retryAfter).trim();
+	const value = readHeader(httpResponse(error)?.headers, 'retry-after');
+	if (value !== undefined) {
 		const seconds = /^\d+$/.test(value) ? Number.parseInt(value, 10) : Number.NaN;
 		if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds * 1000, 30000);
 		const retryAt = Date.parse(value);
 		if (Number.isFinite(retryAt)) return Math.max(0, Math.min(retryAt - Date.now(), 30000));
 	}
 	return Math.min(500 * 2 ** attempt, 30000);
+}
+
+
+const RATE_LIMIT_HEADERS = [
+	'X-Rate-Limit-Limit',
+	'X-Rate-Limit-Remaining',
+	'X-Rate-Limit-Reset',
+	'Retry-After',
+];
+
+/** Summarize the documented rate-limit headers of a 429 response, if it carries any. */
+function describeRateLimit(error: unknown): string | undefined {
+	const headers = httpResponse(error)?.headers;
+	const values = RATE_LIMIT_HEADERS.map((name) => [name, readHeader(headers, name)] as const).filter(
+		([, value]) => value !== undefined && value !== '',
+	);
+	if (values.length === 0) return undefined;
+	return `Rate limited (${values.map(([name, value]) => `${name}: ${value}`).join(', ')}).`;
 }

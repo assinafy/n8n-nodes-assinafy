@@ -17,6 +17,7 @@ import {
 	extractRequiredId,
 	parseJsonParam,
 	requireAccessCode,
+	requireDeclineReason,
 	showOnly as showOnlyFor,
 	validateDigitalCertificateSteps,
 	validateSigningSteps,
@@ -232,13 +233,23 @@ export const assignmentDescription: INodeProperties[] = [
 	// --- resetExpiration ---
 	{ ...assignmentIdField, displayOptions: { show: showOnly(['resetExpiration']) } },
 	{
+		displayName: 'Remove Expiration',
+		name: 'clearExpiration',
+		type: 'boolean',
+		default: false,
+		description:
+			'Whether to remove the expiration so the assignment never expires. Sends { "expires_at": null }. Response: the updated assignment.',
+		displayOptions: { show: showOnly(['resetExpiration']) },
+	},
+	{
 		displayName: 'Expires At',
 		name: 'expiresAt',
 		type: 'dateTime',
 		default: '',
 		required: true,
-		description: 'New ISO8601 expiration date',
-		displayOptions: { show: showOnly(['resetExpiration']) },
+		description:
+			'New ISO 8601 expiration date, at least one hour in the future. Sends { "expires_at": "2026-12-31T23:59:59Z" }. Response: the updated assignment.',
+		displayOptions: { show: { ...showOnly(['resetExpiration']), clearExpiration: [false] } },
 	},
 
 	// --- resendNotification / estimateResendCost ---
@@ -453,9 +464,16 @@ async function estimateCost(this: IExecuteFunctions, itemIndex: number): Promise
 async function resetExpiration(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const documentId = extractDocumentId.call(this, itemIndex);
 	const assignmentId = extractRequiredId(this, 'assignmentId', 'Assignment ID', itemIndex);
-	const expiresAt = (this.getNodeParameter('expiresAt', itemIndex) as string).trim();
-	if (!expiresAt) {
-		throw new NodeOperationError(this.getNode(), 'Expires At is required', { itemIndex });
+	const clear = this.getNodeParameter('clearExpiration', itemIndex, false) as boolean;
+	const expiresAt = clear
+		? null
+		: String(this.getNodeParameter('expiresAt', itemIndex, '') ?? '').trim();
+	if (expiresAt === '') {
+		throw new NodeOperationError(
+			this.getNode(),
+			'Expires At is required; enable Remove Expiration to clear it',
+			{ itemIndex },
+		);
 	}
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'PUT',
@@ -544,10 +562,7 @@ async function declineAssignment(this: IExecuteFunctions, itemIndex: number): Pr
 	const documentId = extractDocumentId.call(this, itemIndex);
 	const assignmentId = extractRequiredId(this, 'assignmentId', 'Assignment ID', itemIndex);
 	const code = requireAccessCode(this, itemIndex);
-	const reason = (this.getNodeParameter('declineReason', itemIndex) as string).trim();
-	if (!reason) {
-		throw new NodeOperationError(this.getNode(), 'Decline Reason is required', { itemIndex });
-	}
+	const reason = requireDeclineReason(this, itemIndex);
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'PUT',
 		path: `/documents/${documentId}/assignments/${assignmentId}/reject`,
