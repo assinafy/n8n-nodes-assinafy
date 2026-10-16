@@ -27,7 +27,7 @@ import {
 	extractRequiredId,
 	parseBinaryResponse,
 	requireAccessCode,
-	sanitizeCpf,
+	normalizeGovernmentId,
 	showOnly as showOnlyFor,
 	wrap,
 } from '../shared/utils';
@@ -41,6 +41,8 @@ const SELF_OPS = new Set([
 	'confirmData',
 	'uploadSignature',
 	'downloadSignature',
+	'getIdentityVerification',
+	'startIdentityVerification',
 ]);
 
 export const signerDescription: INodeProperties[] = [
@@ -76,11 +78,21 @@ export const signerDescription: INodeProperties[] = [
 			},
 			{ name: 'Get', value: 'get', action: 'Get a signer' },
 			{
+				name: 'Get Identity Verification (Signer Side)',
+				value: 'getIdentityVerification',
+				action: 'Get the signer identity verification state',
+			},
+			{
 				name: 'Get Self (Signer Side)',
 				value: 'getSelf',
 				action: 'Signer retrieves their own info via access code',
 			},
 			{ name: 'List', value: 'list', action: 'List signers' },
+			{
+				name: 'Start Identity Verification (Signer Side)',
+				value: 'startIdentityVerification',
+				action: 'Open a biometric verification session with signer consent',
+			},
 			{ name: 'Update', value: 'update', action: 'Update a signer' },
 			{
 				name: 'Upload Signature (Signer Side)',
@@ -140,7 +152,7 @@ export const signerDescription: INodeProperties[] = [
 				default: '',
 				placeholder: '390.533.447-05',
 				description:
-					'Brazilian CPF or CNPJ. Required for Digital Certificate verification. Non-digit characters are stripped before sending.',
+					'Brazilian CPF or CNPJ for Digital Certificate, or a valid CPF for Biometric verification. Formatting is removed; alphanumeric CNPJ letters are preserved and uppercased.',
 			},
 			{
 				displayName: 'Reuse If Exists',
@@ -183,7 +195,8 @@ export const signerDescription: INodeProperties[] = [
 				type: 'string',
 				default: '',
 				placeholder: '390.533.447-05',
-				description: 'Brazilian CPF or CNPJ. Non-digit characters are stripped before sending.',
+				description:
+					'Brazilian CPF or CNPJ. Formatting is removed; alphanumeric CNPJ letters are preserved and uppercased.',
 			},
 			{
 				displayName: 'Email',
@@ -235,8 +248,19 @@ export const signerDescription: INodeProperties[] = [
 				'confirmData',
 				'uploadSignature',
 				'downloadSignature',
+				'getIdentityVerification',
+				'startIdentityVerification',
 			]),
 		},
+	},
+	{
+		displayName: 'Biometric Processing Consent',
+		name: 'biometricConsent',
+		type: 'boolean',
+		default: false,
+		description:
+			'Whether the signer explicitly consented to biometric processing. Required to start verification; never infer consent from assignment creation.',
+		displayOptions: { show: showOnly(['startIdentityVerification']) },
 	},
 
 	// --- verifyCode ---
@@ -369,6 +393,27 @@ export async function executeSigner(
 			return wrap(await uploadSignature.call(this, itemIndex));
 		case 'downloadSignature':
 			return downloadSignature.call(this, itemIndex);
+		case 'getIdentityVerification':
+		case 'startIdentityVerification': {
+			const code = requireAccessCode(this, itemIndex);
+			const start = operation === 'startIdentityVerification';
+			if (start && this.getNodeParameter('biometricConsent', itemIndex, false) !== true) {
+				throw new NodeOperationError(
+					this.getNode(),
+					'The signer must explicitly consent to biometric processing',
+					{ itemIndex },
+				);
+			}
+			return wrap(
+				await assinafyApiRequest(this, {
+					method: start ? 'POST' : 'GET',
+					path: '/signers/identity-verification',
+					qs: { 'signer-access-code': code },
+					skipAuth: true,
+					...(start ? { body: { consent: true } } : {}),
+				}),
+			);
+		}
 		default:
 			throw new NodeOperationError(this.getNode(), `Unknown signer operation: ${operation}`, {
 				itemIndex,
@@ -402,7 +447,8 @@ async function createSigner(
 	if (email) body.email = email;
 	if (additional.whatsapp_phone_number)
 		body.whatsapp_phone_number = additional.whatsapp_phone_number;
-	if (additional.government_id) body.government_id = sanitizeCpf(String(additional.government_id));
+	if (additional.government_id)
+		body.government_id = normalizeGovernmentId(String(additional.government_id));
 
 	try {
 		return await assinafyApiRequest<IDataObject>(this, {
@@ -459,7 +505,7 @@ async function updateSigner(
 	// Map saved `cpf` workflow values to the API's `government_id` field.
 	const governmentId = body.government_id ?? body.cpf;
 	delete body.cpf;
-	if (governmentId !== undefined) body.government_id = sanitizeCpf(String(governmentId));
+	if (governmentId !== undefined) body.government_id = normalizeGovernmentId(String(governmentId));
 	if (body.full_name !== undefined) {
 		body.full_name = String(body.full_name).trim();
 		if (!body.full_name) {

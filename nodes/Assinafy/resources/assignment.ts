@@ -11,11 +11,13 @@ import {
 	documentResourceLocator,
 	limitField,
 	returnAllField,
+	verificationMethodField,
 } from '../shared/descriptions';
 import {
 	asArray,
 	extractRequiredId,
 	parseJsonParam,
+	parseBinaryResponse,
 	requireAccessCode,
 	requireDeclineReason,
 	showOnly as showOnlyFor,
@@ -37,9 +39,19 @@ export const assignmentDescription: INodeProperties[] = [
 		options: [
 			{ name: 'Create', value: 'create', action: 'Create an assignment' },
 			{
+				name: 'Decide Identity Review',
+				value: 'decideIdentityReview',
+				action: 'Approve or reject a signer identity review',
+			},
+			{
 				name: 'Decline (Signer Side)',
 				value: 'decline',
 				action: 'Signer declines to sign the document',
+			},
+			{
+				name: 'Download Identity Review Image',
+				value: 'downloadIdentityReviewImage',
+				action: 'Download evidence for an open signer identity review',
 			},
 			{
 				name: 'Estimate Cost',
@@ -50,6 +62,11 @@ export const assignmentDescription: INodeProperties[] = [
 				name: 'Estimate Resend Cost',
 				value: 'estimateResendCost',
 				action: 'Estimate the cost of resending a signer notification',
+			},
+			{
+				name: 'Get Identity Review',
+				value: 'getIdentityReview',
+				action: 'Get a signer identity review',
 			},
 			{
 				name: 'Get Sign Page',
@@ -98,6 +115,9 @@ export const assignmentDescription: INodeProperties[] = [
 				'listWhatsapp',
 				'sign',
 				'decline',
+				'getIdentityReview',
+				'downloadIdentityReviewImage',
+				'decideIdentityReview',
 			]),
 		},
 	},
@@ -145,17 +165,7 @@ export const assignmentDescription: INodeProperties[] = [
 						description:
 							'Existing signer ID. Leave empty on "Estimate Cost" to estimate without a specific signer.',
 					},
-					{
-						displayName: 'Verification Method',
-						name: 'verification_method',
-						type: 'options',
-						default: 'Email',
-						options: [
-							{ name: 'Digital Certificate', value: 'DigitalCertificate' },
-							{ name: 'Email', value: 'Email' },
-							{ name: 'WhatsApp', value: 'Whatsapp' },
-						],
-					},
+					{ ...verificationMethodField },
 					{
 						displayName: 'Notification Methods',
 						name: 'notification_methods',
@@ -255,7 +265,15 @@ export const assignmentDescription: INodeProperties[] = [
 	// --- resendNotification / estimateResendCost ---
 	{
 		...assignmentIdField,
-		displayOptions: { show: showOnly(['resendNotification', 'estimateResendCost']) },
+		displayOptions: {
+			show: showOnly([
+				'resendNotification',
+				'estimateResendCost',
+				'getIdentityReview',
+				'downloadIdentityReviewImage',
+				'decideIdentityReview',
+			]),
+		},
 	},
 	{
 		displayName: 'Signer ID',
@@ -263,7 +281,59 @@ export const assignmentDescription: INodeProperties[] = [
 		type: 'string',
 		default: '',
 		required: true,
-		displayOptions: { show: showOnly(['resendNotification', 'estimateResendCost']) },
+		displayOptions: {
+			show: showOnly([
+				'resendNotification',
+				'estimateResendCost',
+				'getIdentityReview',
+				'downloadIdentityReviewImage',
+				'decideIdentityReview',
+			]),
+		},
+	},
+	{
+		displayName: 'Image Name',
+		name: 'identityImageName',
+		type: 'options',
+		default: 'document_front',
+		description: 'Use a name returned in the open review’s images array',
+		options: [
+			{ name: 'Document Back', value: 'document_back' },
+			{ name: 'Document Front', value: 'document_front' },
+			{ name: 'Document PDF', value: 'document_pdf' },
+			{ name: 'Face', value: 'face' },
+		],
+		displayOptions: { show: showOnly(['downloadIdentityReviewImage']) },
+	},
+	{
+		displayName: 'Put Output In Field',
+		name: 'binaryOutputProperty',
+		type: 'string',
+		default: 'data',
+		displayOptions: { show: showOnly(['downloadIdentityReviewImage']) },
+	},
+	{
+		displayName: 'Decision',
+		name: 'identityDecision',
+		type: 'options',
+		default: 'Approved',
+		description:
+			'Approve to release certification when all signers finish. Reject cancels the document and notifies signers and copy receivers.',
+		options: [
+			{ name: 'Approved', value: 'Approved' },
+			{ name: 'Rejected', value: 'Rejected' },
+		],
+		displayOptions: { show: showOnly(['decideIdentityReview']) },
+	},
+	{
+		displayName: 'Review Note',
+		name: 'identityReviewNote',
+		type: 'string',
+		typeOptions: { rows: 3 },
+		default: '',
+		description:
+			'Optional note, up to 2000 characters. Recorded in the activity log and sent to the provider; never shown to the signer.',
+		displayOptions: { show: showOnly(['decideIdentityReview']) },
 	},
 
 	// --- listWhatsapp ---
@@ -337,11 +407,89 @@ export async function executeAssignment(
 			return wrap(await signAssignment.call(this, itemIndex));
 		case 'decline':
 			return wrap(await declineAssignment.call(this, itemIndex));
+		case 'getIdentityReview':
+		case 'decideIdentityReview':
+		case 'downloadIdentityReviewImage':
+			return identityReview.call(this, itemIndex, operation);
 		default:
 			throw new NodeOperationError(this.getNode(), `Unknown assignment operation: ${operation}`, {
 				itemIndex,
 			});
 	}
+}
+
+async function identityReview(
+	this: IExecuteFunctions,
+	itemIndex: number,
+	operation: string,
+): Promise<INodeExecutionData> {
+	const documentId = extractDocumentId.call(this, itemIndex);
+	const assignmentId = extractRequiredId(this, 'assignmentId', 'Assignment ID', itemIndex);
+	const signerId = extractRequiredId(this, 'signerId', 'Signer ID', itemIndex);
+	const path = `/documents/${documentId}/assignments/${assignmentId}/signers/${signerId}/identity-verification`;
+	if (operation === 'downloadIdentityReviewImage') {
+		const name = this.getNodeParameter('identityImageName', itemIndex, 'document_front') as string;
+		if (!['document_front', 'document_back', 'document_pdf', 'face'].includes(name)) {
+			throw new NodeOperationError(this.getNode(), 'Invalid identity review image name', {
+				itemIndex,
+			});
+		}
+		const outputProperty = this.getNodeParameter(
+			'binaryOutputProperty',
+			itemIndex,
+			'data',
+		) as string;
+		const response = await assinafyApiRequest<{ body?: Buffer; headers?: IDataObject }>(this, {
+			method: 'GET',
+			path: `${path}/images/${name}`,
+			returnBinary: true,
+		});
+		const { buffer, mimeType } = parseBinaryResponse(
+			this,
+			response,
+			name === 'document_pdf' ? 'application/pdf' : 'image/jpeg',
+			'Identity review image',
+			itemIndex,
+		);
+		const extension =
+			mimeType === 'application/pdf' ? 'pdf' : mimeType === 'image/png' ? 'png' : 'jpg';
+		const fileName = `${signerId}-${name}.${extension}`;
+		const binary = await this.helpers.prepareBinaryData(buffer, fileName, mimeType);
+		return {
+			json: {
+				documentId,
+				assignmentId,
+				signerId,
+				name,
+				fileName,
+				mimeType,
+				size: buffer.byteLength,
+			},
+			binary: { [outputProperty]: binary },
+		};
+	}
+	if (operation === 'decideIdentityReview') {
+		const decision = this.getNodeParameter('identityDecision', itemIndex) as string;
+		if (!['Approved', 'Rejected'].includes(decision)) {
+			throw new NodeOperationError(this.getNode(), 'Decision must be Approved or Rejected', {
+				itemIndex,
+			});
+		}
+		const note = String(this.getNodeParameter('identityReviewNote', itemIndex, '') ?? '').trim();
+		if ([...note].length > 2000) {
+			throw new NodeOperationError(this.getNode(), 'Review Note must be at most 2000 characters', {
+				itemIndex,
+			});
+		}
+		return wrap(
+			await assinafyApiRequest(this, {
+				method: 'POST',
+				path: `${path}/review`,
+				body: { decision, ...(note ? { note } : {}) },
+			}),
+		);
+	}
+	return wrap(await assinafyApiRequest(this, { method: 'GET', path }));
 }
 
 async function listAssignments(
@@ -386,7 +534,11 @@ function buildAssignmentBody(
 	}
 	const signers: IDataObject[] = [];
 	for (const entry of signerEntries) {
-		if (!options.forEstimate && entry.notification_methods && entry.notification_methods.length > 1) {
+		if (
+			!options.forEstimate &&
+			entry.notification_methods &&
+			entry.notification_methods.length > 1
+		) {
 			throw new NodeOperationError(
 				this.getNode(),
 				'Each signer supports at most one Notification Method',

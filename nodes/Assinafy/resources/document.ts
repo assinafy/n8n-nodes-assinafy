@@ -11,6 +11,7 @@ import {
 	documentResourceLocator,
 	limitField,
 	returnAllField,
+	verificationMethodField,
 	searchField,
 	sortField,
 	tagResourceLocator,
@@ -33,7 +34,13 @@ import {
 } from '../shared/utils';
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
-const READY_STATUSES = new Set(['metadata_ready', 'pending_signature', 'certificated']);
+const READY_STATUSES = new Set([
+	'metadata_ready',
+	'pending_signature',
+	'pending_identity_review',
+	'certificating',
+	'certificated',
+]);
 const FAILED_STATUSES = new Set(['failed', 'rejected_by_signer', 'rejected_by_user', 'expired']);
 
 const showOnly = showOnlyFor('document');
@@ -190,6 +197,7 @@ export const documentDescription: INodeProperties[] = [
 					{ name: 'Failed', value: 'failed' },
 					{ name: 'Metadata Processing', value: 'metadata_processing' },
 					{ name: 'Metadata Ready', value: 'metadata_ready' },
+					{ name: 'Pending Identity Review', value: 'pending_identity_review' },
 					{ name: 'Pending Signature', value: 'pending_signature' },
 					{ name: 'Rejected by Signer', value: 'rejected_by_signer' },
 					{ name: 'Rejected by User', value: 'rejected_by_user' },
@@ -337,17 +345,7 @@ export const documentDescription: INodeProperties[] = [
 						description:
 							'Optional signing order. Set every signer to a contiguous sequence starting at 1, or leave every signer at 0 to notify all at once.',
 					},
-					{
-						displayName: 'Verification Method',
-						name: 'verification_method',
-						type: 'options',
-						default: 'Email',
-						options: [
-							{ name: 'Digital Certificate', value: 'DigitalCertificate' },
-							{ name: 'Email', value: 'Email' },
-							{ name: 'WhatsApp', value: 'Whatsapp' },
-						],
-					},
+					{ ...verificationMethodField },
 				],
 			},
 		],

@@ -72,9 +72,9 @@ Sections below show each operation-specific request and a representative respons
 | `Account`                   | `resource:string`, `id:string`, `name:string`, `primary_color:string / null`, `secondary_color:string / null`, `notification_sender_type:string`, `roles:string[]`, `is_delete_allowed:boolean`, `created_at:string`                                                                                                                                                                                                                                                                                                                                                                           |
 | `AccountTheme`              | `account_name:string`, `primary_color:string`, `secondary_color:string / null`, `logo:string / null`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `NotificationPreferences`   | Nine booleans: `DocumentCompleted`, `SignerDeclined`, `DocumentCancelled`, `DocumentAboutToExpire`, `DocumentExpired`, `DocumentExpirationReset`, `DocumentProcessingFailed`, `TemplateProcessingFailed`, `SignerWhatsappFailed`                                                                                                                                                                                                                                                                                                                                                               |
-| `Signer`                    | `resource:string`, `id:string`, `full_name:string`, `email:string / null`, `whatsapp_phone_number:string / null`, `has_accepted_terms:boolean`                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `SignerSelf`                | All `Signer` fields plus `has_signature:boolean`, `has_initial:boolean`, `is_signature_reusable:boolean`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `AssignmentSigner`          | All `Signer` fields plus `verification_method:string / null`, `notification_methods:string[] / null`, `step:integer / null`, `notified:boolean / null`, `completed:boolean / null`, `notification_history:NotificationHistoryEntry[] / null`                                                                                                                                                                                                                                                                                                                                                   |
+| `Signer`                    | `resource:string`, `id:string`, `full_name:string`, `email:string / null`, `whatsapp_phone_number:string / null`, `government_id:string / null`, `has_accepted_terms:boolean`                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `SignerSelf`                | All `Signer` fields plus `verification_method:string`, `has_signature:boolean`, `has_initial:boolean`, `is_signature_reusable:boolean`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `AssignmentSigner`          | All `Signer` fields plus `verification_method:string / null`, `notification_methods:string[] / null`, `step:integer / null`, `notified:boolean / null`, `completed:boolean / null`, `identity_verification_status:string / null` (`Pending`, `InReview`, `Approved`, `Declined`, `Expired`, `Abandoned`), `notification_history:NotificationHistoryEntry[] / null`                                                                                                                                                                                                                                                                                                                                                   |
 | `NotificationHistoryEntry`  | `event:string`, `status:string`, `error_code:string / null`, `error_message:string / null`, `sent_at:string / null`, `failed_at:string / null`                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `DocumentPage`              | `id:string`, `number:integer`, `height:integer`, `width:integer`, `download_url:string`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `DisplaySettings`           | `left:number`, `top:number`, `width:number`, `height:number`, `fontFamily:string`, `fontSize:number`, `backgroundColor:string`                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
@@ -103,15 +103,19 @@ Sections below show each operation-specific request and a representative respons
 | `WebhookEndpointSecret`     | `secret:string` (`whsec_` followed by the base64 key)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `WebhookDispatch`           | `resource:string`, `id:string`, `event:string`, `activity_id:integer`, `endpoint_id:string / null`, `endpoint:string / null`, `payload:object / null`, `delivered:boolean`, `http_status:integer / null`, `response_body:string / null`, `error:string / null`, `created_at:string`, `updated_at:string`                                                                                                                                                                                                                                                                                                                    |
 | `WebhookEventType`          | `id:string`, `description:string`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `WhatsappNotification`      | `sent_at:integer` (Unix seconds), `header:string`, `body:string`, `buttons:{text}[]`, `phone_number:string`, `signer_id:string`                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `WhatsappNotification`      | `sent_at:integer` (Unix seconds), `header:string`, `body:string`, `buttons:{text:string,url?:string}[]`, `phone_number:string`, `signer_id:string`                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+
+`DisplaySettings` uses pixels in the document’s 150-DPI page image, measured from the upper-left corner. `left` and `top` must be non-negative; `width`, `height` and `fontSize` must be positive. These five numeric fields are required for a placement. Keep each rectangle within the selected page’s width and height; the API does not clamp out-of-bounds coordinates. `fontFamily` and `backgroundColor` are optional presentation metadata.
+
+`SignerIdentityReview` is documented in full under [Get Identity Review](#get-identity-review), including every field, nullability and lifecycle state.
 
 ## Cross-operation behavior
 
-Signer terms acceptance and OTP verification send `signer-access-code` in the query string. The OTP itself remains in the JSON body as `verification-code`. Field validation always retains the configured account authentication and can additionally send `signer-access-code`; it does not silently drop the API credential.
+Signer terms acceptance and OTP verification send `signer-access-code` in the query string. The OTP itself remains in the JSON body as `verification-code`. Field validation uses the explicit Authenticate With selection: Workspace Credentials (default) sends the selected credential; Signer Access Code sends only the required code. The Account ID still comes from the configured credential.
 
 ### Where a signer access code comes from
 
-Fourteen operations authenticate with `signer-access-code` instead of the workspace API key. **No endpoint returns that code.** It reaches the signer only out of band, in the body of the notification the API sends when an assignment is created (or resent) — by email, or by WhatsApp for a `Whatsapp` signer. There is no API-key-authenticated way to read, mint, or look one up, by design: holding one is equivalent to being that signer.
+Signer-side operations authenticate with `signer-access-code` instead of the workspace API key. **In production, no endpoint returns that code.** It reaches the signer only out of band, in the body of the notification the API sends when an assignment is created (or resent) — by email, or by WhatsApp for a `Whatsapp` signer. Production provides no API-key-authenticated way to read, mint or look one up: holding one is equivalent to being that signer. In sandbox, List WhatsApp Notifications returns simulated button URLs containing the actual test codes; production strips those URLs.
 
 In particular, the `signing_urls` array on an Assignment is **not** a source of access codes. Each entry addresses the web signing page for the *document* and identifies the signer by email address:
 
@@ -128,19 +132,24 @@ An n8n workflow therefore drives the signer-side operations only when a code arr
 
 ### Verification, notification, and digital-certificate rules
 
-Assignment and template signer rows use `verification_method` (`Email`, `Whatsapp`, or `DigitalCertificate`) and `notification_methods` (`Email` or `Whatsapp`). If both are omitted, both default to `Email`. Create and cost-estimate operations accept exactly one compatible notification channel per signer when supplied; the array shape is historical. When only a verification method is supplied, the API infers its notification channel. Create From Template also infers the verification method when only a notification channel is supplied.
+Assignment and template signer rows use `verification_method` (`Email`, `Whatsapp`, `DigitalCertificate`, or `IdDocumentFaceMatchBasic`) and `notification_methods` (`Email` or `Whatsapp`). If both are omitted, both default to `Email`. Create and cost-estimate operations accept exactly one compatible notification channel per signer when supplied; the array shape is historical. When only a verification method is supplied, the API infers its notification channel. Create From Template also infers the verification method when only a notification channel is supplied.
 
 | Verification         | Requirements                                                                                                                  | Per-signer signature cost |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------- |
 | `Email`              | Signer has an email address.                                                                                                  | 0 credits                 |
 | `Whatsapp`           | Signer has `whatsapp_phone_number`; paid subscription.                                                                        | 0 credits                 |
-| `DigitalCertificate` | Digital Certificate feature (Standard/Pro), signer CPF/CNPJ in `government_id`, and no other signer in the same signing step. | 2 credits                 |
+| `DigitalCertificate` | Digital Certificate feature (Standard/Pro), signer CPF/CNPJ in `government_id`, and no other signer in the same signing step. | 0.5 credits               |
+| `IdDocumentFaceMatchBasic` | ID Document + Face Match feature, valid signer CPF in `government_id`, and explicit consent to biometric processing. | Per-signer fee returned by Estimate Cost |
 
 Email notifications cost 0 credits. WhatsApp notifications require a paid subscription and cost 0.45 credits per notification.
 
+`Email` verification pairs only with Email notification, and `Whatsapp` only with Whatsapp. `DigitalCertificate` and `IdDocumentFaceMatchBasic` accept either channel. Always check the returned cost estimate and `has_sufficient_resources` before creation; fees and plan entitlements are enforced by the API.
+
+Biometric verification opens a hosted capture session after the signer consents. Open the returned URL unchanged, including any fragment, and keep it out of logs and public storage. A Pending session must be reused. Only Expired sessions can be restarted; Declined or Abandoned requires a new document and assignment. InReview lets the signer continue viewing, confirming data and signing, but certification waits for account approval. Once all signers finish, the document remains `pending_identity_review` until all reviews are approved; rejecting one cancels the document and notifies signers and copy receivers. Successful completion still requires `certificated` status and the certified artifact.
+
 For `DigitalCertificate`, a CPF requires that person's e-CPF or an e-CNPJ naming that person as legal representative. A CNPJ requires an e-CNPJ for that company from any representative. Signing is completed through Assinafy's ICP-Brasil A1/A3 browser flow, not the ordinary signer **Sign** operation, and produces the optional `pades` artifact. The cost-estimate response reports the signature charge with breakdown code `SignatureDigitalCertificate`; an extra document costs 1 credit when the plan allowance is exhausted.
 
-Create From Template validates its single-notification-channel rule before sending. Assignment Create forwards every selected notification channel.
+Assignment Create and Create From Template reject multiple notification channels before sending. Cost estimates forward the selected channels to the API for pricing.
 
 ## Resources
 
@@ -533,7 +542,7 @@ If the document omits its assignment or the counts needed to compute progress, `
 
 #### Poll the document until it reaches a ready status
 
-Convenience wrapper: repeatedly fetches the document until its status is one of `metadata_ready`, `pending_signature`, `certificated`, then returns the full document. Throws if the status becomes `failed`, `rejected_by_signer`, `rejected_by_user`, or `expired`, or if it times out.
+Convenience wrapper: repeatedly fetches the document until its status is one of `metadata_ready`, `pending_signature`, `pending_identity_review`, `certificating`, `certificated`, then returns the full document. These statuses confirm metadata is processed, not that the certified artifact is available. Throws if the status becomes `failed`, `rejected_by_signer`, `rejected_by_user`, or `expired`, or if it times out.
 
 **Endpoint:** `GET /documents/{documentId}` (polled internally)
 
@@ -557,7 +566,7 @@ Creates a document from a template, mapping one signer entry per template role.
 - Signers — fixedCollection (multiple) — required — one entry per template role, each with:
   - Role ID — string — required — template role ID.
   - Signer ID — string — required for Create — existing signer ID. The shared UI also serves Estimate Cost, where it may be omitted; Create validates every row and fails before sending if an ID is missing.
-  - Verification Method — options — optional — `Email`, `Whatsapp`, or `DigitalCertificate` (default `Email`).
+  - Verification Method — options — optional — `Email`, `Whatsapp`, `DigitalCertificate`, or `IdDocumentFaceMatchBasic` (default `Email`).
   - Notification Methods — multiOptions — optional — choose one of `Email` or `Whatsapp` (default empty, so the API infers a channel from Verification Method). The Create contract permits only one method per signer; selecting both fails before a request is sent.
   - Step — number — optional — signing order; 0 = notify all at once, otherwise a contiguous sequence starting at 1.
 - Additional Fields > Document Name — string — optional — overrides the template's default name.
@@ -647,9 +656,9 @@ Estimates the credit/document cost of a template-based document without creating
 **Node parameters:**
 
 - Template ID — resourceLocator — required — the template to use, selected from a searchable list or entered by ID.
-- Signers — fixedCollection (multiple) — required — same row shape as Create From Template. Only `role_id`, `verification_method` (`Email`, `Whatsapp`, or `DigitalCertificate`), and one compatible `notification_methods` value (`Email` or `Whatsapp`) matter for cost. The node accepts the shared UI's `id` and `step` values but deliberately omits them from the request.
+- Signers — fixedCollection (multiple) — required — same row shape as Create From Template. Only `role_id`, `verification_method` (`Email`, `Whatsapp`, `DigitalCertificate`, or `IdDocumentFaceMatchBasic`), and one compatible `notification_methods` value (`Email` or `Whatsapp`) matter for cost. The node accepts the shared UI's `id` and `step` values but deliberately omits them from the request.
 
-The node requires at least one row and a `role_id` for each row. It sends only `signers`, strips create-only signer IDs and signing steps, and does not validate those ignored create-only values or send additional document fields. A `DigitalCertificate` estimate adds 2 credits per signer, plus 0 credits for Email or 0.45 credits for WhatsApp; the signature line uses breakdown code `SignatureDigitalCertificate`.
+The node requires at least one row and a `role_id` for each row. It sends only `signers`, strips create-only signer IDs and signing steps, and does not validate those ignored create-only values or send additional document fields. A `DigitalCertificate` estimate adds 0.5 credits per signer, plus 0 credits for Email or 0.45 credits for WhatsApp; the signature line uses breakdown code `SignatureDigitalCertificate`.
 
 **Example request:**
 
@@ -945,7 +954,7 @@ Creates a signer in the account. Only `full_name` is required; email and WhatsAp
 - Email — string — optional — signer email.
 - Additional Fields — collection — optional:
   - Reuse If Exists — boolean (default `true`) — when true and an email is provided, looks up an existing signer with that email and returns it instead of creating a duplicate.
-  - Government ID — string — CPF or CNPJ, sent as `government_id` with non-digits stripped; required later for Digital Certificate verification.
+  - Government ID — string — CPF or CNPJ, sent as `government_id` with formatting removed and alphanumeric CNPJ letters preserved and uppercased; required later for Digital Certificate verification.
   - WhatsApp Phone Number — string — E.164 format (e.g. `+55` followed by the area code and subscriber number).
 
 Signer Create sends `full_name`, `email`, `whatsapp_phone_number` and `government_id`; create-time `cpf` and `metadata` keys are not sent.
@@ -1051,7 +1060,7 @@ Updates a signer's information. At least one update field must be provided. `ema
 - Update Fields — collection — optional (at least one required):
   - Email — string — new email address.
   - Full Name — string (`full_name`) — new full name.
-  - Government ID — string (`government_id`) — signer's CPF or CNPJ; punctuation is stripped and digits are sent.
+  - Government ID — string (`government_id`) — signer's CPF or CNPJ; formatting is removed and alphanumeric CNPJ letters are preserved and uppercased.
   - WhatsApp Phone Number — string (`whatsapp_phone_number`) — E.164 format.
 
 **Example request:**
@@ -1334,6 +1343,51 @@ Signer-side flow: downloads the signer's stored signature or initials image. The
 
 ---
 
+#### Get Identity Verification (Signer Side)
+
+**Operation:** Signer → `getIdentityVerification`.
+**Endpoint:** `GET /signers/identity-verification?signer-access-code=<signer-access-code>`.
+**Authentication:** required Signer Access Code only; no API key or OAuth token. Select the Sandbox credential for sandbox requests.
+**Request:** no body. The API reconciles pending provider decisions before returning the state.
+
+**Complete unwrapped response:**
+
+```json
+{
+	"can_start": false,
+	"status": "Pending",
+	"url": "https://verify.example.com/c/<session-id>#t=<capture-token>",
+	"expires_at": "2026-12-31T12:00:00Z",
+	"completed_at": null
+}
+```
+
+`can_start` is boolean, true before the first session or after Expired. `status` is string or null (`Pending`, `InReview`, `Approved`, `Declined`, `Expired`, `Abandoned`). `url` is string or null, present only while Pending. `expires_at` and `completed_at` are nullable ISO 8601 timestamps. Poll with bounded Wait/Get loops. HTTP 401 means the access code is invalid; provider/API failures surface as errors.
+
+#### Start Identity Verification (Signer Side)
+
+**Operation:** Signer → `startIdentityVerification`.
+**Endpoint:** `POST /signers/identity-verification?signer-access-code=<signer-access-code>`.
+**Authentication:** required Signer Access Code only; no workspace credential is sent.
+**Node parameters:** Signer Access Code (required, secret) and Biometric Processing Consent (boolean, default false). Set consent only after the signer explicitly agrees; other values fail before a request.
+**Request media type:** `application/json`.
+
+```json
+{ "consent": true }
+```
+
+**Complete unwrapped response:**
+
+```json
+{
+	"id": "<verification-id>",
+	"url": "https://verify.example.com/c/<session-id>#t=<capture-token>",
+	"expires_at": "2026-12-31T12:00:00Z"
+}
+```
+
+`id` and `url` are strings; `expires_at` is a nullable ISO 8601 timestamp. The URL is a bearer link and must be opened intact. Requires a biometric assignment with the plan feature and valid signer CPF. HTTP 400 means missing consent or a session already exists in a state other than Expired; HTTP 401 means an invalid access code. A resend preserves the existing live session. Restarts after Expired incur no additional verification fee: billing occurs once per signer at assignment creation.
+
 ### Assignment
 
 Manages signature requests (assignments) on a document — creating them, estimating costs, resending notifications, resetting expiration, and signer-side sign/decline/read flows. All account-scoped operations target a document by ID; the document target is selected via a resource locator. Each assignment always consumes 1 document from the plan allowance.
@@ -1393,7 +1447,7 @@ Creates a signature request on a document. Use `virtual` to collect signatures r
 - Method — options (`virtual` | `collect`) — required — assignment method (default `virtual`).
 - Signers — fixedCollection (multiple) — required — at least one signer; each must supply a Signer ID for create.
   - Signer ID — string — required (for create).
-  - Verification Method — options (`Email` | `Whatsapp` | `DigitalCertificate`) — optional (default `Email`).
+  - Verification Method — options (`Email` | `Whatsapp` | `DigitalCertificate` | `IdDocumentFaceMatchBasic`) — optional (default `Email`).
   - Notification Methods — multiOptions (`Email` | `Whatsapp`) — optional (default empty, so the API infers a channel from Verification Method); select exactly one compatible channel when supplying it.
   - Step — number (≥0) — optional — signing order; set every signer to a contiguous sequence starting at 1, or leave all at 0 to notify everyone at once.
 - Additional Fields — collection — optional:
@@ -1402,7 +1456,7 @@ Creates a signature request on a document. Use `virtual` to collect signatures r
   - Copy Receivers — string (multiple) — optional — signer IDs that receive a copy without signing.
 - Entries (JSON) — json — required only when Method is `collect` — array of `{ page_id, fields: [{ signer_id, field_id, display_settings }] }`. Each `display_settings` requires numeric `left`, `top`, `width`, `height`, and `fontSize`; `fontFamily` and `backgroundColor` are optional.
 
-The API infers omitted verification/notification methods as described in the [shared rules](#verification-notification-and-digital-certificate-rules). `DigitalCertificate` additionally requires the account feature, the signer's CPF/CNPJ in `government_id`, and a signing step with no other signer. It costs 2 credits per signer on top of Email (0) or WhatsApp (0.45) notification credits.
+The API infers omitted verification/notification methods as described in the [shared rules](#verification-notification-and-digital-certificate-rules). `DigitalCertificate` additionally requires the account feature, the signer's CPF/CNPJ in `government_id`, and a signing step with no other signer. It costs 0.5 credits per signer on top of Email (0) or WhatsApp (0.45) notification credits.
 
 **Example request:**
 
@@ -1522,14 +1576,14 @@ Estimates the credit/document cost of an assignment without creating it, returni
 - Method — options (`virtual` | `collect`) — required (default `virtual`).
 - Signers — fixedCollection (multiple) — required for `virtual`; optional for `collect`. Signer ID may be left empty here to estimate without a specific signer; an empty signer defaults to Email.
   - Signer ID — string — optional.
-  - Verification Method — options (`Email` | `Whatsapp` | `DigitalCertificate`) — optional.
+  - Verification Method — options (`Email` | `Whatsapp` | `DigitalCertificate` | `IdDocumentFaceMatchBasic`) — optional.
   - Notification Methods — multiOptions (`Email` | `Whatsapp`) — optional.
   - Step — number — optional (ignored for cost).
 - Entries (JSON) — json — required only when Method is `collect`.
 
 > Note: The Additional Fields (message / expires_at / copy_receivers) are not sent on this operation — they only show for Create.
 
-Pricing is 1 credit for an extra document when the plan allowance is exhausted, 0 credits per Email notification, 0.45 credits per WhatsApp notification, and 2 credits per `DigitalCertificate` signer in addition to the notification. Digital-certificate charges appear under breakdown code `SignatureDigitalCertificate`.
+Pricing is 1 credit for an extra document when the plan allowance is exhausted, 0 credits per Email notification, 0.45 credits per WhatsApp notification, and 0.5 credits per `DigitalCertificate` signer in addition to the notification. Digital-certificate charges appear under breakdown code `SignatureDigitalCertificate`.
 
 `blocking_reason` is `PendingPayment`, `InsufficientDocuments`, `InsufficientCredits`, or `null`.
 
@@ -1750,7 +1804,7 @@ Lists the WhatsApp notification messages sent for an assignment, including the r
 }
 ```
 
-When no WhatsApp notifications have been sent, the node returns `{ "notifications": [] }`.
+When no WhatsApp notifications have been sent, the node returns `{ "notifications": [] }`. Sandbox WhatsApp messages are simulated and their button URLs include signer access/verification codes for testing; production strips the URLs. Treat sandbox button links as secrets and use only the actual returned codes.
 
 #### Resend the signing notification to a signer
 
@@ -1930,6 +1984,81 @@ Signer-side decline (reject): the signer declines the assignment with a reason, 
 The API exposes signer rejection and document deletion in permitted statuses. It does not define a separate assignment cancellation endpoint.
 
 ---
+
+#### Get Identity Review
+
+**Operation:** Assignment → `getIdentityReview`.
+**Endpoint:** `GET /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/identity-verification`.
+**Authentication:** selected API key or OAuth credential for the document workspace (`documents:read`).
+**Node parameters:** Document (resource locator), Assignment ID and Signer ID, all required. IDs are encoded once as path segments.
+**Request:** no body.
+
+**Complete unwrapped `SignerIdentityReview` response:**
+
+```json
+{
+	"id": "<verification-id>",
+	"status": "InReview",
+	"provider": "AssinafyVerify",
+	"verification_method": "IdDocumentFaceMatchBasic",
+	"reason_codes": [{ "code": "NAME_MISMATCH", "description": "Name differs from the registered name" }],
+	"evidence_available": true,
+	"expected": { "name": "Example Signer", "cpf": "<cpf>" },
+	"document": { "type": "CNH", "name": "EXAMPLE SIGNER", "cpf": "<cpf>" },
+	"matches": { "cpf": true, "name": 0.6, "birth_date": null },
+	"checks": [{ "name": "name", "result": "review", "score": 0.6, "reasons": ["NAME_MISMATCH"] }],
+	"images": ["document_front", "document_back", "face"],
+	"ruleset_version": "<ruleset-version>",
+	"evidence_sha256": "<sha256>",
+	"reviewed_by": null,
+	"reviewed_at": null,
+	"review_note": null,
+	"completed_at": null
+}
+```
+
+`id`, `provider` and `verification_method` are strings; provider is `AssinafyVerify` and method is `IdDocumentFaceMatchBasic`. `status` is `Pending`, `InReview`, `Approved`, `Declined`, `Expired` or `Abandoned`. `reason_codes` contains `{code:string,description:string}` entries. `evidence_available` is boolean. `expected`, `document` and `matches` are nullable objects; their fields are nullable strings except `matches.cpf`/`birth_date` (nullable booleans) and `matches.name` (nullable number, similarity 0–1). `checks` contains `{name:string,result:string,score:number|null,reasons:string[]}`. `images` is an array of `document_front`, `document_back`, `document_pdf` or `face`, available only InReview and empty after a decision. `ruleset_version`, `evidence_sha256` and `review_note` are nullable strings; `reviewed_by` is null or `{id:string,name:string}`; `reviewed_at` and `completed_at` are nullable ISO 8601 timestamps.
+
+The stored evidence is a summary, without images or biometrics. `evidence_available` may be false because no evidence exists or fetching is incomplete. Provider-approved verifications without account review have evidence on the `signer_identity_verified` activity instead. HTTP 404 means assignment, signer or verification not found; HTTP 401 means authentication failed.
+
+#### Download Identity Review Image
+
+**Operation:** Assignment → `downloadIdentityReviewImage`.
+**Endpoint:** `GET /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/identity-verification/images/{name}`.
+**Authentication:** selected API key or OAuth credential (`documents:read`).
+**Node parameters:** Document, Assignment ID and Signer ID (required); Image Name (`document_front`, default; `document_back`, `document_pdf` or `face`); Put Output In Field (default `data`). Choose an image listed in the open review's `images`.
+**Request:** no body.
+**Response media types:** `image/jpeg`, `image/png` or `application/pdf`, with `Cache-Control: no-store`. No JSON envelope. The node writes the bytes using n8n binary storage and emits metadata:
+
+```json
+{
+	"documentId": "<document-id>",
+	"assignmentId": "<assignment-id>",
+	"signerId": "<signer-id>",
+	"name": "face",
+	"fileName": "<signer-id>-face.jpg",
+	"mimeType": "image/jpeg",
+	"size": 12345
+}
+```
+
+All metadata fields are strings except `size` (bytes, integer). The binary is attached under the selected property. Images are fetched from the provider and available only while InReview. HTTP 404 also means the review has closed or the named image is absent. Unknown image names and empty binary responses fail. Restrict execution-data access and retention because evidence contains identity documents and face photos.
+
+#### Decide Identity Review
+
+**Operation:** Assignment → `decideIdentityReview`.
+**Endpoint:** `POST /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/identity-verification/review`.
+**Authentication:** selected API key or OAuth credential (`documents:write`).
+**Node parameters:** Document, Assignment ID and Signer ID (required); Decision (`Approved`, default, or `Rejected`); Review Note (optional, up to 2000 Unicode code points).
+**Request media type:** `application/json`.
+
+```json
+{ "decision": "Approved", "note": "Reviewed by the account operator" }
+```
+
+The complete request schema is `{decision:"Approved"|"Rejected",note?:string|null}`. The node omits a blank note. The response is the complete `SignerIdentityReview` object described above, with the decided status, reviewer and timestamps filled in, and `images: []`.
+
+Requires InReview verification and a document in `pending_signature` or `pending_identity_review`. Approval releases certification after all signatures and all other reviews complete. Rejection cancels the document as `rejected_by_user` and sends cancellation notices to every signer and copy receiver; the review note is logged and sent to the provider but never shown to signers. The signer receives no separate decision message. HTTP 400 means invalid decision, verification no longer InReview or document no longer awaiting signatures; HTTP 404 means assignment, signer or verification not found. Reconcile the review before repeating a decision after an uncertain result.
 
 ### Template
 
@@ -2525,7 +2654,7 @@ Lists the workspace's webhook endpoints, oldest first, one n8n item per endpoint
 
 **Endpoint:** `GET /accounts/{accountId}/webhooks/endpoints`
 
-**Node parameters:** none.
+**Node parameters:** Filters → URL — optional exact delivery URL. When set, the request adds `?url=<registered-url>`.
 
 **Example response (one item):**
 
@@ -2545,7 +2674,7 @@ Lists the workspace's webhook endpoints, oldest first, one n8n item per endpoint
 
 #### Create Endpoint
 
-Registers a new URL to receive the workspace's events. Creating an endpoint past the plan limit returns `403`; a URL already used by another endpoint of the workspace returns `400`. With signing enabled, a signing secret is generated; read it with **Get Endpoint Signing Secret**.
+Registers a new URL to receive the workspace's events. Creating an endpoint past the plan limit returns `403`; a URL already used by another endpoint of the workspace returns `400`. With signing enabled, the creation response includes `secret` once. Store it securely. API-key callers can also read it with **Get Endpoint Signing Secret**; OAuth callers must delete and recreate the endpoint if they lose it.
 
 **Endpoint:** `POST /accounts/{accountId}/webhooks/endpoints`
 
@@ -2615,6 +2744,22 @@ Stops delivering events to the endpoint and frees its slot.
 { "deleted": true, "id": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4" }
 ```
 
+#### Delete Endpoint by URL
+
+**Operation:** Webhook → `deleteEndpointByUrl`.
+**Endpoint:** `DELETE /accounts/{accountId}/webhooks/endpoints?url=<registered-url>`.
+**Authentication:** API key or OAuth credential (`webhooks:write`).
+**Node parameters:** URL — required, exact delivery URL, including its query. It must be HTTPS (HTTP only for loopback), without user information or a fragment.
+**Request:** no body; the HTTP client URL-encodes the query value.
+**API response:** `{ "status": 200, "message": "", "data": [] }`.
+**Complete node output:**
+
+```json
+{ "deleted": true, "url": "https://example.com/hooks/assinafy?app=n8n" }
+```
+
+Deletion stops delivery and frees the endpoint slot. HTTP 400 means missing URL; HTTP 404 means no endpoint in this workspace has that exact URL. Other endpoints are unchanged.
+
 #### Get Endpoint Signing Secret
 
 Returns the secret used to sign deliveries to the endpoint. Returns `400` when signing is disabled. Not available to OAuth applications; with OAuth2 authentication the node fails before sending the request.
@@ -2658,7 +2803,7 @@ Updates the workspace's oldest webhook endpoint, creating it when the workspace 
 - Events — multiOptions — optional — event types to subscribe to. If left empty, the SDK falls back to the default set (`document_ready`, `document_prepared`, `signer_signed_document`, `signer_rejected_document`, `document_processing_failed`).
 - Is Active — boolean — optional — whether delivery is active (default `true`).
 
-Available event values: `assignment_created`, `document_metadata_ready`, `document_prepared`, `document_processing_failed`, `document_ready`, `document_uploaded`, `signature_requested`, `signer_created`, `signer_data_confirmed`, `signer_email_verified`, `signer_rejected_document`, `signer_signed_document`, `signer_viewed_document`, `signer_whatsapp_verified`, `template_created`, `template_processed`, `template_processing_failed`, `user_rejected_document`.
+Available event values: `assignment_created`, `document_metadata_ready`, `document_prepared`, `document_processing_failed`, `document_ready`, `document_uploaded`, `signature_requested`, `signer_created`, `signer_data_confirmed`, `signer_email_verified`, `signer_identity_review_approved`, `signer_identity_review_rejected`, `signer_identity_review_required`, `signer_identity_verification_failed`, `signer_identity_verified`, `signer_rejected_document`, `signer_signed_document`, `signer_viewed_document`, `signer_whatsapp_verified`, `template_created`, `template_processed`, `template_processing_failed`, `user_rejected_document`.
 
 **Example request:**
 
@@ -2981,6 +3126,11 @@ The event-specific contract is:
 | `signer_created`             | User    | Signer   | `signer_full_name`                                                                                      |
 | `signer_email_verified`      | Signer  | Document | `signer_email`                                                                                          |
 | `signer_whatsapp_verified`   | Signer  | Document | `signer_whatsapp_phone_number`                                                                          |
+| `signer_identity_verified` | Signer | Document | `signer_full_name`, `evidence` when available |
+| `signer_identity_verification_failed` | Signer | Document | `signer_full_name`, `reason` |
+| `signer_identity_review_required` | Signer | Document | `signer_full_name`, `reason_codes` |
+| `signer_identity_review_approved` | Signer | Document | `signer_full_name`, `reviewer_id`, `reviewer_name`, `reason_codes` |
+| `signer_identity_review_rejected` | Signer | Document | `signer_full_name`, `reviewer_id`, `reviewer_name`, `note` |
 | `signer_data_confirmed`      | Signer  | Document | `signer_email`                                                                                          |
 | `signer_viewed_document`     | Signer  | Document | `signer_full_name`                                                                                      |
 | `signer_signed_document`     | Signer  | Document | `signer_full_name`                                                                                      |

@@ -64,6 +64,11 @@ export const webhookDescription: INodeProperties[] = [
 				action: 'Delete a webhook endpoint',
 			},
 			{
+				name: 'Delete Endpoint by URL',
+				value: 'deleteEndpointByUrl',
+				action: 'Delete a webhook endpoint by its exact delivery URL',
+			},
+			{
 				name: 'Get Endpoint',
 				value: 'getEndpoint',
 				action: 'Get a webhook endpoint',
@@ -130,7 +135,24 @@ export const webhookDescription: INodeProperties[] = [
 		required: true,
 		placeholder: 'https://example.com/hooks/assinafy',
 		description: 'HTTPS delivery URL. HTTP is accepted only for loopback development hosts.',
-		displayOptions: { show: showOnly(['register', 'createEndpoint']) },
+		displayOptions: { show: showOnly(['register', 'createEndpoint', 'deleteEndpointByUrl']) },
+	},
+	{
+		displayName: 'Filters',
+		name: 'endpointFilters',
+		type: 'collection',
+		placeholder: 'Add Filter',
+		default: {},
+		displayOptions: { show: showOnly(['listEndpoints']) },
+		options: [
+			{
+				displayName: 'URL',
+				name: 'url',
+				type: 'string',
+				default: '',
+				description: 'Filter by the exact delivery URL',
+			},
+		],
 	},
 	{
 		displayName: 'Notification Email',
@@ -306,8 +328,12 @@ export async function executeWebhook(
 			return listDispatches.call(this, itemIndex);
 		case 'retryDispatch':
 			return wrap(await retryDispatch.call(this, itemIndex));
-		case 'listEndpoints':
-			return asArray<IDataObject>(await endpointRequest(this, 'GET')).map((json) => ({ json }));
+		case 'listEndpoints': {
+			const filters = this.getNodeParameter('endpointFilters', itemIndex, {}) as IDataObject;
+			return asArray<IDataObject>(
+				await endpointRequest(this, 'GET', '', undefined, cleanQs(filters)),
+			).map((json) => ({ json }));
+		}
 		case 'createEndpoint':
 			return wrap(await endpointRequest(this, 'POST', '', createEndpointBody(this, itemIndex)));
 		case 'getEndpoint':
@@ -325,6 +351,11 @@ export async function executeWebhook(
 			const path = endpointPath(this, itemIndex);
 			await endpointRequest(this, 'DELETE', path);
 			return wrap({ deleted: true, id: decodeURIComponent(path.slice(1)) });
+		}
+		case 'deleteEndpointByUrl': {
+			const url = validateUrl(this, this.getNodeParameter('url', itemIndex), itemIndex);
+			await endpointRequest(this, 'DELETE', '', undefined, { url });
+			return wrap({ deleted: true, url });
 		}
 		case 'getEndpointSecret':
 		case 'rotateEndpointSecret':
@@ -447,12 +478,14 @@ async function endpointRequest(
 	method: IHttpRequestMethods,
 	subPath = '',
 	body?: IDataObject,
+	qs?: IDataObject,
 ): Promise<IDataObject> {
 	const accountId = await getAccountId(ctx);
 	return assinafyApiRequest<IDataObject>(ctx, {
 		method,
 		path: `/accounts/${accountId}/webhooks/endpoints${subPath}`,
 		...(body ? { body } : {}),
+		qs,
 	});
 }
 

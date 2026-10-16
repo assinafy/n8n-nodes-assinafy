@@ -5,6 +5,25 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-10-16
+
+### Added
+
+- **Biometric (ID Document + Face Match)** verification (`IdDocumentFaceMatchBasic`) for assignment and template creation and cost estimates.
+- **Signer → Get Identity Verification** and **Start Identity Verification**, with explicit biometric-processing consent.
+- **Assignment → Get Identity Review**, **Download Identity Review Image** and **Decide Identity Review** for account approval or rejection.
+- Five identity-verification and review events in the action and trigger event selectors.
+- **Webhook → Delete Endpoint by URL** and an exact URL filter on **List Endpoints**.
+
+### Fixed
+
+- **Signer → Create and Update** preserve letters in alphanumeric CNPJ values while normalizing formatting.
+- **Document → Wait Until Ready** recognizes processed documents awaiting identity review or certification; **List** can filter by `pending_identity_review`.
+
+### Changed
+
+- Development and release workflows use Node.js 24.22.0 LTS. The minimum supported runtime remains Node.js 24.21.0.
+
 ## [1.8.1] - 2026-10-12
 
 ### Fixed

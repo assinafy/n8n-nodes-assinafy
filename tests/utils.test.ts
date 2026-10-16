@@ -7,7 +7,7 @@ import {
 	extractRequiredId,
 	normalizeHexColor,
 	parseStringList,
-	sanitizeCpf,
+	normalizeGovernmentId,
 	showOnly,
 	validateDigitalCertificateSteps,
 	validateSigningSteps,
@@ -139,22 +139,22 @@ describe('shared/utils', () => {
 		});
 	});
 
-	describe('sanitizeCpf', () => {
-		it('should remove all non-digit characters', () => {
-			expect(sanitizeCpf('123.456.789-00')).toBe('12345678900');
-			expect(sanitizeCpf('12345678900')).toBe('12345678900');
+	describe('normalizeGovernmentId', () => {
+		it('should remove CPF formatting', () => {
+			expect(normalizeGovernmentId('123.456.789-00')).toBe('12345678900');
+			expect(normalizeGovernmentId('12345678900')).toBe('12345678900');
 		});
 
 		it('should handle empty string', () => {
-			expect(sanitizeCpf('')).toBe('');
+			expect(normalizeGovernmentId('')).toBe('');
 		});
 
 		it('should handle string with only special characters', () => {
-			expect(sanitizeCpf('...---...')).toBe('');
+			expect(normalizeGovernmentId('...---...')).toBe('');
 		});
 
-		it('should preserve digits only', () => {
-			expect(sanitizeCpf('abc123def456')).toBe('123456');
+		it('should preserve and uppercase alphanumeric CNPJ letters', () => {
+			expect(normalizeGovernmentId('12.abc.345/01de-35')).toBe('12ABC34501DE35');
 		});
 	});
 

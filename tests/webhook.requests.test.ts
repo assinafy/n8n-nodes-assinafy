@@ -149,6 +149,38 @@ describe('webhook request construction', () => {
 			expect(result.map((item) => item.json.id)).toEqual(['ep_1', 'ep_2']);
 		});
 
+		it('filters endpoints by exact URL', async () => {
+			const url = 'https://example.com/hook?app=n8n';
+			const { ctx, requests } = makeCtx({ endpointFilters: { url } }, { response: [] });
+			await executeWebhook.call(ctx, 0, 'listEndpoints');
+			expect(lastAuth(requests)).toMatchObject({ method: 'GET', url: ENDPOINTS, qs: { url } });
+		});
+
+		it('deletes an endpoint by exact URL using OAuth', async () => {
+			const url = 'https://example.com/hook?app=n8n';
+			const { ctx, requests, httpRequestWithAuthentication } = makeCtx({
+				url,
+				authentication: 'oAuth2',
+			});
+			expect(await executeWebhook.call(ctx, 0, 'deleteEndpointByUrl')).toEqual({
+				json: { deleted: true, url },
+			});
+			expect(lastAuth(requests)).toMatchObject({ method: 'DELETE', url: ENDPOINTS, qs: { url } });
+			expect(lastAuth(requests).body).toBeUndefined();
+			expect(httpRequestWithAuthentication).toHaveBeenCalledWith(
+				'assinafyOAuth2Api',
+				expect.any(Object),
+			);
+		});
+
+		it('rejects an empty delete URL before making a request', async () => {
+			const { ctx, requests } = makeCtx({ url: '' });
+			await expect(executeWebhook.call(ctx, 0, 'deleteEndpointByUrl')).rejects.toThrow(
+				'valid HTTPS URL',
+			);
+			expect(requests).toHaveLength(0);
+		});
+
 		it('creates an endpoint with name and signing', async () => {
 			const { ctx, requests } = makeCtx({
 				url: 'https://example.com/hook',

@@ -1,5 +1,20 @@
 import type { INodeProperties } from 'n8n-workflow';
 
+export const verificationMethodField: INodeProperties = {
+	displayName: 'Verification Method',
+	name: 'verification_method',
+	type: 'options',
+	default: 'Email',
+	description:
+		'Biometric requires the ID Document + Face Match feature and a valid signer CPF. Digital Certificate requires its plan feature and CPF/CNPJ. Estimate the cost before sending.',
+	options: [
+		{ name: 'Biometric (ID Document + Face Match)', value: 'IdDocumentFaceMatchBasic' },
+		{ name: 'Digital Certificate', value: 'DigitalCertificate' },
+		{ name: 'Email', value: 'Email' },
+		{ name: 'WhatsApp', value: 'Whatsapp' },
+	],
+};
+
 /** `document` as a resourceLocator: list picker, by ID, or by URL. */
 export const documentResourceLocator: INodeProperties = {
 	displayName: 'Document',

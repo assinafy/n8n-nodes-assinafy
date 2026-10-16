@@ -5,6 +5,17 @@ import { makeCtx, lastAuth, lastPublic } from './helpers';
 const BASE = 'https://api.assinafy.com.br/v1';
 
 describe('signer request construction', () => {
+	it.each(['create', 'update'])('preserves alphanumeric CNPJ in %s', async (operation) => {
+		const government_id = '12.abc.345/01de-35';
+		const { ctx, requests } = makeCtx({
+			fullName: 'Example Signer',
+			signerId: 'signer_1',
+			additionalFields: { government_id },
+			updateFields: { government_id },
+		});
+		await executeSigner.call(ctx, 0, operation);
+		expect(lastAuth(requests).body.government_id).toBe('12ABC34501DE35');
+	});
 	it('creates a signer with the documented fields', async () => {
 		const { ctx, requests } = makeCtx({
 			fullName: 'Jane Doe',
@@ -28,7 +39,10 @@ describe('signer request construction', () => {
 			additionalFields: { government_id: '390.533.447-05' },
 		});
 		await executeSigner.call(ctx as any, 0, 'create');
-		expect(lastAuth(requests).body).toEqual({ full_name: 'Jane Doe', government_id: '39053344705' });
+		expect(lastAuth(requests).body).toEqual({
+			full_name: 'Jane Doe',
+			government_id: '39053344705',
+		});
 	});
 
 	it('uploadSignature accepts only PNG images', async () => {

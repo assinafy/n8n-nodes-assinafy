@@ -25,7 +25,7 @@ GitHub Packages may be used as an optional release mirror. Installing from that 
 
 Publication to npmjs is required for n8n's verified community-node submission process. Availability in n8n Cloud still depends on n8n review and catalog approval; npm publication alone does not imply Cloud availability.
 
-The package declares `n8n-workflow` as a peer dependency so the installed n8n instance supplies the runtime. Use **Node.js 24.21.0 LTS** for development, builds, and tests. Your n8n runtime must satisfy the package's `node >=24.21.0` requirement; the official n8n image supplies its own compatible Node.js version. Assinafy accepts only HTTPS with TLS 1.2 or higher, which Node.js uses by default; do not lower the minimum with `--tls-min-v1.0` or `--tls-min-v1.1`.
+The package declares `n8n-workflow` as a peer dependency so the installed n8n instance supplies the runtime. Use **Node.js 24.22.0 LTS** for development, builds, and tests. Your n8n runtime must satisfy the package's `node >=24.21.0` requirement; the official n8n image supplies its own compatible Node.js version. Assinafy accepts only HTTPS with TLS 1.2 or higher, which Node.js uses by default; do not lower the minimum with `--tls-min-v1.0` or `--tls-min-v1.1`.
 
 For production hosting, use the supported official n8n image, a stable HTTPS hostname, persistent data, and backups of the database and credential encryption key. Keep every queue worker on the same n8n version with this package installed. Follow n8n's [Docker deployment guidance](https://docs.n8n.io/deploy/host-n8n/install-options/install-with-docker) for database and runtime configuration. The Compose service in this repository is an isolated local test instance.
 
@@ -85,7 +85,7 @@ Receive:  Assinafy Trigger → deduplicate event → route by event → Download
 
 1. Start with a Manual Trigger, Webhook, form, storage node, or another source that provides a non-empty PDF as binary data, up to 25 MB and 2,000 pages. The default binary property is `data`. Confirm the intended recipients before sending.
 2. Add **Assinafy → Document → Upload**, select the binary property, and name the node `Upload document`. Its output is the document object; the reusable ID expression is `={{ $('Upload document').first().json.id }}`. Persist the ID so a retry can reconcile the existing document.
-3. Add **Assinafy → Document → Wait Until Ready**. Set **Document ID** to the upload expression. Continue only after the status is `metadata_ready`, `pending_signature`, or `certificated`; `failed`, rejection, expiration, and timeout states raise an error.
+3. Add **Assinafy → Document → Wait Until Ready**. Set **Document ID** to the upload expression. Continue only after the status is `metadata_ready`, `pending_signature`, `pending_identity_review`, `certificating`, or `certificated`; `failed`, rejection, expiration, and timeout states raise an error.
 4. Add **Assinafy → Signer → Create** for each recipient. Only Full Name is mandatory, but a virtual email or WhatsApp assignment needs the matching contact field. **Reuse If Exists** searches every result page before creating another contact with the same email. Name the nodes, for example, `Create signer 1` and `Create signer 2`.
 5. Add **Assignment → Estimate Cost** before sending. Use the uploaded document ID and the same verification and notification options intended for Create. Check `has_sufficient_resources`, `total_credits`, and `blocking_reason` before allowing the assignment. Stop if the resources or expected cost are unacceptable.
 6. Add **Assignment → Create**:
@@ -94,7 +94,7 @@ Receive:  Assinafy Trigger → deduplicate event → route by event → Download
    - **Signer 1 ID:** `={{ $('Create signer 1').first().json.id }}`
    - **Signer 2 ID:** `={{ $('Create signer 2').first().json.id }}`
    - Set each signer's verification method, notification method, and `step`. Equal steps run in parallel; increasing steps enforce sequence.
-   - Verification methods: `Email` (code by email; 0 credits), `Whatsapp` (code over WhatsApp; requires `whatsapp_phone_number` and a paid plan; 0.45 credits for the paired WhatsApp notification), and `DigitalCertificate` (the signer's own ICP-Brasil A1 or A3 certificate in the browser; requires the plan's Digital Certificate feature, a CPF in `government_id`, the signer alone in its step; 0.5 credits plus its notification). `Email` verification pairs with `Email` notification and `Whatsapp` with `Whatsapp`; `DigitalCertificate` accepts either. Send one notification method per signer.
+   - Verification methods: `Email` (code by email; 0 credits), `Whatsapp` (code over WhatsApp; requires `whatsapp_phone_number` and a paid plan; 0.45 credits for the paired WhatsApp notification), and `DigitalCertificate` (the signer's own ICP-Brasil A1 or A3 certificate in the browser; requires the plan's Digital Certificate feature, a CPF or CNPJ in `government_id`, the signer alone in its step; 0.5 credits plus its notification). `Email` verification pairs with `Email` notification and `Whatsapp` with `Whatsapp`; `DigitalCertificate` and `IdDocumentFaceMatchBasic` accept either. Biometric verification (`IdDocumentFaceMatchBasic`) requires the ID Document + Face Match feature, a valid signer CPF, explicit biometric-processing consent, and a per-signer fee reported by Estimate Cost. Send one notification method per signer.
    - Add `expires_at`, `message`, or `copy_receivers` only when needed. Attach tags with **Document → Append Tags** or **Replace Tags**.
 7. Persist the returned assignment ID together with the document ID in your application or data store. Do not use automatic workflow retries around Create Assignment unless your workflow first checks whether the assignment already exists; only explicit HTTP 429 failures are retried by the node; other failures are returned to the workflow.
 
@@ -153,7 +153,7 @@ Each accepted delivery emits `{ event, headers, body }` as one n8n item; authent
 Where the API offers no webhook endpoints, the trigger falls back to the workspace's single subscription: activation replaces it, deactivation inactivates it only while it still matches this trigger, and **Verify Signature** is unavailable.
 
 The full event list (source of truth: `nodes/Assinafy/resources/webhookEvents.ts`, shown in the node's **Events** dropdown):
-`assignment_created`, `document_metadata_ready`, `document_prepared`, `document_processing_failed`, `document_ready`, `document_uploaded`, `signature_requested`, `signer_created`, `signer_data_confirmed`, `signer_email_verified`, `signer_rejected_document`, `signer_signed_document`, `signer_viewed_document`, `signer_whatsapp_verified`, `template_created`, `template_processed`, `template_processing_failed`, `user_rejected_document`. When no events are selected, the trigger subscribes to a sensible default set (`document_ready`, `document_prepared`, `signer_signed_document`, `signer_rejected_document`, `document_processing_failed`).
+`assignment_created`, `document_metadata_ready`, `document_prepared`, `document_processing_failed`, `document_ready`, `document_uploaded`, `signature_requested`, `signer_created`, `signer_data_confirmed`, `signer_email_verified`, `signer_identity_review_approved`, `signer_identity_review_rejected`, `signer_identity_review_required`, `signer_identity_verification_failed`, `signer_identity_verified`, `signer_rejected_document`, `signer_signed_document`, `signer_viewed_document`, `signer_whatsapp_verified`, `template_created`, `template_processed`, `template_processing_failed`, `user_rejected_document`. When no events are selected, the trigger subscribes to a sensible default set (`document_ready`, `document_prepared`, `signer_signed_document`, `signer_rejected_document`, `document_processing_failed`).
 
 ## Supported operations
 
@@ -164,7 +164,7 @@ The full event list (source of truth: `nodes/Assinafy/resources/webhookEvents.ts
 
 ### Signer access codes
 
-Operations marked **(Signer Side)** authenticate with a per-signer `signer-access-code` instead of the workspace API key. **No endpoint returns that code** — it reaches the signer only in the notification the API sends when an assignment is created or resent, by email or WhatsApp. The `signing_urls` on a new assignment are not a substitute: each one addresses the web signing page for the document (`https://app.assinafy.com.br/sign/{documentId}?email=…`) and carries no code, so passing its path segment as `signer-access-code` returns an HTTP 401 authentication error.
+Operations marked **(Signer Side)** authenticate with a per-signer `signer-access-code` instead of the workspace API key. **In production, no endpoint returns that code** — it reaches the signer only in the notification the API sends when an assignment is created or resent, by email or WhatsApp. Sandbox **List WhatsApp Notifications** exposes simulated button URLs with codes; production strips those URLs. The `signing_urls` on a new assignment are not a substitute: each one addresses the web signing page for the document (`https://app.assinafy.com.br/sign/{documentId}?email=…`) and carries no code, so passing its path segment as `signer-access-code` returns an HTTP 401 authentication error.
 
 Drive these operations only when a code enters the workflow through a step you control — an inbox-reading node, a WhatsApp integration, or a human pasting it in. To simply get a signer to their document, hand them the signing URL or use **Document → Send Public Token**. Owner administration uses the API-key credential; delegated document operations may use OAuth. See [Where a signer access code comes from](docs/OPERATIONS.md#where-a-signer-access-code-comes-from).
 
@@ -183,7 +183,7 @@ Drive these operations only when a code enters the workflow through a step you c
 | Download Page               | `GET /documents/{id}/pages/{pageId}/download`                                                                 |
 | Get Activities              | `GET /documents/{id}/activities`                                                                              |
 | Get Signing Progress        | derived from `GET /documents/{id}`                                                                            |
-| Wait Until Ready            | polls `GET /documents/{id}` until status is `metadata_ready`, `pending_signature`, or `certificated`          |
+| Wait Until Ready            | polls `GET /documents/{id}` until status is `metadata_ready`, `pending_signature`, `pending_identity_review`, `certificating`, or `certificated`          |
 | Create From Template        | `POST /accounts/{accountId}/templates/{templateId}/documents`                                                 |
 | Estimate Cost From Template | `POST /accounts/{accountId}/templates/{templateId}/documents/estimate-cost`                                   |
 | Verify                      | `GET /documents/{hash}/verify` — public; verifies a certificated document by its signature hash               |
@@ -213,8 +213,12 @@ Uploads accept a binary property from the previous node (must be a non-empty PDF
 | Confirm Data (Signer Side)       | `PUT /documents/{documentId}/signers/confirm-data?signer-access-code=…` |
 | Upload Signature (Signer Side)   | `POST /signature?signer-access-code=…&type=signature\|initial`          |
 | Download Signature (Signer Side) | `GET /signature/{type}?signer-access-code=…`                            |
+| Get Identity Verification (Signer Side) | `GET /signers/identity-verification?signer-access-code=…` |
+| Start Identity Verification (Signer Side) | `POST /signers/identity-verification?signer-access-code=…` — `{ "consent": true }` |
 
-Signer creation follows the published request body: only **Full Name** is required; email and WhatsApp are optional and may be added later before a remote signature request. Signer Update exposes `government_id` for a CPF or CNPJ and normalizes it to digits. Changing an unverified email/WhatsApp channel with requests in flight rotates its links and OTPs; a verified in-flight channel cannot be changed until its documents are certificated. Signer Create does not send the unsupported `cpf` or `metadata` keys.
+Signer creation follows the published request body: only **Full Name** is required; email and WhatsApp are optional and may be added later before a remote signature request. Signer Update exposes `government_id` for a CPF or CNPJ and removes formatting while preserving and uppercasing alphanumeric CNPJ letters. Changing an unverified email/WhatsApp channel with requests in flight rotates its links and OTPs; a verified in-flight channel cannot be changed until its documents are certificated. Signer Create does not send the unsupported `cpf` or `metadata` keys.
+
+For biometric verification, the signer explicitly consents before **Start Identity Verification (Signer Side)** opens a hosted capture session. Open the returned URL unchanged, including its fragment. Poll **Get Identity Verification (Signer Side)** with bounded waits. Only an `Expired` session can be restarted; `Declined` or `Abandoned` requires a new document and assignment. An `InReview` signer can sign while the account reviews the evidence. Use **Assignment → Get Identity Review**, **Download Identity Review Image**, and **Decide Identity Review**; approval releases certification once all signers finish, while rejection cancels the document and notifies signers and copy receivers. Download the certified artifact only after `certificated` status and artifact availability.
 
 ### Resource: Assignment
 
@@ -230,8 +234,11 @@ Signer creation follows the published request body: only **Full Name** is requir
 | Sign (Signer Side)          | `POST /documents/{documentId}/assignments/{assignmentId}?signer-access-code=…`                    |
 | Decline (Signer Side)       | `PUT /documents/{documentId}/assignments/{assignmentId}/reject?signer-access-code=…`              |
 | List                        | `GET /assignments?accountId={accountId}`                                                          |
+| Get Identity Review | `GET /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/identity-verification` |
+| Download Identity Review Image | `GET /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/identity-verification/images/{name}` |
+| Decide Identity Review | `POST /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/identity-verification/review` |
 
-The `method` can be `virtual` (remote signature via email or WhatsApp) or `collect` (field-placed signatures on the document). Each signer entry accepts optional `verification_method` (`Email`, `Whatsapp`, or `DigitalCertificate`), exactly one compatible `notification_methods` value when supplied, and sequential-signing `step`. Match the notification channel to the available signer contact data; when omitted, the API infers the notification channel from the verification method, defaulting both to `Email` when neither is supplied. `DigitalCertificate` requires the account feature, a signer CPF/CNPJ in `government_id`, and a signing step containing no other signer; it costs 2 credits per signer in addition to notification cost and produces the optional `pades` artifact. For `collect`, provide `entries` as JSON. `copy_receivers` are signer IDs, not email addresses.
+The `method` can be `virtual` (remote signature via email or WhatsApp) or `collect` (field-placed signatures on the document). Each signer entry accepts optional `verification_method` (`Email`, `Whatsapp`, `DigitalCertificate`, or `IdDocumentFaceMatchBasic`), exactly one compatible `notification_methods` value when supplied, and sequential-signing `step`. Match the notification channel to the available signer contact data; when omitted, the API infers the notification channel from the verification method, defaulting both to `Email` when neither is supplied. `DigitalCertificate` requires the account feature, a signer CPF/CNPJ in `government_id`, and a signing step containing no other signer; it costs 0.5 credits per signer in addition to notification cost and produces the optional `pades` artifact. `IdDocumentFaceMatchBasic` requires the ID Document + Face Match feature and a valid CPF; use Estimate Cost for its current fee. For `collect`, provide `entries` as JSON. `copy_receivers` are signer IDs, not email addresses.
 
 ### Resource: Template
 
@@ -340,11 +347,12 @@ User-account flows. Login operations return an access token used as `Authorizati
 
 | Operation                      | Endpoint                                                                 |
 | ------------------------------ | ------------------------------------------------------------------------ |
-| List Endpoints                 | `GET /accounts/{accountId}/webhooks/endpoints`                           |
+| List Endpoints                 | `GET /accounts/{accountId}/webhooks/endpoints` — URL filter                           |
 | Create Endpoint                | `POST /accounts/{accountId}/webhooks/endpoints`                          |
 | Get Endpoint                   | `GET /accounts/{accountId}/webhooks/endpoints/{endpointId}`              |
 | Update Endpoint                | `PUT /accounts/{accountId}/webhooks/endpoints/{endpointId}`              |
 | Delete Endpoint                | `DELETE /accounts/{accountId}/webhooks/endpoints/{endpointId}`           |
+| Delete Endpoint by URL | `DELETE /accounts/{accountId}/webhooks/endpoints?url={registeredUrl}` |
 | Get Endpoint Signing Secret    | `GET /accounts/{accountId}/webhooks/endpoints/{endpointId}/secret`       |
 | Rotate Endpoint Signing Secret | `POST /accounts/{accountId}/webhooks/endpoints/{endpointId}/secret/rotate` |
 | Register Subscription          | `PUT /accounts/{accountId}/webhooks/subscriptions`                       |
@@ -356,7 +364,7 @@ User-account flows. Login operations return an access token used as `Authorizati
 
 A workspace holds 1 endpoint, or up to 3 on paid plans. The subscription operations act on the oldest endpoint. Signing secrets require the API-key credential.
 
-See the [webhook delivery payload reference](docs/OPERATIONS.md#webhook-delivery-payloads) for the complete POST envelope, all 18 event-specific payload variants, success/retry/circuit-breaker behavior, and the trigger's n8n output shape.
+See the [webhook delivery payload reference](docs/OPERATIONS.md#webhook-delivery-payloads) for the complete POST envelope, all 23 event-specific payload variants, success/retry/circuit-breaker behavior, and the trigger's n8n output shape.
 
 ## Development
 

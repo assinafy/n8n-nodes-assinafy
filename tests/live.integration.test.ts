@@ -20,8 +20,8 @@
 //   ASSINAFY_BASE_URL=https://sandbox.assinafy.com.br/v1 \
 //   npx jest tests/live.integration.test.ts
 //
-// The 14 signer-facing endpoints authenticate with a `signer-access-code` that
-// no endpoint returns — it only reaches the signer by email/WhatsApp. Their test
+// Signer-facing endpoints authenticate with a `signer-access-code` delivered
+// by email/WhatsApp (sandbox WhatsApp notifications may expose test links). Their test
 // needs ASSINAFY_TEST_SIGNER_ACCESS_CODE, pasted from a real sandbox inbox, and
 // is skipped otherwise. See CONTRIBUTING.md for live-test configuration.
 //
@@ -35,6 +35,7 @@ import { executeTemplate } from '../nodes/Assinafy/resources/template';
 import { executeSigner } from '../nodes/Assinafy/resources/signer';
 import { executeSignerDocument } from '../nodes/Assinafy/resources/signerDocument';
 import { executeAuth } from '../nodes/Assinafy/resources/auth';
+import { WEBHOOK_EVENT_OPTIONS } from '../nodes/Assinafy/resources/webhookEvents';
 
 const env = process.env;
 const LIVE = env.ASSINAFY_LIVE === '1';
@@ -649,7 +650,7 @@ d('LIVE sandbox integration (real SDK code paths)', () => {
 		expect(estimate.json).toHaveProperty('total_credits');
 	});
 
-	destructiveIt('workspace: notification preferences round-trip', async () => {
+	workspaceIt('workspace: notification preferences round-trip', async () => {
 		const before = (await executeWorkspace.call(
 			liveCtx({}),
 			0,
@@ -676,7 +677,7 @@ d('LIVE sandbox integration (real SDK code paths)', () => {
 		}
 	});
 
-	destructiveIt('webhook: dispatch history and retry', async () => {
+	workspaceIt('webhook: dispatch history and retry', async () => {
 		const dispatches = (await executeWebhook.call(
 			liveCtx({ returnAll: false, limit: 5, filters: {} }),
 			0,
@@ -706,7 +707,7 @@ d('LIVE sandbox integration (real SDK code paths)', () => {
 				liveCtx({
 					fullName,
 					email: '',
-					additionalFields: { reuseIfExists: false },
+					additionalFields: { reuseIfExists: false, government_id: '12.abc.345/01de-35' },
 				}),
 				0,
 				'create',
@@ -714,6 +715,7 @@ d('LIVE sandbox integration (real SDK code paths)', () => {
 			signerId = created.json.id;
 			expect(signerId).toBeTruthy();
 			expect(created.json.email).toBeNull();
+			expect(created.json.government_id).toBe('12ABC34501DE35');
 
 			const listed = (await executeSigner.call(
 				liveCtx({ returnAll: false, limit: 100, filters: { search: fullName } }),
@@ -727,11 +729,15 @@ d('LIVE sandbox integration (real SDK code paths)', () => {
 
 			const updatedName = `Assinafy SDK Contactless Updated ${Date.now()}`;
 			const updated = (await executeSigner.call(
-				liveCtx({ signerId, updateFields: { full_name: updatedName } }),
+				liveCtx({
+					signerId,
+					updateFields: { full_name: updatedName, government_id: '12.ABC.345/01DE-35' },
+				}),
 				0,
 				'update',
 			)) as any;
 			expect(updated.json.full_name).toBe(updatedName);
+			expect(updated.json.government_id).toBe('12ABC34501DE35');
 		} finally {
 			if (signerId) await executeSigner.call(liveCtx({ signerId }), 0, 'delete');
 		}
@@ -746,6 +752,26 @@ d('LIVE sandbox integration (real SDK code paths)', () => {
 
 		const events = (await executeWebhook.call(liveCtx({}), 0, 'listEventTypes')) as any;
 		expect(events.json.eventTypes.length).toBeGreaterThan(0);
+		const eventIds = events.json.eventTypes.map((event: any) => event.id);
+		const supportedEvents = WEBHOOK_EVENT_OPTIONS.map(({ value }) => value);
+		for (const eventId of eventIds) expect(supportedEvents).toContain(eventId);
+	});
+
+	it('lists webhook endpoints with an exact URL filter without changing them', async () => {
+		const endpoints = (await executeWebhook.call(liveCtx({}), 0, 'listEndpoints')) as any[];
+		expect(Array.isArray(endpoints)).toBe(true);
+		const url = endpoints[0]?.json.url ?? 'https://example.com/unused-test-hook';
+		const filtered = (await executeWebhook.call(
+			liveCtx({ endpointFilters: { url } }),
+			0,
+			'listEndpoints',
+		)) as any[];
+		expect(filtered).toEqual(endpoints.filter((item) => item.json.url === url));
+	});
+
+	it('lists assignments for the configured workspace', async () => {
+		const assignments = await executeAssignment.call(liveCtx({ limit: 2 }), 0, 'list');
+		expect(Array.isArray(assignments)).toBe(true);
 	});
 
 	it('template list and get use the configured sandbox workspace', async () => {
@@ -927,7 +953,9 @@ d('LIVE sandbox integration (real SDK code paths)', () => {
 				)) as any;
 				expect(Array.isArray(whatsapp.json.notifications)).toBe(true);
 
-				const expiresAt = new Date(Date.now() + 7 * 86400_000).toISOString().replace(/\.\d+Z$/, 'Z');
+				const expiresAt = new Date(Date.now() + 7 * 86400_000)
+					.toISOString()
+					.replace(/\.\d+Z$/, 'Z');
 				const reset = (await executeAssignment.call(
 					liveCtx({ documentId, assignmentId, expiresAt }),
 					0,
@@ -990,7 +1018,6 @@ d('LIVE sandbox integration (real SDK code paths)', () => {
 					recipient: TEST_EMAIL_PRIMARY,
 					document: { id: documentId },
 				});
-
 			} finally {
 				try {
 					if (documentId) await executeDocument.call(liveCtx({ documentId }), 0, 'delete');

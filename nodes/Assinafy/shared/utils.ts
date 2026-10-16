@@ -213,8 +213,8 @@ export const showOnly = (resource: string) => (operation: string[]) => ({
 	operation,
 });
 
-export function sanitizeCpf(value: string): string {
-	return value.replace(/\D/g, '');
+export function normalizeGovernmentId(value: string): string {
+	return value.replace(/[^a-z0-9]/gi, '').toUpperCase();
 }
 
 export function parseStringList(value: unknown): string[] {

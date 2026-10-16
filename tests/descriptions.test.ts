@@ -20,6 +20,22 @@ const getOperations = (description: INodeProperties[]): string[] => {
 };
 
 describe('Resource Descriptions', () => {
+	it.each([
+		[assignmentDescription, 'signers'],
+		[documentDescription, 'templateSigners'],
+	])('offers all verification methods in signer rows', (description, name) => {
+		const rows = (description as INodeProperties[]).find((property) => property.name === name)!;
+		const group = rows.options![0] as any;
+		const method = group.values.find(
+			(property: INodeProperties) => property.name === 'verification_method',
+		);
+		expect(method.options.map((option: any) => option.value)).toEqual([
+			'IdDocumentFaceMatchBasic',
+			'DigitalCertificate',
+			'Email',
+			'Whatsapp',
+		]);
+	});
 	it('keeps both codex node versions at 1.0', () => {
 		expect(actionMetadata.nodeVersion).toBe('1.0');
 		expect(triggerMetadata.nodeVersion).toBe('1.0');
@@ -88,8 +104,10 @@ describe('Resource Descriptions', () => {
 				'downloadSignature',
 				'findByEmail',
 				'get',
+				'getIdentityVerification',
 				'getSelf',
 				'list',
+				'startIdentityVerification',
 				'update',
 				'uploadSignature',
 				'verifyCode',
@@ -113,9 +131,12 @@ describe('Resource Descriptions', () => {
 			const operations = getOperations(assignmentDescription);
 			expect(operations).toEqual([
 				'create',
+				'decideIdentityReview',
 				'decline',
+				'downloadIdentityReviewImage',
 				'estimateCost',
 				'estimateResendCost',
+				'getIdentityReview',
 				'getSignPage',
 				'list',
 				'listWhatsapp',
@@ -176,6 +197,7 @@ describe('Resource Descriptions', () => {
 			expect(operations).toEqual([
 				'createEndpoint',
 				'deleteEndpoint',
+				'deleteEndpointByUrl',
 				'getEndpoint',
 				'getEndpointSecret',
 				'get',

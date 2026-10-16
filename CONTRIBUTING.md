@@ -2,7 +2,7 @@
 
 Contributions are welcome through [GitHub issues](https://github.com/assinafy/n8n-nodes-assinafy/issues) and [pull requests](https://github.com/assinafy/n8n-nodes-assinafy/pulls). Fork the repository, create a branch from `main`, and open a pull request against `main`. Describe the problem, the resulting behavior, and how you verified the change.
 
-Use Node.js 24.21.0 LTS for development and GitHub Actions. With nvm, run `nvm install` and `nvm use` to select the version in `.nvmrc`. The official n8n container supplies its own supported Node.js runtime.
+Use Node.js 24.22.0 LTS for development and GitHub Actions. With nvm, run `nvm install` and `nvm use` to select the version in `.nvmrc`. The official n8n container supplies its own supported Node.js runtime.
 
 ```bash
 npm ci --strict-peer-deps
@@ -31,7 +31,7 @@ ASSINAFY_BASE_URL=https://sandbox.assinafy.com.br/v1 \
 npx jest tests/live.integration.test.ts --runInBand
 ```
 
-Mutation tests additionally require `ASSINAFY_LIVE_DESTRUCTIVE=1`. Assignment and notification checks that consume account credits also require `ASSINAFY_LIVE_CREDIT_MUTATIONS=1` and both test-email variables. Workspace create/logo/webhook/delete checks require the separate `ASSINAFY_LIVE_WORKSPACE_MUTATIONS=1` safety gate. Use disposable records, confirm cleanup in `finally`, and never point the suite at production. Do not mutate a primary logo, API key, subscription, or account.
+Mutation tests additionally require `ASSINAFY_LIVE_DESTRUCTIVE=1`. Assignment and notification checks that consume account credits also require `ASSINAFY_LIVE_CREDIT_MUTATIONS=1` and both test-email variables. Workspace create/logo/webhook/delete checks, notification-preference changes and webhook delivery retries require the separate `ASSINAFY_LIVE_WORKSPACE_MUTATIONS=1` safety gate. Use disposable records, confirm cleanup in `finally`, and never point the suite at production. Do not mutate a primary logo, API key, subscription, or account.
 
 ## Releasing
 
@@ -46,7 +46,7 @@ Prepare a versioned main commit and matching Git tag for releases. The GitHub ta
 
 Successful signer, social-login, password-reset, and verification flows require external tokens or inbox access. When those are unavailable, document the limitation and test request construction; do not describe an expected 401/404 route check as end-to-end success.
 
-Signer-side operations authenticate with a `signer-access-code` delivered in the signer's notification email or WhatsApp message. No endpoint returns this code, and an assignment's `signing_urls` do not contain it. Set `ASSINAFY_TEST_SIGNER_ACCESS_CODE` to the code received in a sandbox inbox to run the signer-side assertions; without it they skip.
+Signer-side operations authenticate with a `signer-access-code` delivered in the signer's notification email or WhatsApp message. Production endpoints do not return this code, and an assignment's `signing_urls` do not contain it. Sandbox WhatsApp notifications are simulated; List WhatsApp Notifications includes button URLs with test codes, while production strips them. Set `ASSINAFY_TEST_SIGNER_ACCESS_CODE` to an actual received sandbox code to run the signer-side assertions; without it they skip. Never fabricate a code from an assignment URL.
 
 ## Dependency updates
 
