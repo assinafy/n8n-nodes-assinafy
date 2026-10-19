@@ -6,7 +6,7 @@ export const verificationMethodField: INodeProperties = {
 	type: 'options',
 	default: 'Email',
 	description:
-		'Biometric requires the ID Document + Face Match feature and a valid signer CPF. Digital Certificate requires its plan feature and CPF/CNPJ. Estimate the cost before sending.',
+		'Biometric requires the ID Document + Face Match feature and a valid signer CPF. Digital Certificate requires a virtual assignment, its plan feature and CPF/CNPJ. Estimate the cost before sending.',
 	options: [
 		{ name: 'Biometric (ID Document + Face Match)', value: 'IdDocumentFaceMatchBasic' },
 		{ name: 'Digital Certificate', value: 'DigitalCertificate' },

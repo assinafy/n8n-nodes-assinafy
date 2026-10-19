@@ -138,7 +138,7 @@ Assignment and template signer rows use `verification_method` (`Email`, `Whatsap
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------- |
 | `Email`              | Signer has an email address.                                                                                                  | 0 credits                 |
 | `Whatsapp`           | Signer has `whatsapp_phone_number`; paid subscription.                                                                        | 0 credits                 |
-| `DigitalCertificate` | Digital Certificate feature (Standard/Pro), signer CPF/CNPJ in `government_id`, and no other signer in the same signing step. | 0.5 credits               |
+| `DigitalCertificate` | `method: virtual`, Digital Certificate feature (Standard/Pro), signer CPF/CNPJ in `government_id`, and no other signer in the same signing step. | 0.5 credits               |
 | `IdDocumentFaceMatchBasic` | ID Document + Face Match feature, valid signer CPF in `government_id`, and explicit consent to biometric processing. | Per-signer fee returned by Estimate Cost |
 
 Email notifications cost 0 credits. WhatsApp notifications require a paid subscription and cost 0.45 credits per notification.
@@ -147,7 +147,7 @@ Email notifications cost 0 credits. WhatsApp notifications require a paid subscr
 
 Biometric verification opens a hosted capture session after the signer consents. Open the returned URL unchanged, including any fragment, and keep it out of logs and public storage. A Pending session must be reused. Only Expired sessions can be restarted; Declined or Abandoned requires a new document and assignment. InReview lets the signer continue viewing, confirming data and signing, but certification waits for account approval. Once all signers finish, the document remains `pending_identity_review` until all reviews are approved; rejecting one cancels the document and notifies signers and copy receivers. Successful completion still requires `certificated` status and the certified artifact.
 
-For `DigitalCertificate`, a CPF requires that person's e-CPF or an e-CNPJ naming that person as legal representative. A CNPJ requires an e-CNPJ for that company from any representative. Signing is completed through Assinafy's ICP-Brasil A1/A3 browser flow, not the ordinary signer **Sign** operation, and produces the optional `pades` artifact. The cost-estimate response reports the signature charge with breakdown code `SignatureDigitalCertificate`; an extra document costs 1 credit when the plan allowance is exhausted.
+For `DigitalCertificate`, a CPF requires that person's e-CPF or an e-CNPJ naming that person as legal representative. A CNPJ requires an e-CNPJ for that company from any representative. Signing is completed through Assinafy's ICP-Brasil A1/A3 browser flow, which completes the signer's virtual assignment item; the ordinary signer **Sign** operation used for placed fields refuses certificate signers. Therefore `DigitalCertificate` requires `method: virtual`. Assignment Create and Estimate Cost reject `collect`, and both template operations first read the template and reject it when any placed field makes the resulting assignment `collect`. They fail before the creation or estimate request with stable error code `ASSINAFY_DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL`. The certificate flow produces the optional `pades` artifact. The cost-estimate response reports the signature charge with breakdown code `SignatureDigitalCertificate`; an extra document costs 1 credit when the plan allowance is exhausted.
 
 Assignment Create and Create From Template reject multiple notification channels before sending. Cost estimates forward the selected channels to the API for pricing.
 
@@ -575,7 +575,7 @@ Creates a document from a template, mapping one signer entry per template role.
 - Additional Fields > Message — string — optional — message for the signing invitation.
 - Additional Fields > Tag Names — string (multiple) — optional — tag names to attach (missing tags auto-created). Each value is kept as one tag even when it contains a comma; a scalar comma-delimited expression is split.
 
-The node validates signing steps client-side. `step` is only sent when > 0; `verification_method` and `notification_methods` are only sent when present. A `DigitalCertificate` signer must meet the [shared digital-certificate requirements](#verification-notification-and-digital-certificate-rules), including being alone in its signing step.
+The node validates signing steps client-side. `step` is only sent when > 0; `verification_method` and `notification_methods` are only sent when present. A `DigitalCertificate` signer must meet the [shared digital-certificate requirements](#verification-notification-and-digital-certificate-rules), including using a template without placed fields. The node reads the template first when any signer uses `DigitalCertificate` and rejects a resulting `collect` assignment before creating the document.
 
 **Example request:**
 
@@ -658,7 +658,7 @@ Estimates the credit/document cost of a template-based document without creating
 - Template ID — resourceLocator — required — the template to use, selected from a searchable list or entered by ID.
 - Signers — fixedCollection (multiple) — required — same row shape as Create From Template. Only `role_id`, `verification_method` (`Email`, `Whatsapp`, `DigitalCertificate`, or `IdDocumentFaceMatchBasic`), and one compatible `notification_methods` value (`Email` or `Whatsapp`) matter for cost. The node accepts the shared UI's `id` and `step` values but deliberately omits them from the request.
 
-The node requires at least one row and a `role_id` for each row. It sends only `signers`, strips create-only signer IDs and signing steps, and does not validate those ignored create-only values or send additional document fields. A `DigitalCertificate` estimate adds 0.5 credits per signer, plus 0 credits for Email or 0.45 credits for WhatsApp; the signature line uses breakdown code `SignatureDigitalCertificate`.
+The node requires at least one row and a `role_id` for each row. It sends only `signers`, strips create-only signer IDs and signing steps, and does not validate those ignored create-only values or send additional document fields. When any signer uses `DigitalCertificate`, it first reads the template and rejects placed fields before requesting an estimate. A valid virtual-template `DigitalCertificate` estimate adds 0.5 credits per signer, plus 0 credits for Email or 0.45 credits for WhatsApp; the signature line uses breakdown code `SignatureDigitalCertificate`.
 
 **Example request:**
 
@@ -1456,7 +1456,7 @@ Creates a signature request on a document. Use `virtual` to collect signatures r
   - Copy Receivers — string (multiple) — optional — signer IDs that receive a copy without signing.
 - Entries (JSON) — json — required only when Method is `collect` — array of `{ page_id, fields: [{ signer_id, field_id, display_settings }] }`. Each `display_settings` requires numeric `left`, `top`, `width`, `height`, and `fontSize`; `fontFamily` and `backgroundColor` are optional.
 
-The API infers omitted verification/notification methods as described in the [shared rules](#verification-notification-and-digital-certificate-rules). `DigitalCertificate` additionally requires the account feature, the signer's CPF/CNPJ in `government_id`, and a signing step with no other signer. It costs 0.5 credits per signer on top of Email (0) or WhatsApp (0.45) notification credits.
+The API infers omitted verification/notification methods as described in the [shared rules](#verification-notification-and-digital-certificate-rules). `DigitalCertificate` additionally requires `method: virtual`, the account feature, the signer's CPF/CNPJ in `government_id`, and a signing step with no other signer. The node rejects `collect` with code `ASSINAFY_DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL` before sending the request. A valid virtual assignment costs 0.5 credits per certificate signer on top of Email (0) or WhatsApp (0.45) notification credits.
 
 **Example request:**
 
@@ -1583,7 +1583,7 @@ Estimates the credit/document cost of an assignment without creating it, returni
 
 > Note: The Additional Fields (message / expires_at / copy_receivers) are not sent on this operation — they only show for Create.
 
-Pricing is 1 credit for an extra document when the plan allowance is exhausted, 0 credits per Email notification, 0.45 credits per WhatsApp notification, and 0.5 credits per `DigitalCertificate` signer in addition to the notification. Digital-certificate charges appear under breakdown code `SignatureDigitalCertificate`.
+Pricing is 1 credit for an extra document when the plan allowance is exhausted, 0 credits per Email notification, 0.45 credits per WhatsApp notification, and 0.5 credits per `DigitalCertificate` signer in addition to the notification. Digital-certificate charges appear under breakdown code `SignatureDigitalCertificate`. The node rejects a `collect` estimate containing a certificate signer with code `ASSINAFY_DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL` before sending the request.
 
 `blocking_reason` is `PendingPayment`, `InsufficientDocuments`, `InsufficientCredits`, or `null`.
 

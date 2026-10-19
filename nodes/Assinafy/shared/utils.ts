@@ -295,6 +295,25 @@ export function validateDigitalCertificateSteps(
 	}
 }
 
+/** Digital-certificate signing can complete only a virtual assignment item. */
+export function validateDigitalCertificateMethod(
+	ctx: IExecuteFunctions,
+	method: string,
+	signers: Array<{ verification_method?: unknown }>,
+	itemIndex: number,
+): void {
+	if (
+		method !== 'virtual' &&
+		signers.some((signer) => signer.verification_method === 'DigitalCertificate')
+	) {
+		throw new NodeOperationError(
+			ctx.getNode(),
+			'ASSINAFY_DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL: Digital Certificate signers require assignment method virtual',
+			{ itemIndex },
+		);
+	}
+}
+
 export function assertEmail(email: string): boolean {
 	return EMAIL_RE.test(email);
 }

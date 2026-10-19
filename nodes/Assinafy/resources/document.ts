@@ -28,6 +28,7 @@ import {
 	parseJsonParam,
 	parseStringList,
 	showOnly as showOnlyFor,
+	validateDigitalCertificateMethod,
 	validateDigitalCertificateSteps,
 	validateSigningSteps,
 	wrap,
@@ -921,6 +922,30 @@ function readTemplateSigners(
 	return signersRaw;
 }
 
+async function validateTemplateDigitalCertificateMethod(
+	this: IExecuteFunctions,
+	accountId: string,
+	templateId: string,
+	signers: IDataObject[],
+	itemIndex: number,
+): Promise<void> {
+	if (!signers.some((signer) => signer.verification_method === 'DigitalCertificate')) return;
+	const template = await assinafyApiRequest<IDataObject>(this, {
+		method: 'GET',
+		path: `/accounts/${accountId}/templates/${templateId}`,
+	});
+	const method =
+		Array.isArray(template.pages) &&
+		(template.pages as unknown[]).every((page) => {
+			if (!page || typeof page !== 'object') return false;
+			const fields = (page as IDataObject).fields;
+			return Array.isArray(fields) && fields.length === 0;
+		})
+			? 'virtual'
+			: 'collect';
+	validateDigitalCertificateMethod(this, method, signers, itemIndex);
+}
+
 async function createFromTemplate(
 	this: IExecuteFunctions,
 	itemIndex: number,
@@ -946,6 +971,13 @@ async function createFromTemplate(
 	}
 	const tags = parseStringList(additional.tags);
 	if (tags.length > 0) body.tags = tags;
+	await validateTemplateDigitalCertificateMethod.call(
+		this,
+		accountId,
+		templateId,
+		signersRaw,
+		itemIndex,
+	);
 
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'POST',
@@ -961,6 +993,13 @@ async function estimateCostFromTemplate(
 	const accountId = await getAccountId(this);
 	const templateId = extractRequiredId(this, 'templateId', 'Template ID', itemIndex);
 	const signersRaw = readTemplateSigners.call(this, itemIndex, false);
+	await validateTemplateDigitalCertificateMethod.call(
+		this,
+		accountId,
+		templateId,
+		signersRaw,
+		itemIndex,
+	);
 
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'POST',

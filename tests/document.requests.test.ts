@@ -301,16 +301,66 @@ describe('document request construction', () => {
 	});
 
 	it('estimates Digital Certificate cost from a template', async () => {
-		const { ctx, requests } = makeCtx({
-			templateId: 'tpl_1',
-			templateSigners: {
-				signer: [{ role_id: 'role_1', verification_method: 'DigitalCertificate' }],
+		const { ctx, requests } = makeCtx(
+			{
+				templateId: 'tpl_1',
+				templateSigners: {
+					signer: [{ role_id: 'role_1', verification_method: 'DigitalCertificate' }],
+				},
 			},
-		});
+			{ response: { pages: [] } },
+		);
 		await executeDocument.call(ctx as any, 0, 'estimateCostFromTemplate');
+		expect(requests[0].options).toMatchObject({
+			method: 'GET',
+			url: `${BASE}/accounts/acc_123/templates/tpl_1`,
+		});
 		expect(lastAuth(requests).body.signers).toEqual([
 			{ role_id: 'role_1', verification_method: 'DigitalCertificate' },
 		]);
+	});
+
+	it.each(['createFromTemplate', 'estimateCostFromTemplate'])(
+		'rejects Digital Certificate when a template has placed fields during %s',
+		async (operation) => {
+			const { ctx, requests } = makeCtx(
+				{
+					templateId: 'tpl_1',
+					templateSigners: {
+						signer: [
+							{
+								role_id: 'role_1',
+								id: 'sig_1',
+								verification_method: 'DigitalCertificate',
+							},
+						],
+					},
+					additionalFields: {},
+				},
+				{ response: { pages: [{ fields: [{ role_id: 'role_1' }] }] } },
+			);
+			await expect(executeDocument.call(ctx as any, 0, operation)).rejects.toThrow(
+				'ASSINAFY_DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL',
+			);
+			expect(requests).toHaveLength(1);
+			expect(requests[0].options.method).toBe('GET');
+		},
+	);
+
+	it('rejects Digital Certificate when template fields cannot be verified', async () => {
+		const { ctx, requests } = makeCtx(
+			{
+				templateId: 'tpl_1',
+				templateSigners: {
+					signer: [{ role_id: 'role_1', verification_method: 'DigitalCertificate' }],
+				},
+			},
+			{ response: { id: 'tpl_1' } },
+		);
+		await expect(
+			executeDocument.call(ctx as any, 0, 'estimateCostFromTemplate'),
+		).rejects.toThrow('ASSINAFY_DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL');
+		expect(requests).toHaveLength(1);
 	});
 
 	it('rejects a Digital Certificate template signer sharing a signing step', async () => {

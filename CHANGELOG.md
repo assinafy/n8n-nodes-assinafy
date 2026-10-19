@@ -5,6 +5,12 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-10-19
+
+### Fixed
+
+- Assignment creation and cost estimates reject `DigitalCertificate` signers unless the assignment method is `virtual`. Template creation and estimates apply the same guard when the template has placed fields, before any chargeable request.
+
 ## [1.9.0] - 2026-10-16
 
 ### Added

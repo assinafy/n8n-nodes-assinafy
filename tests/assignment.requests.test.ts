@@ -107,6 +107,24 @@ describe('assignment request construction', () => {
 		]);
 	});
 
+	it.each(['create', 'estimateCost'])(
+		'rejects Digital Certificate for a collect assignment during %s',
+		async (operation) => {
+			const { ctx, requests } = makeCtx({
+				documentId: 'doc_1',
+				method: 'collect',
+				signers: {
+					signer: [{ id: 'sig_1', verification_method: 'DigitalCertificate' }],
+				},
+				entries: '[{"page_id":"p1","fields":[]}]',
+			});
+			await expect(executeAssignment.call(ctx as any, 0, operation)).rejects.toThrow(
+				'ASSINAFY_DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL',
+			);
+			expect(requests).toHaveLength(0);
+		},
+	);
+
 	it('rejects two notification methods for one signer before making a request', async () => {
 		const { ctx, requests } = makeCtx({
 			documentId: 'doc_1',

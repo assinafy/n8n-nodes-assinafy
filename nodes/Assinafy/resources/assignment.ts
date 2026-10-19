@@ -21,6 +21,7 @@ import {
 	requireAccessCode,
 	requireDeclineReason,
 	showOnly as showOnlyFor,
+	validateDigitalCertificateMethod,
 	validateDigitalCertificateSteps,
 	validateSigningSteps,
 	wrap,
@@ -524,6 +525,7 @@ function buildAssignmentBody(
 			itemIndex,
 		});
 	}
+	validateDigitalCertificateMethod(this, method, signerEntries, itemIndex);
 	if (!options.forEstimate) {
 		validateSigningSteps(
 			this,
