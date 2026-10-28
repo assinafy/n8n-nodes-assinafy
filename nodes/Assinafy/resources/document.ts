@@ -6,7 +6,12 @@ import type {
 	INodeProperties,
 } from 'n8n-workflow';
 import { NodeOperationError, sleep } from 'n8n-workflow';
-import { assinafyApiRequest, executeListOperation, getAccountId } from '../shared/transport';
+import {
+	assinafyApiRequest,
+	assinafyApiRequestAllItems,
+	executeListOperation,
+	getAccountId,
+} from '../shared/transport';
 import {
 	documentResourceLocator,
 	limitField,
@@ -28,9 +33,6 @@ import {
 	parseJsonParam,
 	parseStringList,
 	showOnly as showOnlyFor,
-	validateDigitalCertificateMethod,
-	validateDigitalCertificateSteps,
-	validateSigningSteps,
 	wrap,
 } from '../shared/utils';
 
@@ -218,7 +220,11 @@ export const documentDescription: INodeProperties[] = [
 					{ name: 'Collect', value: 'collect' },
 				],
 			},
-			{ ...sortField },
+			{
+				...sortField,
+				placeholder: '-updated_at',
+				description: 'Sort by name or updated_at; prefix with - for descending',
+			},
 			{
 				displayName: 'Tag IDs',
 				name: 'tags',
@@ -280,6 +286,11 @@ export const documentDescription: INodeProperties[] = [
 		options: [
 			{ ...searchField },
 			{
+				...sortField,
+				placeholder: '-updated_at',
+				description: 'Sort by name or updated_at; prefix with - for descending',
+			},
+			{
 				displayName: 'Status',
 				name: 'status',
 				type: 'string',
@@ -303,13 +314,29 @@ export const documentDescription: INodeProperties[] = [
 		default: {},
 		required: true,
 		description:
-			'One entry per template role. Use Template &gt; Get for role IDs and the Signer resource for signer IDs.',
+			'One entry per signing role and optional copy receiver. Use Template &gt; Get for role IDs; editor roles use Editor Fields instead.',
 		displayOptions: { show: showOnly(['createFromTemplate', 'estimateCostFromTemplate']) },
 		options: [
 			{
 				displayName: 'Signer',
 				name: 'signer',
 				values: [
+					{
+						displayName: 'Email',
+						name: 'email',
+						type: 'string',
+						default: '',
+						placeholder: 'signer@example.com',
+						description:
+							'When Signer ID is empty, reuse or create a signer by email. Ignored for Estimate Cost.',
+					},
+					{
+						displayName: 'Full Name',
+						name: 'name',
+						type: 'string',
+						default: '',
+						description: 'Full name for a signer created from Email. Ignored for Estimate Cost.',
+					},
 					{
 						displayName: 'Notification Methods',
 						name: 'notification_methods',
@@ -318,8 +345,14 @@ export const documentDescription: INodeProperties[] = [
 						description:
 							'Leave empty to infer the channel from Verification Method. Choose one channel per signer when providing it.',
 						options: [
-							{ name: 'Email', value: 'Email' },
-							{ name: 'WhatsApp', value: 'Whatsapp' },
+							{
+								name: 'Email',
+								value: 'Email',
+							},
+							{
+								name: 'WhatsApp',
+								value: 'Whatsapp',
+							},
 						],
 					},
 					{
@@ -335,7 +368,8 @@ export const documentDescription: INodeProperties[] = [
 						name: 'id',
 						type: 'string',
 						default: '',
-						description: 'Existing signer ID. Can be omitted for Estimate Cost.',
+						description:
+							'Existing signer ID. Takes precedence over Email; can be omitted for Estimate Cost.',
 					},
 					{
 						displayName: 'Step',
@@ -347,6 +381,13 @@ export const documentDescription: INodeProperties[] = [
 							'Optional signing order. Set every signer to a contiguous sequence starting at 1, or leave every signer at 0 to notify all at once.',
 					},
 					{ ...verificationMethodField },
+					{
+						displayName: 'WhatsApp Phone Number',
+						name: 'whatsapp_phone_number',
+						type: 'string',
+						default: '',
+						description: 'E.164 number for a signer created from Email. Ignored for Estimate Cost.',
+					},
 				],
 			},
 		],
@@ -485,6 +526,12 @@ export const documentDescription: INodeProperties[] = [
 		},
 	},
 
+	{
+		...sortField,
+		placeholder: '-id',
+		description: 'Sort activities by -id (default, newest first) or id (oldest first)',
+		displayOptions: { show: showOnly(['getActivities']) },
+	},
 	// --- downloadPage ---
 	{
 		displayName: 'Page ID',
@@ -728,11 +775,13 @@ async function downloadArtifact(
 
 async function getActivities(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const documentId = extractDocumentId.call(this, itemIndex);
-	const activities = await assinafyApiRequest<IDataObject[] | null>(this, {
+	const sort = this.getNodeParameter('sort', itemIndex, '') as string;
+	const activities = await assinafyApiRequestAllItems<IDataObject>(this, {
 		method: 'GET',
 		path: `/documents/${documentId}/activities`,
+		qs: cleanQs({ sort }),
 	});
-	return { documentId, activities: activities ?? [] };
+	return { documentId, activities };
 }
 
 async function getSigningProgress(
@@ -857,14 +906,22 @@ function buildTemplateSigners(
 ): IDataObject[] {
 	return signersRaw.map((s) => {
 		const entry: IDataObject = { role_id: s.role_id };
-		if (!options.forEstimate && s.id) entry.id = s.id;
+		if (!options.forEstimate) {
+			if (s.id) {
+				entry.id = s.id;
+			} else {
+				entry.email = String(s.email).trim();
+				if (s.name) entry.name = s.name;
+				if (s.whatsapp_phone_number) entry.whatsapp_phone_number = s.whatsapp_phone_number;
+			}
+		}
 		if (s.verification_method) entry.verification_method = s.verification_method;
 		if (Array.isArray(s.notification_methods) && (s.notification_methods as unknown[]).length > 0) {
 			entry.notification_methods = s.notification_methods;
 		}
 		if (!options.forEstimate) {
 			const step = Number(s.step ?? 0);
-			if (step > 0) entry.step = step;
+			if (step !== 0) entry.step = step;
 		}
 		return entry;
 	});
@@ -891,59 +948,25 @@ function readTemplateSigners(
 			});
 		}
 		if (requireSignerId && !signer.id) {
-			throw new NodeOperationError(this.getNode(), 'Each template signer requires a Signer ID', {
-				itemIndex,
-			});
-		}
-		if (
-			requireSignerId &&
-			Array.isArray(signer.notification_methods) &&
-			(signer.notification_methods as unknown[]).length > 1
-		) {
-			throw new NodeOperationError(
-				this.getNode(),
-				'Each template signer supports at most one Notification Method',
-				{ itemIndex },
-			);
+			const email = String(signer.email ?? '').trim();
+			if (!email) {
+				throw new NodeOperationError(
+					this.getNode(),
+					'Each template signer requires a Signer ID or Email',
+					{
+						itemIndex,
+					},
+				);
+			}
+			if (!assertEmail(email)) {
+				throw new NodeOperationError(this.getNode(), 'Invalid template signer email address', {
+					itemIndex,
+				});
+			}
 		}
 	}
-	if (requireSignerId) {
-		validateSigningSteps(
-			this,
-			signersRaw.map((signer) => signer.step as number | string | undefined),
-			itemIndex,
-		);
-		validateDigitalCertificateSteps(
-			this,
-			signersRaw as Array<{ step?: number | string; verification_method?: unknown }>,
-			itemIndex,
-		);
-	}
+	// The API resolves Signer, CopyReceiver and Editor roles before validating signing rules.
 	return signersRaw;
-}
-
-async function validateTemplateDigitalCertificateMethod(
-	this: IExecuteFunctions,
-	accountId: string,
-	templateId: string,
-	signers: IDataObject[],
-	itemIndex: number,
-): Promise<void> {
-	if (!signers.some((signer) => signer.verification_method === 'DigitalCertificate')) return;
-	const template = await assinafyApiRequest<IDataObject>(this, {
-		method: 'GET',
-		path: `/accounts/${accountId}/templates/${templateId}`,
-	});
-	const method =
-		Array.isArray(template.pages) &&
-		(template.pages as unknown[]).every((page) => {
-			if (!page || typeof page !== 'object') return false;
-			const fields = (page as IDataObject).fields;
-			return Array.isArray(fields) && fields.length === 0;
-		})
-			? 'virtual'
-			: 'collect';
-	validateDigitalCertificateMethod(this, method, signers, itemIndex);
 }
 
 async function createFromTemplate(
@@ -971,14 +994,6 @@ async function createFromTemplate(
 	}
 	const tags = parseStringList(additional.tags);
 	if (tags.length > 0) body.tags = tags;
-	await validateTemplateDigitalCertificateMethod.call(
-		this,
-		accountId,
-		templateId,
-		signersRaw,
-		itemIndex,
-	);
-
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'POST',
 		path: `/accounts/${accountId}/templates/${templateId}/documents`,
@@ -993,14 +1008,6 @@ async function estimateCostFromTemplate(
 	const accountId = await getAccountId(this);
 	const templateId = extractRequiredId(this, 'templateId', 'Template ID', itemIndex);
 	const signersRaw = readTemplateSigners.call(this, itemIndex, false);
-	await validateTemplateDigitalCertificateMethod.call(
-		this,
-		accountId,
-		templateId,
-		signersRaw,
-		itemIndex,
-	);
-
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'POST',
 		path: `/accounts/${accountId}/templates/${templateId}/documents/estimate-cost`,

@@ -21,6 +21,10 @@ import {
 
 const showOnly = showOnlyFor('workspace');
 const NOTIFICATION_PREFERENCE_KEYS = new Set([
+	'ContractExpired',
+	'ContractExpiring',
+	'ContractRenewalNotice',
+	'ContractRenewed',
 	'DocumentAboutToExpire',
 	'DocumentCancelled',
 	'DocumentCompleted',
@@ -197,6 +201,34 @@ export const workspaceDescription: INodeProperties[] = [
 		description: 'Only selected preferences are changed; all omitted preferences keep their value',
 		displayOptions: { show: showOnly(['updateNotificationPreferences']) },
 		options: [
+			{
+				displayName: 'Contract Expired',
+				name: 'ContractExpired',
+				type: 'boolean',
+				default: true,
+				description: 'Whether to email when a tracked contract ends without renewal',
+			},
+			{
+				displayName: 'Contract Expiring',
+				name: 'ContractExpiring',
+				type: 'boolean',
+				default: true,
+				description: 'Whether to email when a tracked contract ends in 45 or 30 days',
+			},
+			{
+				displayName: 'Contract Renewal Notice',
+				name: 'ContractRenewalNotice',
+				type: 'boolean',
+				default: true,
+				description: 'Whether to email when a tracked contract enters its notice period',
+			},
+			{
+				displayName: 'Contract Renewed',
+				name: 'ContractRenewed',
+				type: 'boolean',
+				default: true,
+				description: 'Whether to email when a tracked contract automatically renews into its next term',
+			},
 			{
 				displayName: 'Document About to Expire',
 				name: 'DocumentAboutToExpire',

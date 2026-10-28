@@ -22,6 +22,14 @@ describe('webhookEvents', () => {
 			const values = WEBHOOK_EVENT_OPTIONS.map((o) => o.value);
 			expect(values).toEqual([
 				'assignment_created',
+				'document_contract_amended',
+				'document_contract_amendment_updated',
+				'document_contract_expired',
+				'document_contract_expiring',
+				'document_contract_renewal_notice',
+				'document_contract_renewed',
+				'document_contract_terminated',
+				'document_contract_updated',
 				'document_metadata_ready',
 				'document_prepared',
 				'document_processing_failed',

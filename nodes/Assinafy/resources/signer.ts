@@ -187,6 +187,8 @@ export const signerDescription: INodeProperties[] = [
 		type: 'collection',
 		placeholder: 'Add Field',
 		default: {},
+		description:
+			'Only selected fields change. An empty Email, Government ID or WhatsApp Phone Number clears that field; Full Name cannot be cleared.',
 		displayOptions: { show: showOnly(['update']) },
 		options: [
 			{
@@ -501,13 +503,17 @@ async function updateSigner(
 ): Promise<IDataObject> {
 	const signerId = extractSignerId.call(this, itemIndex);
 	const updates = this.getNodeParameter('updateFields', itemIndex, {}) as IDataObject;
-	const body = cleanQs(updates);
+	const body: IDataObject = Object.fromEntries(
+		Object.entries(updates).filter(([, value]) => value !== undefined),
+	);
 	// Map saved `cpf` workflow values to the API's `government_id` field.
-	const governmentId = body.government_id ?? body.cpf;
+	const governmentId = body.government_id === undefined ? body.cpf : body.government_id;
 	delete body.cpf;
-	if (governmentId !== undefined) body.government_id = normalizeGovernmentId(String(governmentId));
+	if (governmentId !== undefined) {
+		body.government_id = governmentId === null ? null : normalizeGovernmentId(String(governmentId));
+	}
 	if (body.full_name !== undefined) {
-		body.full_name = String(body.full_name).trim();
+		body.full_name = String(body.full_name ?? '').trim();
 		if (!body.full_name) {
 			throw new NodeOperationError(this.getNode(), 'Full Name cannot be blank', { itemIndex });
 		}

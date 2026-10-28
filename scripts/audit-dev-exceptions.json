@@ -1,6 +1,6 @@
 {
 	"expires": "2026-11-05",
-	"reason": "Development-only n8n tooling pins Axios below its patched release; braces has no patched release. Remove each exception when upstream dependencies can be updated. Production auditing has no exceptions.",
+	"reason": "Development-only n8n tooling pins Axios and Zod below patched releases. Remove each advisory exception when upstream dependencies can be updated. Production auditing has no exceptions.",
 	"advisories": {
 		"axios": [
 			"GHSA-3pq3-5fj3-cg6v",
@@ -11,18 +11,8 @@
 			"GHSA-r4gj-5m52-g5wh",
 			"GHSA-x97p-jq2g-jp4f"
 		],
-		"braces": [
-			"GHSA-vfj7-8cjw-p6xm"
+		"zod": [
+			"GHSA-mrhx-c7xc-m3w5"
 		]
-	},
-	"critical": {
-		"expires": "2026-10-25",
-		"reason": "handlebars is pinned to 4.7.9 by every @n8n/node-cli release; 4.7.10 fixes these advisories. Development-only, never shipped in the node package. Remove once @n8n/node-cli depends on 4.7.10 or later.",
-		"advisories": {
-			"handlebars": [
-				"GHSA-8r5x-fm3f-whwj",
-				"GHSA-p8wg-vrv2-v86f"
-			]
-		}
 	}
 }

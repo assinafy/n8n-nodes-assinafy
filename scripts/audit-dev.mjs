@@ -50,20 +50,6 @@ if (process.argv.includes('--self-test')) {
 		url: `https://github.com/advisories/${id}`,
 	};
 	assert.throws(() => verify(report, lock, '2026-10-05'), /Unaccepted/);
-	const [criticalName, [criticalId]] = Object.entries(policy.critical.advisories)[0];
-	const critical = {
-		vulnerabilities: {
-			[criticalName]: {
-				severity: 'critical',
-				nodes: [`node_modules/${criticalName}`],
-				via: [{ severity: 'critical', url: `https://github.com/advisories/${criticalId}` }],
-			},
-		},
-	};
-	const criticalLock = { packages: { [`node_modules/${criticalName}`]: { dev: true } } };
-	verify(critical, criticalLock, '2026-10-11');
-	assert.throws(() => verify(critical, criticalLock, policy.critical.expires), /expired advisory/);
-	assert.throws(() => verify(critical, { packages: {} }, '2026-10-11'), /Production dependency/);
 	console.log('Development audit exception checks passed');
 } else {
 	const result = spawnSync('npm', ['audit', '--json'], {

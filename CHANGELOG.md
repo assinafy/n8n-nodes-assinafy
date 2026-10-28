@@ -5,6 +5,15 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-10-28
+
+- Add contract tracking: list and manage terms, link amendments, read contract families, renew and terminate with concurrency preconditions.
+- Add eight contract webhook events and four contract notification preferences. Support OAuth signing-secret rotation and deleting legacy endpoints by URL.
+- Resume held webhook endpoints on activation, limit signing-secret caching to 60 seconds, and reject invalid signing/activity flags.
+- Support template signers by email, preserve signer contact-field clearing, retrieve complete document activity history, and expose supported sort controls.
+- Require API-key authentication for biometric review evidence and decisions while retaining OAuth review-summary access.
+- Use Node.js 26 LTS for development and release tooling.
+
 ## [1.9.1] - 2026-10-19
 
 ### Fixed

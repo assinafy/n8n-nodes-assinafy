@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   verify:
-    name: Node.js 24 LTS
+    name: Node.js 26 LTS
     runs-on: ubuntu-24.04
     timeout-minutes: 20
 
@@ -25,7 +25,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Node.js 24 LTS
+      - name: Set up Node.js 26 LTS
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc

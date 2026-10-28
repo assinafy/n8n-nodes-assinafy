@@ -133,6 +133,22 @@ describe('AssinafyTrigger webhook()', () => {
 		);
 	});
 
+	it('does not fetch a signing secret when the URL token is invalid', async () => {
+		const calls: any[] = [];
+		await expect(
+			node.webhook.call(
+				webhookCtx({
+					verify: true,
+					body,
+					headers: signedHeaders(raw),
+					token: 'invalid-token',
+					calls,
+				}),
+			),
+		).rejects.toThrow('Invalid Assinafy webhook token');
+		expect(calls).toHaveLength(0);
+	});
+
 	it('redacts authentication, cookie, API-key and signature headers from workflow output', async () => {
 		const result = await node.webhook.call(
 			webhookCtx({
@@ -243,6 +259,52 @@ describe('AssinafyTrigger webhook()', () => {
 			}),
 		);
 		expect(calls).toHaveLength(2);
+	});
+
+	it('expires a cached secret after sixty seconds even when the old signature still matches', async () => {
+		const startedAt = 1_700_000_000_000;
+		jest.useFakeTimers({ now: startedAt });
+		try {
+			const oldSecret = ['whsec', Buffer.from('previous-key').toString('base64')].join('_');
+			const calls: any[] = [];
+			const oldHeaders = () => ({
+				...signedHeaders(raw),
+				'webhook-signature': `v1,${createHmac('sha256', Buffer.from('previous-key'))
+					.update(`msg_1.${now()}.${raw}`)
+					.digest('base64')}`,
+			});
+			const delivery = (headers: Record<string, string>, serverSecret = REFERENCE_VECTOR_KEY) =>
+				webhookCtx({
+					verify: true,
+					body,
+					rawBody: raw,
+					headers,
+					serverSecret,
+					calls,
+					path: 'cache-expiry',
+				});
+
+			await node.webhook.call(delivery(oldHeaders(), oldSecret));
+			expect(calls).toHaveLength(2);
+
+			jest.setSystemTime(startedAt + 59_999);
+			await node.webhook.call(delivery(oldHeaders()));
+			expect(calls).toHaveLength(2);
+
+			jest.setSystemTime(startedAt + 60_000);
+			await expect(node.webhook.call(delivery(oldHeaders()))).rejects.toThrow(
+				'Invalid Assinafy webhook signature',
+			);
+			expect(calls).toHaveLength(4);
+
+			const result = await node.webhook.call(delivery(signedHeaders(raw)));
+			expect(result.workflowData![0][0].json.event).toBe('document_ready');
+			expect(calls).toHaveLength(6);
+			await node.webhook.call(delivery(signedHeaders(raw)));
+			expect(calls).toHaveLength(6);
+		} finally {
+			jest.useRealTimers();
+		}
 	});
 
 	it('does not refetch the secret for a stale timestamp', async () => {
@@ -455,15 +517,18 @@ describe('AssinafyTrigger lifecycle', () => {
 		]);
 	});
 
-	it('delete() inactivates a matching legacy subscription', async () => {
-		const calls: any[] = [];
-		const subscription = { ...ownEndpoint(), signing_enabled: undefined };
-		delete subscription.signing_enabled;
-		await node.webhookMethods.default.delete.call(
-			hookCtx({ endpoints: null, subscription }, calls),
-		);
-		expect(calls[calls.length - 1].url).toBe(`${BASE}/inactivate`);
-	});
+	it.each([false, true])(
+		'delete() inactivates a matching legacy subscription (held: %s)',
+		async (isHeld) => {
+			const calls: any[] = [];
+			const subscription = { ...ownEndpoint({ is_held: isHeld }), signing_enabled: undefined };
+			delete subscription.signing_enabled;
+			await node.webhookMethods.default.delete.call(
+				hookCtx({ endpoints: null, subscription }, calls),
+			);
+			expect(calls[calls.length - 1].url).toBe(`${BASE}/inactivate`);
+		},
+	);
 
 	it('delete() leaves a newer replacement legacy subscription active', async () => {
 		const calls: any[] = [];
@@ -523,6 +588,31 @@ describe('AssinafyTrigger lifecycle', () => {
 			verify: true,
 		});
 		expect(await node.webhookMethods.default.checkExists.call(ctx)).toBe(true);
+	});
+
+	it('activation updates a held matching endpoint to resume deliveries', async () => {
+		const calls: any[] = [];
+		const ctx = hookCtx({ endpoints: [ownEndpoint({ is_held: true })] }, calls);
+		expect(await node.webhookMethods.default.checkExists.call(ctx)).toBe(false);
+		await node.webhookMethods.default.create.call(ctx);
+		expect(calls.find((call) => call.method === 'PUT')).toMatchObject({
+			url: `${BASE}/endpoints/ep_1`,
+			body: { is_active: true },
+		});
+		expect(calls.some((call) => call.method === 'POST')).toBe(false);
+	});
+
+	it('activation updates a held matching legacy subscription to resume deliveries', async () => {
+		const calls: any[] = [];
+		const subscription = { ...ownEndpoint({ is_held: true }), signing_enabled: undefined };
+		delete subscription.signing_enabled;
+		const ctx = hookCtx({ endpoints: null, subscription }, calls);
+		expect(await node.webhookMethods.default.checkExists.call(ctx)).toBe(false);
+		await node.webhookMethods.default.create.call(ctx);
+		expect(calls.find((call) => call.method === 'PUT')).toMatchObject({
+			url: `${BASE}/subscriptions`,
+			body: { is_active: true },
+		});
 	});
 
 	it('checkExists() is false when no legacy subscription is registered', async () => {

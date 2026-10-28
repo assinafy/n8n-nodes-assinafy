@@ -288,6 +288,16 @@ describe('assignment request construction', () => {
 		expect(result[0].json).toEqual({ id: 'asg_1' });
 	});
 
+	it('forwards the assignment sort order', async () => {
+		const { ctx, requests } = makeCtx({ sort: '-expires_at', limit: 10 }, { response: [] });
+		await executeAssignment.call(ctx, 0, 'list');
+		expect(lastAuth(requests).qs).toEqual({
+			accountId: 'acc_123',
+			sort: '-expires_at',
+			'per-page': 10,
+		});
+	});
+
 	it('reads the sign page with the access code (no auth)', async () => {
 		const { ctx, requests } = makeCtx({ signerAccessCode: 'code123' });
 		await executeAssignment.call(ctx as any, 0, 'getSignPage');

@@ -134,7 +134,8 @@ export const webhookDescription: INodeProperties[] = [
 		default: '',
 		required: true,
 		placeholder: 'https://example.com/hooks/assinafy',
-		description: 'HTTPS delivery URL. HTTP is accepted only for loopback development hosts.',
+		description:
+			'New delivery URLs must use HTTPS and resolve to a public address. Deletion accepts the exact registered URL, including a legacy HTTP URL. HTTP loopback is supported for local API fixtures.',
 		displayOptions: { show: showOnly(['register', 'createEndpoint', 'deleteEndpointByUrl']) },
 	},
 	{
@@ -223,7 +224,13 @@ export const webhookDescription: INodeProperties[] = [
 				default: [],
 				options: WEBHOOK_EVENT_OPTIONS,
 			},
-			{ displayName: 'Is Active', name: 'isActive', type: 'boolean', default: true },
+			{
+				displayName: 'Is Active',
+				name: 'isActive',
+				type: 'boolean',
+				default: true,
+				description: 'Whether to deliver events. Setting true also lifts a delivery-failure pause.',
+			},
 			endpointNameField,
 			{
 				displayName: 'Notification Email',
@@ -353,16 +360,19 @@ export async function executeWebhook(
 			return wrap({ deleted: true, id: decodeURIComponent(path.slice(1)) });
 		}
 		case 'deleteEndpointByUrl': {
-			const url = validateUrl(this, this.getNodeParameter('url', itemIndex), itemIndex);
+			const url = validateUrl(this, this.getNodeParameter('url', itemIndex), itemIndex, true);
 			await endpointRequest(this, 'DELETE', '', undefined, { url });
 			return wrap({ deleted: true, url });
 		}
 		case 'getEndpointSecret':
 		case 'rotateEndpointSecret':
-			if (getCredentialsType(this) === DELEGATED_CREDENTIAL_TYPE) {
+			if (
+				operation === 'getEndpointSecret' &&
+				getCredentialsType(this) === DELEGATED_CREDENTIAL_TYPE
+			) {
 				throw new NodeOperationError(
 					this.getNode(),
-					'Endpoint signing secrets are not available to OAuth applications; use API Key authentication',
+					'Get Endpoint Signing Secret is not available to OAuth applications; use API Key authentication or Rotate Endpoint Signing Secret',
 					{ itemIndex },
 				);
 			}
@@ -392,10 +402,12 @@ async function registerWebhook(this: IExecuteFunctions, itemIndex: number): Prom
 /** URL, email, events and active flag shared by Register Subscription and Create Endpoint. */
 function readDeliveryFields(ctx: IExecuteFunctions, itemIndex: number): IDataObject {
 	const events = validateEvents(ctx, ctx.getNodeParameter('events', itemIndex, []), itemIndex);
-	const isActive = ctx.getNodeParameter('isActive', itemIndex, true);
-	if (typeof isActive !== 'boolean') {
-		throw new NodeOperationError(ctx.getNode(), 'Is Active must be a boolean', { itemIndex });
-	}
+	const isActive = validateBoolean(
+		ctx,
+		ctx.getNodeParameter('isActive', itemIndex, true),
+		'Is Active',
+		itemIndex,
+	);
 	return {
 		url: validateUrl(ctx, ctx.getNodeParameter('url', itemIndex), itemIndex),
 		email: validateEmail(ctx, ctx.getNodeParameter('email', itemIndex), itemIndex),
@@ -404,12 +416,19 @@ function readDeliveryFields(ctx: IExecuteFunctions, itemIndex: number): IDataObj
 	};
 }
 
-function validateUrl(ctx: IExecuteFunctions, value: unknown, itemIndex: number): string {
-	const url = normalizeWebhookUrl(value);
+function validateUrl(
+	ctx: IExecuteFunctions,
+	value: unknown,
+	itemIndex: number,
+	allowLegacyHttp = false,
+): string {
+	const url = normalizeWebhookUrl(value, allowLegacyHttp);
 	if (!url) {
 		throw new NodeOperationError(
 			ctx.getNode(),
-			'Webhook URL must be a valid HTTPS URL (HTTP is allowed only for loopback hosts)',
+			allowLegacyHttp
+				? 'Webhook URL must be a valid absolute HTTP or HTTPS URL without user information or a fragment'
+				: 'Webhook URL must be a valid HTTPS URL (HTTP is allowed only for loopback hosts)',
 			{ itemIndex },
 		);
 	}
@@ -436,12 +455,26 @@ function validateEvents(ctx: IExecuteFunctions, events: unknown, itemIndex: numb
 	return events as string[];
 }
 
+function validateBoolean(
+	ctx: IExecuteFunctions,
+	value: unknown,
+	label: string,
+	itemIndex: number,
+): boolean {
+	if (typeof value !== 'boolean') {
+		throw new NodeOperationError(ctx.getNode(), `${label} must be a boolean`, { itemIndex });
+	}
+	return value;
+}
+
 function createEndpointBody(ctx: IExecuteFunctions, itemIndex: number): IDataObject {
 	const extra = ctx.getNodeParameter('additionalFields', itemIndex, {}) as IDataObject;
 	const body = readDeliveryFields(ctx, itemIndex);
 	const name = String(extra.name ?? '').trim();
 	if (name) body.name = name;
-	if (typeof extra.signingEnabled === 'boolean') body.signing_enabled = extra.signingEnabled;
+	if (extra.signingEnabled !== undefined) {
+		body.signing_enabled = validateBoolean(ctx, extra.signingEnabled, 'Signing Enabled', itemIndex);
+	}
 	return body;
 }
 
@@ -459,8 +492,17 @@ function updateEndpointBody(ctx: IExecuteFunctions, itemIndex: number): IDataObj
 		body.events = events;
 	}
 	if (fields.name !== undefined) body.name = String(fields.name).trim();
-	if (typeof fields.isActive === 'boolean') body.is_active = fields.isActive;
-	if (typeof fields.signingEnabled === 'boolean') body.signing_enabled = fields.signingEnabled;
+	if (fields.isActive !== undefined) {
+		body.is_active = validateBoolean(ctx, fields.isActive, 'Is Active', itemIndex);
+	}
+	if (fields.signingEnabled !== undefined) {
+		body.signing_enabled = validateBoolean(
+			ctx,
+			fields.signingEnabled,
+			'Signing Enabled',
+			itemIndex,
+		);
+	}
 	if (Object.keys(body).length === 0) {
 		throw new NodeOperationError(ctx.getNode(), 'Add at least one field to update', {
 			itemIndex,
@@ -517,7 +559,7 @@ function isEmptySubscription(subscription: IDataObject | null): boolean {
 	return !hasUrl && !hasEvents;
 }
 
-export function normalizeWebhookUrl(value: unknown): string | null {
+export function normalizeWebhookUrl(value: unknown, allowLegacyHttp = false): string | null {
 	const url = typeof value === 'string' ? value.trim() : '';
 	if (url.split('').some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) {
 		return null;
@@ -530,7 +572,8 @@ export function normalizeWebhookUrl(value: unknown): string | null {
 			hostname === '127.0.0.1' ||
 			hostname === '[::1]' ||
 			hostname === '::1';
-		return (parsed.protocol === 'https:' || (parsed.protocol === 'http:' && isLoopback)) &&
+		return (parsed.protocol === 'https:' ||
+			(parsed.protocol === 'http:' && (isLoopback || allowLegacyHttp))) &&
 			parsed.hostname &&
 			!parsed.username &&
 			!parsed.password &&

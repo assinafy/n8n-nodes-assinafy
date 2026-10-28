@@ -7,6 +7,7 @@ import type {
 import { NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
 
 import { documentDescription, executeDocument } from './resources/document';
+import { contractDescription, executeContract } from './resources/contract';
 import { signerDescription, executeSigner } from './resources/signer';
 import { assignmentDescription, executeAssignment } from './resources/assignment';
 import { workspaceDescription, executeWorkspace } from './resources/workspace';
@@ -31,7 +32,7 @@ export class Assinafy implements INodeType {
 		version: 1,
 		subtitle: '={{$parameter["operation"] + ": " + $parameter["resource"]}}',
 		description:
-			'Manage Assinafy documents, signers, assignments, templates, tags, workspaces and webhooks via the official REST API',
+			'Manage Assinafy documents, contracts, signers, assignments, templates, tags, workspaces and webhooks via the official REST API',
 		defaults: {
 			name: 'Assinafy',
 		},
@@ -71,6 +72,7 @@ export class Assinafy implements INodeType {
 				options: [
 					{ name: 'Assignment', value: 'assignment' },
 					{ name: 'Authentication', value: 'auth' },
+					{ name: 'Contract', value: 'contract' },
 					{ name: 'Document', value: 'document' },
 					{ name: 'Field Definition', value: 'field' },
 					{ name: 'OAuth', value: 'oauth' },
@@ -83,6 +85,7 @@ export class Assinafy implements INodeType {
 				],
 			},
 			...documentDescription,
+			...contractDescription,
 			...signerDescription,
 			...assignmentDescription,
 			...templateDescription,
@@ -116,6 +119,9 @@ export class Assinafy implements INodeType {
 				let result: INodeExecutionData | INodeExecutionData[];
 
 				switch (resource) {
+					case 'contract':
+						result = await executeContract.call(this, i, operation);
+						break;
 					case 'document':
 						result = await executeDocument.call(this, i, operation);
 						break;

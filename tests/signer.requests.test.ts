@@ -149,6 +149,47 @@ describe('signer request construction', () => {
 		expect(lastAuth(requests).body).toEqual({ government_id: '11122233344' });
 	});
 
+	it.each(['email', 'whatsapp_phone_number', 'government_id'])(
+		'preserves explicit empty and null clears for %s',
+		async (field) => {
+			for (const value of ['', null]) {
+				const { ctx, requests } = makeCtx({ signerId: 'sig_1', updateFields: { [field]: value } });
+				await executeSigner.call(ctx, 0, 'update');
+				expect(lastAuth(requests).body).toEqual({ [field]: value });
+			}
+		},
+	);
+
+	it('can clear government ID and email while changing a name', async () => {
+		const { ctx, requests } = makeCtx({
+			signerId: 'sig_1',
+			updateFields: {
+				full_name: 'Updated Example',
+				email: '',
+				government_id: null,
+				cpf: '12345678900',
+			},
+		});
+		await executeSigner.call(ctx, 0, 'update');
+		expect(lastAuth(requests).body).toEqual({
+			full_name: 'Updated Example',
+			email: '',
+			government_id: null,
+		});
+	});
+
+	it.each(['', null])('rejects clearing the required full name (%s)', async (full_name) => {
+		const { ctx, requests } = makeCtx({ signerId: 'sig_1', updateFields: { full_name } });
+		await expect(executeSigner.call(ctx, 0, 'update')).rejects.toThrow('Full Name cannot be blank');
+		expect(requests).toHaveLength(0);
+	});
+
+	it('rejects an update with only undefined fields', async () => {
+		const { ctx, requests } = makeCtx({ signerId: 'sig_1', updateFields: { email: undefined } });
+		await expect(executeSigner.call(ctx, 0, 'update')).rejects.toThrow('At least one update field');
+		expect(requests).toHaveLength(0);
+	});
+
 	it.each([
 		[{ signerId: 'sig_1', updateFields: {} }, 'At least one update field is required'],
 		[{ signerId: 'sig_1', updateFields: { full_name: '   ' } }, 'Full Name cannot be blank'],

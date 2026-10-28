@@ -129,6 +129,27 @@ describe('workspace request construction', () => {
 		expect(req.body).toEqual({ DocumentCompleted: false, SignerDeclined: true });
 	});
 
+	it('updates contract lifecycle notification preferences without dropping false values', async () => {
+		const preferences = {
+			ContractRenewalNotice: false,
+			ContractExpiring: true,
+			ContractExpired: false,
+			ContractRenewed: true,
+		};
+		const { ctx, requests } = makeCtx(
+			{ notificationPreferences: preferences },
+			{ response: { DocumentCompleted: true, ...preferences } },
+		);
+		await expect(executeWorkspace.call(ctx, 0, 'updateNotificationPreferences')).resolves.toEqual({
+			json: { DocumentCompleted: true, ...preferences },
+		});
+		expect(lastAuth(requests)).toMatchObject({
+			method: 'PUT',
+			url: `${BASE}/users/self/notification-preferences`,
+			body: preferences,
+		});
+	});
+
 	it('rejects an empty notification-preference update before the request', async () => {
 		const { ctx, requests } = makeCtx({ notificationPreferences: {} });
 		await expect(

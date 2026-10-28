@@ -6,6 +6,14 @@ import type { INodePropertyOptions } from 'n8n-workflow';
  */
 export const WEBHOOK_EVENT_OPTIONS: INodePropertyOptions[] = [
 	{ name: 'Assignment Created', value: 'assignment_created' },
+	{ name: 'Document Contract Amended', value: 'document_contract_amended' },
+	{ name: 'Document Contract Amendment Updated', value: 'document_contract_amendment_updated' },
+	{ name: 'Document Contract Expired', value: 'document_contract_expired' },
+	{ name: 'Document Contract Expiring', value: 'document_contract_expiring' },
+	{ name: 'Document Contract Renewal Notice', value: 'document_contract_renewal_notice' },
+	{ name: 'Document Contract Renewed', value: 'document_contract_renewed' },
+	{ name: 'Document Contract Terminated', value: 'document_contract_terminated' },
+	{ name: 'Document Contract Updated', value: 'document_contract_updated' },
 	{ name: 'Document Metadata Ready', value: 'document_metadata_ready' },
 	{ name: 'Document Prepared', value: 'document_prepared' },
 	{

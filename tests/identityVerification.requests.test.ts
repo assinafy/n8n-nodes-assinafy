@@ -149,6 +149,21 @@ describe('biometric identity verification', () => {
 		},
 	);
 
+	it.each(['downloadIdentityReviewImage', 'decideIdentityReview'])(
+		'rejects OAuth before requesting %s',
+		async (operation) => {
+			const { ctx, requests } = makeCtx({
+				...target,
+				authentication: 'oAuth2',
+				identityDecision: 'Approved',
+			});
+			await expect(executeAssignment.call(ctx, 0, operation)).rejects.toThrow(
+				'not available to OAuth applications',
+			);
+			expect(requests).toHaveLength(0);
+		},
+	);
+
 	it.each([
 		[{ identityDecision: 'approved' }, 'Decision must be'],
 		[{ identityDecision: 'Approved', identityReviewNote: 'x'.repeat(2001) }, 'at most 2000'],

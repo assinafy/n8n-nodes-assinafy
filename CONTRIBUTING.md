@@ -2,7 +2,7 @@
 
 Contributions are welcome through [GitHub issues](https://github.com/assinafy/n8n-nodes-assinafy/issues) and [pull requests](https://github.com/assinafy/n8n-nodes-assinafy/pulls). Fork the repository, create a branch from `main`, and open a pull request against `main`. Describe the problem, the resulting behavior, and how you verified the change.
 
-Use Node.js 24.22.0 LTS for development and GitHub Actions. With nvm, run `nvm install` and `nvm use` to select the version in `.nvmrc`. The official n8n container supplies its own supported Node.js runtime.
+Use Node.js 26.13.0 LTS for development and GitHub Actions. With nvm, run `nvm install` and `nvm use` to select the version in `.nvmrc`. The official n8n container supplies its own supported Node.js runtime.
 
 ```bash
 npm ci --strict-peer-deps

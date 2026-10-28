@@ -73,7 +73,7 @@ describe('document request construction', () => {
 			{
 				returnAll: false,
 				limit: 15,
-				searchFilters: { search: 'contract', status: 'metadata_ready' },
+				searchFilters: { search: 'contract', status: 'metadata_ready', sort: 'name' },
 			},
 			{ response: [{ id: 'doc_1' }] },
 		);
@@ -81,7 +81,12 @@ describe('document request construction', () => {
 		const req = lastAuth(requests);
 		expect(req.method).toBe('GET');
 		expect(req.url).toBe(`${BASE}/accounts/acc_123/documents/search`);
-		expect(req.qs).toEqual({ search: 'contract', status: 'metadata_ready', 'per-page': 15 });
+		expect(req.qs).toEqual({
+			search: 'contract',
+			status: 'metadata_ready',
+			sort: 'name',
+			'per-page': 15,
+		});
 	});
 
 	it('deletes a document by id', async () => {
@@ -142,6 +147,30 @@ describe('document request construction', () => {
 		const result = (await executeDocument.call(ctx as any, 0, 'getActivities')) as any;
 		expect(lastAuth(requests).url).toBe(`${BASE}/documents/doc_123/activities`);
 		expect(result.json.activities).toEqual([{ event: 'document_created' }]);
+	});
+
+	it('loads every activity page and preserves the requested sort order', async () => {
+		const { ctx, httpRequestWithAuthentication } = makeCtx({ documentId: 'doc_123', sort: 'id' });
+		httpRequestWithAuthentication.mockImplementation(async (_type, options) => ({
+			body: { status: 200, data: [{ id: options.qs.page, event: 'signature_requested' }] },
+			headers: { 'X-Pagination-Page-Count': '2' },
+		}));
+		await expect(executeDocument.call(ctx, 0, 'getActivities')).resolves.toEqual({
+			json: {
+				documentId: 'doc_123',
+				activities: [
+					{ id: 1, event: 'signature_requested' },
+					{ id: 2, event: 'signature_requested' },
+				],
+			},
+		});
+		expect(httpRequestWithAuthentication).toHaveBeenCalledTimes(2);
+		expect(httpRequestWithAuthentication).toHaveBeenLastCalledWith(
+			'assinafyApi',
+			expect.objectContaining({
+				qs: { sort: 'id', page: 2, 'per-page': 100 },
+			}),
+		);
 	});
 
 	it('waits until the document is already ready', async () => {
@@ -264,6 +293,51 @@ describe('document request construction', () => {
 		expect(req.body.name).toBe('Contract');
 	});
 
+	it('creates or reuses an inline template signer by email', async () => {
+		const signer = {
+			role_id: 'role_1',
+			email: ' signer@example.com ',
+			name: 'Example Signer',
+			whatsapp_phone_number: '+5511999990001',
+		};
+		const { ctx, requests } = makeCtx({
+			templateId: 'tpl_1',
+			templateSigners: { signer: [signer] },
+		});
+		await executeDocument.call(ctx, 0, 'createFromTemplate');
+		expect(lastAuth(requests).body.signers).toEqual([{ ...signer, email: 'signer@example.com' }]);
+	});
+
+	it('lets an existing signer ID take precedence over inline contact fields', async () => {
+		const { ctx, requests } = makeCtx({
+			templateId: 'tpl_1',
+			templateSigners: {
+				signer: [
+					{
+						role_id: 'role_1',
+						id: 'sig_1',
+						email: 'invalid',
+						name: 'Ignored',
+						whatsapp_phone_number: 'ignored',
+					},
+				],
+			},
+		});
+		await executeDocument.call(ctx, 0, 'createFromTemplate');
+		expect(lastAuth(requests).body.signers).toEqual([{ role_id: 'role_1', id: 'sig_1' }]);
+	});
+
+	it('rejects an invalid inline template signer email', async () => {
+		const { ctx, requests } = makeCtx({
+			templateId: 'tpl_1',
+			templateSigners: { signer: [{ role_id: 'role_1', email: 'invalid' }] },
+		});
+		await expect(executeDocument.call(ctx, 0, 'createFromTemplate')).rejects.toThrow(
+			'Invalid template signer email',
+		);
+		expect(requests).toHaveLength(0);
+	});
+
 	it('requires signer IDs when creating a document from a template', async () => {
 		const { ctx, requests } = makeCtx({
 			templateId: 'tpl_1',
@@ -300,89 +374,67 @@ describe('document request construction', () => {
 		expect(req.body.signers).toEqual([{ role_id: 'role_1' }]);
 	});
 
-	it('estimates Digital Certificate cost from a template', async () => {
-		const { ctx, requests } = makeCtx(
-			{
-				templateId: 'tpl_1',
-				templateSigners: {
-					signer: [{ role_id: 'role_1', verification_method: 'DigitalCertificate' }],
-				},
-			},
-			{ response: { pages: [] } },
-		);
-		await executeDocument.call(ctx as any, 0, 'estimateCostFromTemplate');
-		expect(requests[0].options).toMatchObject({
-			method: 'GET',
-			url: `${BASE}/accounts/acc_123/templates/tpl_1`,
-		});
-		expect(lastAuth(requests).body.signers).toEqual([
-			{ role_id: 'role_1', verification_method: 'DigitalCertificate' },
-		]);
-	});
-
 	it.each(['createFromTemplate', 'estimateCostFromTemplate'])(
-		'rejects Digital Certificate when a template has placed fields during %s',
+		'lets the API validate certificate eligibility for %s',
 		async (operation) => {
 			const { ctx, requests } = makeCtx(
 				{
 					templateId: 'tpl_1',
 					templateSigners: {
-						signer: [
-							{
-								role_id: 'role_1',
-								id: 'sig_1',
-								verification_method: 'DigitalCertificate',
-							},
-						],
+						signer: [{ role_id: 'role_1', id: 'sig_1', verification_method: 'DigitalCertificate' }],
 					},
-					additionalFields: {},
 				},
-				{ response: { pages: [{ fields: [{ role_id: 'role_1' }] }] } },
+				{
+					rejectWith: {
+						httpCode: '400',
+						message: 'Digital certificate requires a virtual assignment',
+					},
+				},
 			);
-			await expect(executeDocument.call(ctx as any, 0, operation)).rejects.toThrow(
-				'ASSINAFY_DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL',
-			);
+			await expect(executeDocument.call(ctx, 0, operation)).rejects.toMatchObject({
+				httpCode: '400',
+				description: 'Digital certificate requires a virtual assignment',
+			});
 			expect(requests).toHaveLength(1);
-			expect(requests[0].options.method).toBe('GET');
+			expect(lastAuth(requests).method).toBe('POST');
 		},
 	);
 
-	it('rejects Digital Certificate when template fields cannot be verified', async () => {
-		const { ctx, requests } = makeCtx(
-			{
-				templateId: 'tpl_1',
-				templateSigners: {
-					signer: [{ role_id: 'role_1', verification_method: 'DigitalCertificate' }],
-				},
-			},
-			{ response: { id: 'tpl_1' } },
-		);
-		await expect(
-			executeDocument.call(ctx as any, 0, 'estimateCostFromTemplate'),
-		).rejects.toThrow('ASSINAFY_DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL');
-		expect(requests).toHaveLength(1);
-	});
-
-	it('rejects a Digital Certificate template signer sharing a signing step', async () => {
+	it.each([0, 1])('accepts a certificate signer with a copy receiver (step %s)', async (step) => {
+		const signers = [
+			{ role_id: 'signer_role', id: 'sig_1', verification_method: 'DigitalCertificate', step },
+			{ role_id: 'copy_role', id: 'sig_2', step: 0 },
+		];
 		const { ctx, requests } = makeCtx({
 			templateId: 'tpl_1',
-			templateSigners: {
-				signer: [
-					{
-						role_id: 'role_1',
-						id: 'sig_1',
-						verification_method: 'DigitalCertificate',
-						step: 1,
-					},
-					{ role_id: 'role_2', id: 'sig_2', verification_method: 'Email', step: 1 },
-				],
+			templateSigners: { signer: signers },
+			additionalFields: {
+				editor_fields: [{ field_id: 'editor_field', value: 'Prepared by Example' }],
 			},
-			additionalFields: {},
 		});
-		await expect(executeDocument.call(ctx as any, 0, 'createFromTemplate')).rejects.toThrow(
-			'must be alone in their signing step',
-		);
-		expect(requests).toHaveLength(0);
+		await executeDocument.call(ctx, 0, 'createFromTemplate');
+		expect(requests).toHaveLength(1);
+		expect(lastAuth(requests).body).toEqual({
+			signers: [
+				{
+					role_id: 'signer_role',
+					id: 'sig_1',
+					verification_method: 'DigitalCertificate',
+					...(step ? { step } : {}),
+				},
+				{ role_id: 'copy_role', id: 'sig_2' },
+			],
+			editor_fields: [{ field_id: 'editor_field', value: 'Prepared by Example' }],
+		});
+	});
+
+	it('preserves invalid explicit template steps for API validation', async () => {
+		const { ctx, requests } = makeCtx({
+			templateId: 'tpl_1',
+			templateSigners: { signer: [{ role_id: 'role_1', id: 'sig_1', step: -1 }] },
+		});
+		await executeDocument.call(ctx, 0, 'createFromTemplate');
+		expect(lastAuth(requests).body.signers[0].step).toBe(-1);
 	});
 
 	it('omits signer IDs and signing steps from a template cost estimate', async () => {
@@ -393,6 +445,9 @@ describe('document request construction', () => {
 					{
 						role_id: 'role_1',
 						id: 'sig_1',
+						email: 'signer@example.com',
+						name: 'Example Signer',
+						whatsapp_phone_number: '+5511999990001',
 						verification_method: 'Email',
 						notification_methods: ['Email'],
 						step: 4,
@@ -410,24 +465,18 @@ describe('document request construction', () => {
 		]);
 	});
 
-	it('rejects multiple notification methods for one template signer', async () => {
+	it('does not apply signing notification restrictions to an optional copy receiver', async () => {
 		const { ctx, requests } = makeCtx({
 			templateId: 'tpl_1',
 			templateSigners: {
 				signer: [
-					{
-						role_id: 'role_1',
-						id: 'sig_1',
-						notification_methods: ['Email', 'Whatsapp'],
-					},
+					{ role_id: 'signer_role', id: 'sig_1', notification_methods: ['Email'] },
+					{ role_id: 'copy_role', id: 'sig_2', notification_methods: ['Email', 'Whatsapp'] },
 				],
 			},
-			additionalFields: {},
 		});
-		await expect(executeDocument.call(ctx as any, 0, 'createFromTemplate')).rejects.toThrow(
-			'at most one Notification Method',
-		);
-		expect(requests).toHaveLength(0);
+		await executeDocument.call(ctx, 0, 'createFromTemplate');
+		expect(lastAuth(requests).body.signers[1].notification_methods).toEqual(['Email', 'Whatsapp']);
 	});
 
 	it('allows multiple notification methods when estimating template cost', async () => {

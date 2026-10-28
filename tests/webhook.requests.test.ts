@@ -173,10 +173,23 @@ describe('webhook request construction', () => {
 			);
 		});
 
-		it('rejects an empty delete URL before making a request', async () => {
-			const { ctx, requests } = makeCtx({ url: '' });
+		it('deletes an existing legacy HTTP endpoint by its exact URL', async () => {
+			const url = 'http://receiver.example.com/hook?source=n8n&key=a%2Fb';
+			const { ctx, requests } = makeCtx({ url });
+			await executeWebhook.call(ctx, 0, 'deleteEndpointByUrl');
+			expect(lastAuth(requests)).toMatchObject({ method: 'DELETE', url: ENDPOINTS, qs: { url } });
+		});
+
+		it.each([
+			'',
+			'/hook',
+			'ftp://example.com/hook',
+			'http://user:password@example.com/hook',
+			'http://example.com/hook#fragment',
+		])('rejects an invalid delete URL before making a request: %s', async (url) => {
+			const { ctx, requests } = makeCtx({ url });
 			await expect(executeWebhook.call(ctx, 0, 'deleteEndpointByUrl')).rejects.toThrow(
-				'valid HTTPS URL',
+				'valid absolute HTTP or HTTPS URL',
 			);
 			expect(requests).toHaveLength(0);
 		});
@@ -220,11 +233,30 @@ describe('webhook request construction', () => {
 			});
 		});
 
+		it.each(['true', 1, null])(
+			'rejects a malformed signing flag on create: %j',
+			async (signingEnabled) => {
+				const { ctx, requests } = makeCtx({
+					url: 'https://example.com/hook',
+					email: 'ops@example.com',
+					additionalFields: { signingEnabled },
+				});
+				await expect(executeWebhook.call(ctx, 0, 'createEndpoint')).rejects.toThrow(
+					'Signing Enabled must be a boolean',
+				);
+				expect(requests).toHaveLength(0);
+			},
+		);
+
 		it.each([
 			[{}, 'Add at least one field to update'],
 			[{ url: 'http://example.com/hook' }, 'valid HTTPS URL'],
 			[{ email: 'nope' }, 'Invalid email address'],
 			[{ events: [] }, 'Select at least one event'],
+			[{ name: 'CRM', signingEnabled: 'true' }, 'Signing Enabled must be a boolean'],
+			[{ name: 'CRM', isActive: 'false' }, 'Is Active must be a boolean'],
+			[{ signingEnabled: null }, 'Signing Enabled must be a boolean'],
+			[{ isActive: 0 }, 'Is Active must be a boolean'],
 		])('rejects an invalid update before sending: %j', async (updateFields, message) => {
 			const { ctx, requests } = makeCtx({ endpointId: 'ep_1', updateFields });
 			await expect(executeWebhook.call(ctx as any, 0, 'updateEndpoint')).rejects.toThrow(message);
@@ -241,16 +273,32 @@ describe('webhook request construction', () => {
 			expect(lastAuth(requests)).toMatchObject({ method, url: `${ENDPOINTS}/ep_1${suffix}` });
 		});
 
-		it.each(['getEndpointSecret', 'rotateEndpointSecret'])(
-			'%s refuses OAuth authentication before calling the API',
-			async (operation) => {
-				const { ctx, requests } = makeCtx({ authentication: 'oAuth2', endpointId: 'ep_1' });
-				await expect(executeWebhook.call(ctx as any, 0, operation)).rejects.toThrow(
-					'not available to OAuth applications',
-				);
-				expect(requests).toHaveLength(0);
-			},
-		);
+		it('getEndpointSecret refuses OAuth authentication before calling the API', async () => {
+			const { ctx, requests } = makeCtx({ authentication: 'oAuth2', endpointId: 'ep_1' });
+			await expect(executeWebhook.call(ctx as any, 0, 'getEndpointSecret')).rejects.toThrow(
+				'not available to OAuth applications',
+			);
+			expect(requests).toHaveLength(0);
+		});
+
+		it('rotates the endpoint secret using OAuth and preserves the returned secret', async () => {
+			const secret = 'synthetic-endpoint-secret';
+			const { ctx, requests, httpRequestWithAuthentication } = makeCtx(
+				{ authentication: 'oAuth2', endpointId: 'ep/1' },
+				{ response: { secret } },
+			);
+			expect(await executeWebhook.call(ctx, 0, 'rotateEndpointSecret')).toEqual({
+				json: { secret },
+			});
+			expect(lastAuth(requests)).toMatchObject({
+				method: 'POST',
+				url: `${ENDPOINTS}/ep%2F1/secret/rotate`,
+			});
+			expect(httpRequestWithAuthentication).toHaveBeenCalledWith(
+				'assinafyOAuth2Api',
+				expect.any(Object),
+			);
+		});
 
 		it('deletes an endpoint and reports its ID', async () => {
 			const { ctx, requests } = makeCtx({ endpointId: 'ep_1' }, { response: [] });

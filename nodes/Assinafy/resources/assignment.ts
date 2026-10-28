@@ -5,16 +5,24 @@ import type {
 	INodeProperties,
 } from 'n8n-workflow';
 import { NodeOperationError } from 'n8n-workflow';
-import { assinafyApiRequest, executeListOperation, getAccountId } from '../shared/transport';
+import {
+	assinafyApiRequest,
+	DELEGATED_CREDENTIAL_TYPE,
+	executeListOperation,
+	getAccountId,
+	getCredentialsType,
+} from '../shared/transport';
 import {
 	assignmentIdField,
 	documentResourceLocator,
 	limitField,
 	returnAllField,
+	sortField,
 	verificationMethodField,
 } from '../shared/descriptions';
 import {
 	asArray,
+	cleanQs,
 	extractRequiredId,
 	parseJsonParam,
 	parseBinaryResponse,
@@ -98,6 +106,11 @@ export const assignmentDescription: INodeProperties[] = [
 		],
 	},
 	{ ...returnAllField, displayOptions: { show: showOnly(['list']) } },
+	{
+		...sortField,
+		description: 'Sort by created_at (default), expires_at or id; prefix with - for descending',
+		displayOptions: { show: showOnly(['list']) },
+	},
 	{
 		...limitField,
 		displayOptions: { show: { ...showOnly(['list']), returnAll: [false] } },
@@ -424,6 +437,13 @@ async function identityReview(
 	itemIndex: number,
 	operation: string,
 ): Promise<INodeExecutionData> {
+	if (operation !== 'getIdentityReview' && getCredentialsType(this) === DELEGATED_CREDENTIAL_TYPE) {
+		throw new NodeOperationError(
+			this.getNode(),
+			'Identity review images and decisions are not available to OAuth applications; use API Key authentication',
+			{ itemIndex },
+		);
+	}
 	const documentId = extractDocumentId.call(this, itemIndex);
 	const assignmentId = extractRequiredId(this, 'assignmentId', 'Assignment ID', itemIndex);
 	const signerId = extractRequiredId(this, 'signerId', 'Signer ID', itemIndex);
@@ -497,10 +517,12 @@ async function listAssignments(
 	this: IExecuteFunctions,
 	itemIndex: number,
 ): Promise<INodeExecutionData[]> {
-	// The running API requires this camelCase account context even though the
-	// published OpenAPI operation currently documents only page/per-page.
 	const accountId = await getAccountId(this, false);
-	return executeListOperation(this, itemIndex, { path: '/assignments', qs: { accountId } });
+	const sort = this.getNodeParameter('sort', itemIndex, '') as string;
+	return executeListOperation(this, itemIndex, {
+		path: '/assignments',
+		qs: cleanQs({ accountId, sort }),
+	});
 }
 
 interface SignerEntry {

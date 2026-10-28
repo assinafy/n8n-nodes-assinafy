@@ -26,6 +26,7 @@ const SENSITIVE_HEADERS = new Set([
 ]);
 /** Standard Webhooks replay window, in seconds. */
 const SIGNATURE_TOLERANCE_SECONDS = 300;
+const SIGNING_SECRET_CACHE_TTL_MS = 60_000;
 const ENDPOINT_NAME = 'n8n Assinafy Trigger';
 
 const INVALID_SIGNATURE = 'Invalid Assinafy webhook signature';
@@ -33,7 +34,7 @@ const INVALID_SIGNATURE = 'Invalid Assinafy webhook signature';
  * Endpoint signing secrets by delivery URL. Workflow static data written while
  * receiving a webhook is not persisted, so the cache lives in the process.
  */
-const signingSecrets = new Map<string, string>();
+const signingSecrets = new Map<string, { secret: string; expiresAt: number }>();
 
 export class AssinafyTrigger implements INodeType {
 	description: INodeTypeDescription = {
@@ -109,10 +110,12 @@ export class AssinafyTrigger implements INodeType {
 				const endpoints = await listEndpoints(this, accountId);
 				if (endpoints === null) {
 					const existing = await getLegacySubscription(this, accountId);
-					return existing !== null && matchesConfig(existing, config);
+					return existing !== null && existing.is_held !== true && matchesConfig(existing, config);
 				}
 				const endpoint = endpoints.find((entry) => entry.url === config.webhookUrl);
-				return endpoint !== undefined && matchesConfig(endpoint, config);
+				return (
+					endpoint !== undefined && endpoint.is_held !== true && matchesConfig(endpoint, config)
+				);
 			},
 
 			async create(this: IHookFunctions): Promise<boolean> {
@@ -208,15 +211,22 @@ export class AssinafyTrigger implements INodeType {
 				);
 			}
 			const payload = Buffer.isBuffer(rawBody) ? rawBody : Buffer.from(String(rawBody), 'utf8');
-			// Try the cached secret first; on a signature mismatch fetch the current
-			// one, which also picks up a rotated secret.
+			// Refresh on expiry or mismatch so a rotated-out key cannot remain valid indefinitely.
 			const webhookUrl = await buildWebhookUrl(this);
 			const cached = signingSecrets.get(webhookUrl);
-			let failure = cached ? verifyStandardWebhook(cached, headers, payload) : INVALID_SIGNATURE;
+			let failure =
+				cached && cached.expiresAt > Date.now()
+					? verifyStandardWebhook(cached.secret, headers, payload)
+					: INVALID_SIGNATURE;
 			if (failure === INVALID_SIGNATURE) {
 				const secret = await fetchSigningSecret(this, webhookUrl);
 				failure = verifyStandardWebhook(secret, headers, payload);
-				if (!failure) signingSecrets.set(webhookUrl, secret);
+				if (!failure) {
+					signingSecrets.set(webhookUrl, {
+						secret,
+						expiresAt: Date.now() + SIGNING_SECRET_CACHE_TTL_MS,
+					});
+				}
 			}
 			if (failure) throw new NodeOperationError(this.getNode(), failure);
 		}

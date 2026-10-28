@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { documentDescription } from '../nodes/Assinafy/resources/document';
+import { contractDescription } from '../nodes/Assinafy/resources/contract';
 import { signerDescription } from '../nodes/Assinafy/resources/signer';
 import { assignmentDescription } from '../nodes/Assinafy/resources/assignment';
 import { workspaceDescription } from '../nodes/Assinafy/resources/workspace';
@@ -20,6 +21,16 @@ const getOperations = (description: INodeProperties[]): string[] => {
 };
 
 describe('Resource Descriptions', () => {
+	it('offers every contract operation', () => {
+		expect(getOperations(contractDescription)).toEqual([
+			'get',
+			'getRelated',
+			'list',
+			'renew',
+			'setTerms',
+			'terminate',
+		]);
+	});
 	it.each([
 		[assignmentDescription, 'signers'],
 		[documentDescription, 'templateSigners'],
