@@ -1,0 +1,78 @@
+name: GitHub Release
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+      package_run_id:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing published version tag
+        required: true
+        type: string
+      package_run_id:
+        description: Publish workflow run with successful npmjs and GitHub Packages jobs
+        required: true
+        type: string
+
+concurrency:
+  group: github-release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ inputs.tag }}
+      PACKAGE_RUN_ID: ${{ inputs.package_run_id }}
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify published package workflow
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ || ! "$PACKAGE_RUN_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::A stable version tag and numeric Publish run ID are required"
+            exit 1
+          fi
+          IFS=$'\t' read -r WORKFLOW_PATH WORKFLOW_EVENT WORKFLOW_SHA WORKFLOW_TAG < <(
+            gh api "repos/$GH_REPO/actions/runs/$PACKAGE_RUN_ID" \
+              --jq '[.path, .event, .head_sha, .head_branch] | @tsv'
+          )
+          if [[ "$WORKFLOW_PATH" != '.github/workflows/publish.yml' || "$WORKFLOW_EVENT" != 'push' || "$WORKFLOW_SHA" != "$(git rev-parse HEAD)" || "$WORKFLOW_TAG" != "$RELEASE_TAG" ]]; then
+            echo "::error::Publish run must match the checked-out version tag"
+            exit 1
+          fi
+          PUBLISHED_JOBS="$(gh api "repos/$GH_REPO/actions/runs/$PACKAGE_RUN_ID/jobs?filter=latest&per_page=100" \
+            --jq '[.jobs[] | select(.name == "Verify and package" or .name == "Publish to npmjs" or .name == "Mirror to GitHub Packages") | .conclusion] | sort | join(",")')"
+          if [[ "$PUBLISHED_JOBS" != 'success,success,success' ]]; then
+            echo "::error::Package verification and both registry publications must succeed first"
+            exit 1
+          fi
+
+      - name: Download published package tarball
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: assinafy-package
+          run-id: ${{ inputs.package_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Create release with verified package
+        run: gh release create "$RELEASE_TAG" assinafy-package.tgz --verify-tag --title "$RELEASE_TAG" --notes-from-tag

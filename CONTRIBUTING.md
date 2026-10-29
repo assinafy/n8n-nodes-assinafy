@@ -44,6 +44,8 @@ npm trust list @assinafy/n8n-nodes-assinafy
 
 Prepare a versioned main commit and matching annotated Git tag containing the version's changelog notes. The GitHub tag workflow uses the protected `npm` environment, verifies the package, and publishes to npmjs with provenance using OIDC. After mirroring the same tarball to GitHub Packages, it creates a GitHub Release with the tag's notes and attaches that tarball. Direct `npm publish` from the source tree is blocked; the n8n CLI's local `npm run release` command is not used for this repository's release path.
 
+If only GitHub Release creation fails after both registry publications succeed, run the **GitHub Release** workflow from main with the existing version tag and original Publish workflow run ID. It verifies those publications and reuses their package artifact, which is retained for one day. Keep published tags unchanged.
+
 Successful signer, social-login, password-reset, and verification flows require external tokens or inbox access. When those are unavailable, document the limitation and test request construction; do not describe an expected 401/404 route check as end-to-end success.
 
 Signer-side operations authenticate with a `signer-access-code` delivered in the signer's notification email or WhatsApp message. Production endpoints do not return this code, and an assignment's `signing_urls` do not contain it. Sandbox WhatsApp notifications are simulated; List WhatsApp Notifications includes button URLs with test codes, while production strips them. Set `ASSINAFY_TEST_SIGNER_ACCESS_CODE` to an actual received sandbox code to run the signer-side assertions; without it they skip. Never fabricate a code from an assignment URL.
