@@ -13,6 +13,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Support template signers by email, preserve signer contact-field clearing, retrieve complete document activity history, and expose supported sort controls.
 - Require API-key authentication for biometric review evidence and decisions while retaining OAuth review-summary access.
 - Use Node.js 26 LTS for development and release tooling.
+- Create GitHub Releases automatically after publication, with release notes and the verified package tarball.
 
 ## [1.9.1] - 2026-10-19
 
@@ -76,6 +77,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **Assinafy Trigger → Verify Signature** enables signing on the endpoint and verifies the Standard Webhooks signature (`webhook-id`, `webhook-timestamp`, `webhook-signature`) over the raw body with the endpoint secret, rejecting timestamps more than five minutes away. A rotated secret is picked up without reactivating the workflow. The credential **Webhook Secret** now only derives the URL token.
 - Register, Get and Inactivate Subscription are documented as acting on the workspace's oldest endpoint.
 - Development and local runtime use n8n 2.42.4 and `n8n-workflow` 2.42.2; package verification uses `@n8n/scan-community-package` 0.38.0.
+
 ## [1.7.8] — 2026-10-05
 
 ### Security

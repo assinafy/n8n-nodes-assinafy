@@ -42,7 +42,7 @@ npm trust github @assinafy/n8n-nodes-assinafy --file publish.yml --repo assinafy
 npm trust list @assinafy/n8n-nodes-assinafy
 ```
 
-Prepare a versioned main commit and matching Git tag for releases. The GitHub tag workflow uses the protected `npm` environment, verifies the package, and publishes to npmjs with provenance using OIDC. Direct `npm publish` from the source tree is blocked; the n8n CLI's local `npm run release` command is not used for this repository's release path.
+Prepare a versioned main commit and matching annotated Git tag containing the version's changelog notes. The GitHub tag workflow uses the protected `npm` environment, verifies the package, and publishes to npmjs with provenance using OIDC. After mirroring the same tarball to GitHub Packages, it creates a GitHub Release with the tag's notes and attaches that tarball. Direct `npm publish` from the source tree is blocked; the n8n CLI's local `npm run release` command is not used for this repository's release path.
 
 Successful signer, social-login, password-reset, and verification flows require external tokens or inbox access. When those are unavailable, document the limitation and test request construction; do not describe an expected 401/404 route check as end-to-end success.
 

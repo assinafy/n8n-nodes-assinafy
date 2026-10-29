@@ -1,5 +1,5 @@
 # A version tag builds one immutable tarball, publishes it to npmjs with
-# provenance, and mirrors the same bytes to GitHub Packages.
+# provenance, mirrors the same bytes to GitHub Packages, and creates a release.
 name: Publish
 
 on:
@@ -140,3 +140,23 @@ jobs:
         run: npm publish assinafy-package.tgz --ignore-scripts --access public --provenance=false --registry=https://npm.pkg.github.com
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  github-release:
+    name: Create GitHub Release
+    needs: [package, github-packages]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download package tarball
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: assinafy-package
+
+      - name: Create release with verified package
+        run: gh release create "$GITHUB_REF_NAME" assinafy-package.tgz --verify-tag --title "$GITHUB_REF_NAME" --notes-from-tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
