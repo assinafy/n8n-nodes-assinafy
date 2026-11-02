@@ -89,6 +89,7 @@ Sections below show each operation-specific request and a representative respons
 | `DocumentStatsRow`          | `period:string`, `documents_uploaded:integer`, `documents_sent:integer`, `signature_requests:integer`, `signature_requests_notification_email:integer`, `signature_requests_notification_whatsapp:integer`, `signature_requests_notification_bypass:integer`, `signature_requests_verification_email:integer`, `signature_requests_verification_whatsapp:integer`, `signature_requests_verification_bypass:integer`, `signature_requests_verification_digital_certificate:integer`, `signature_requests_viewed:integer`, `signature_requests_completed:integer`, `documents_certified:integer` |
 | `CostEstimateBreakdownItem` | `code:string`, `name:string`, `cost:number`, `quantity:integer`, `unit_cost:number`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `CostEstimate`              | `documents:integer`, `credits:number`, `needs_extra_document:boolean`, `extra_document_cost:number`, `total_credits:number`, `breakdown:CostEstimateBreakdownItem[]`, `document_balance:number`, `credit_balance:number`, `has_sufficient_resources:boolean`, `blocking_reason:string / null`, `message:string / null`                                                                                                                                                                                                                                                                         |
+| `ResendCostEstimate`        | `total:number`, `breakdown:{ code:string, name:string, cost:number }[]`, `credit_balance:number / null`, `has_sufficient_credits:boolean`                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `Field`                     | `resource:string`, `id:string`, `name:string`, `type:string`, `regex:string / null`, `is_pre_defined:boolean`, `is_active:boolean`, `is_required:boolean`, `is_standard:boolean`, `is_read_only:boolean`, `is_visible:boolean`                                                                                                                                                                                                                                                                                                                                                                 |
 | `FieldType`                 | `type:string`, `name:string`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `FieldValidation`           | `type:string`, `success:boolean`, `error_message:string`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
@@ -1924,7 +1925,7 @@ Pricing is 1 credit for an extra document when the plan allowance is exhausted, 
 
 #### Estimate the cost of resending a signer notification
 
-Estimates the credit cost of resending a notification to one signer without resending it, plus the current credit balance.
+Estimates the credit cost of resending a notification to one signer without resending it. A reminder consumes no document. `total` is the sum of the `breakdown` costs; `credit_balance` is `null` when the workspace's credits are not limited. Check `has_sufficient_credits` immediately before resending.
 
 **Endpoint:** `POST /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/estimate-resend-cost`
 
@@ -1940,25 +1941,16 @@ Estimates the credit cost of resending a notification to one signer without rese
 
 ```json
 {
-	"documents": 0,
-	"credits": 0,
-	"needs_extra_document": false,
-	"extra_document_cost": 0,
-	"total_credits": 0,
+	"total": 0.45,
 	"breakdown": [
 		{
-			"code": "NotificationEmailResend",
-			"name": "Email Notification Resend",
-			"cost": 0,
-			"quantity": 1,
-			"unit_cost": 0
+			"code": "NotificationWhatsappResend",
+			"name": "Whatsapp Notification Resend",
+			"cost": 0.45
 		}
 	],
-	"document_balance": 68,
-	"credit_balance": 0,
-	"has_sufficient_resources": true,
-	"blocking_reason": null,
-	"message": null
+	"credit_balance": 10,
+	"has_sufficient_credits": true
 }
 ```
 

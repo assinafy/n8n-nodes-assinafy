@@ -2,418 +2,97 @@
 
 **Português (Brasil)** · [English](README.md)
 
-Nós da comunidade para integrar o n8n à [Assinafy](https://assinafy.com.br), plataforma brasileira de assinatura eletrônica. O pacote permite enviar documentos, cadastrar signatários, solicitar assinaturas, acompanhar o andamento, baixar documentos certificados e trabalhar com modelos, gestão de contratos, tags e webhooks. Também oferece operações de conta e autenticação para fluxos que precisam desses recursos.
-
-O pacote inclui:
-
-- **Assinafy** — nó de ação com os recursos `assignment`, `auth`, `contract`, `document`, `field`, `oauth`, `signer`, `signerDocument`, `tag`, `template`, `webhook` e `workspace`.
-- **Assinafy Trigger** — gatilho de webhook que registra o próprio endpoint de webhook, com autenticação obrigatória na URL, derivada da credencial, e verificação opcional da assinatura Standard Webhooks.
-- **Assinafy OAuth2 API** — credencial OAuth com código de autorização e PKCE, armazenamento criptografado dos tokens e renovação automática pelo n8n.
-- **Assinafy API** — credencial compartilhada com chave de API (`X-Api-Key`), ID da conta e ambientes de produção, sandbox e URL personalizada.
-
-Os nomes de nós, operações e campos da interface aparecem em inglês neste guia para corresponder ao que você encontra no n8n. Os identificadores e valores da API também são mantidos como devem ser enviados.
+Nós comunitários do n8n para a [Assinafy](https://assinafy.com.br): documentos, contratos, signatários, solicitações de assinatura, modelos, etiquetas, campos, contas, autenticação, OAuth e webhooks. O pacote inclui o nó de ações **Assinafy**, o **Assinafy Trigger** e as credenciais **Assinafy API** e **Assinafy OAuth2 API**.
 
 ## Instalação
 
-As versões públicas são distribuídas pelo **npmjs.com** com o nome `@assinafy/n8n-nodes-assinafy`. A instalação não exige um registro personalizado nem um arquivo `.npmrc`.
+No n8n em infraestrutura própria, abra **Settings → Community Nodes → Install**, informe `@assinafy/n8n-nodes-assinafy` e reinicie o n8n se solicitado. O npmjs é o registro principal; o GitHub Packages é apenas um espelho. A disponibilidade no n8n Cloud depende da aprovação no catálogo do n8n.
 
-### n8n em infraestrutura própria
-
-No n8n, acesse **Settings → Community Nodes → Install**, informe `@assinafy/n8n-nodes-assinafy` e siga as instruções de instalação. Para instalar manualmente, instale o pacote no diretório de nós da comunidade da sua instância e reinicie o n8n. Consulte o [guia oficial de instalação](https://docs.n8n.io/integrations/community-nodes/installation-and-management/manual-installation) para contêineres e workers que processam filas.
-
-O GitHub Packages pode ser usado como espelho opcional das versões. A instalação por esse espelho exige o mapeamento `@assinafy:registry=https://npm.pkg.github.com` e um token do GitHub com a permissão `read:packages`. Essas configurações não são necessárias para instalar pelo npmjs.
-
-### n8n Cloud
-
-A publicação no npmjs é um requisito do processo de submissão de nós verificados da comunidade. A disponibilidade no n8n Cloud depende também da análise e aprovação no catálogo do n8n; publicar no npm não torna o pacote automaticamente disponível no Cloud.
-
-O pacote declara `n8n-workflow` como dependência do tipo peer, fornecida pela instância do n8n. Use **Node.js 26.13.0 LTS** para desenvolvimento, compilação e testes. O ambiente que executa o n8n deve atender ao requisito `node >=24.21.0` do pacote; a imagem oficial do n8n já fornece uma versão compatível do Node.js. A Assinafy aceita apenas HTTPS com TLS 1.2 ou superior, padrão do Node.js; não reduza a versão mínima com `--tls-min-v1.0` ou `--tls-min-v1.1`.
-
-Em produção, use a imagem oficial compatível do n8n, um endereço HTTPS estável, armazenamento persistente e backups do banco de dados e da chave de criptografia das credenciais. Mantenha todos os workers de fila na mesma versão do n8n e com este pacote instalado. Siga as [orientações de implantação com Docker](https://docs.n8n.io/deploy/host-n8n/install-options/install-with-docker) para configurar o banco e o ambiente de execução. O serviço Compose deste repositório é uma instância local isolada para testes.
+Use Node.js 26.13.0 LTS no desenvolvimento. A versão mínima de execução do pacote é Node.js 24.21.0; o ambiente local usa n8n 2.42.4. A Assinafy exige HTTPS com TLS 1.2 ou mais recente.
 
 ## Credenciais
 
-### OAuth para fluxos de documentos
+### OAuth2
 
-Use uma versão atual do n8n; a configuração local deste repositório fixa a versão 2.42.4. No nó de ação Assinafy, selecione **Authentication → OAuth2** e crie uma credencial **Assinafy OAuth2 API**.
+Use OAuth2 para aplicativos que atuam em uma conta autorizada.
 
-1. Copie a **OAuth Redirect URL** exibida pelo n8n. Ela deve ser uma URL HTTPS pública, normalmente `https://n8n.example.com/rest/oauth2-credential/callback`.
-2. No seu workspace da Assinafy, acesse **Integrações → Apps OAuth → Novo aplicativo**. Escolha **Aplicação no servidor / Confidential**, informe exatamente a URL de callback e selecione as permissões necessárias para os seus fluxos.
-3. Copie o Client ID e o Client Secret, exibido uma única vez, para a credencial do n8n. Guarde o segredo nas credenciais do n8n, nunca nos parâmetros do fluxo ou em arquivos JSON exportados.
-4. Em **Scope**, informe as permissões separadas por espaços, usando apenas as que foram habilitadas no aplicativo. Um fluxo de documentos usa `documents:read documents:write account:read offline_access`; adicione `templates:read` se usar modelos. Para criar, atualizar, excluir, registrar ou inativar endpoints de webhook da Assinafy pelo nó de ação, habilite `webhooks:write` no aplicativo OAuth e adicione esse escopo ao campo **Scope** da credencial. A configuração padrão da credencial já inclui `templates:read`; remova esse escopo se o aplicativo não o permitir.
-5. Deixe **Account ID** vazio para descobrir automaticamente o único workspace selecionado no consentimento, ou informe explicitamente o ID desse workspace. Clique em **Connect my account**, entre na Assinafy, selecione o workspace e autorize o acesso solicitado.
-6. Teste a conexão com **Workspace → List**. O OAuth retorna apenas o workspace autorizado; o acesso a outro workspace é proibido. O teste de conexão da própria credencial também chama `GET /accounts`.
+1. No nó de ações, selecione **Authentication → OAuth2** e crie uma credencial **Assinafy OAuth2 API**.
+2. Copie a URL HTTPS exata de callback exibida pelo n8n. Na Assinafy, abra **Integrações → Apps OAuth**, crie um aplicativo e cadastre esse callback.
+3. Um aplicativo confidencial de servidor usa Client ID e Client Secret privado. Um cliente público omite o segredo. O n8n gerencia Authorization Code, PKCE S256, armazenamento criptografado e renovação.
+4. Solicite apenas os escopos permitidos. Fluxos de documentos usam `documents:read documents:write account:read`; modelos adicionam `templates:read`; alterações de webhook adicionam `webhooks:write`. Adicione `offline_access` para rotação e `openid profile email` somente quando precisar dos dados de identidade.
+5. Deixe **Account ID** vazio para descobrir a única conta selecionada no consentimento, ou informe o ID dessa conta. OAuth não pode trocar de conta nem executar administração exclusiva do proprietário.
+6. Teste com **Workspace → List**. O access token dura uma hora; cada renovação troca o refresh token por outro válido por mais 30 dias. Uma credencial ociosa por 30 dias precisa ser reconectada.
 
-O n8n executa o fluxo Authorization Code com PKCE S256 e envia o segredo do cliente confidencial no corpo da requisição de token. Um aplicativo público pode deixar Client Secret vazio. Os tokens de acesso expiram após uma hora. O escopo `offline_access` solicita tokens de renovação com rotação: cada renovação devolve um novo token de renovação válido por mais 30 dias, e a conexão só expira depois de 30 dias sem renovação. O n8n renova sob demanda, quando uma requisição encontra o token de acesso expirado; para manter conectada uma credencial pouco usada, agende uma chamada leve, como **Workspace → List**, pelo menos a cada poucas semanas. Reconecte quando a conexão expirar ou for revogada. Mantenha os workers na mesma versão compatível do n8n, com infraestrutura compartilhada de credenciais e coordenação. Não copie tokens com rotação para credenciais separadas nem renove manualmente a mesma conexão. Para desconectar, revogue o aplicativo em **Aplicativos conectados** no seu perfil da Assinafy e depois exclua a credencial do n8n; excluir apenas a credencial mantém o token de renovação válido até expirar.
+O recurso OAuth expõe troca, renovação, revogação, UserInfo e metadados do recurso protegido para integrações que gerenciam seus próprios tokens. A saída contém dados sensíveis, e mutações de token nunca são repetidas automaticamente.
 
-| Permissão | Uso no fluxo |
-| --- | --- |
-| `documents:read` | Ler documentos, andamento das assinaturas, signatários e arquivos do documento |
-| `documents:write` | Enviar documentos, gerenciar signatários e solicitar assinaturas |
-| `templates:read` | Consultar os modelos usados para gerar documentos |
-| `account:read` | Consultar os dados permitidos do workspace selecionado |
-| `webhooks:write` | Criar, atualizar, excluir, registrar ou inativar endpoints de webhook pelo nó de ação; adicione apenas quando necessário |
-| `offline_access` | Manter a conexão com tokens de renovação com rotação |
-| `openid`, `profile`, `email` | Acessar identidade, nome e e-mail, respectivamente, pelo OAuth UserInfo; são opcionais |
+### Chave de API
 
-O OAuth não autoriza operações administrativas do proprietário, como alteração de senha ou chave de API, criação e exclusão de workspaces, cobrança ou membros. Use a credencial de chave de API para essas operações e para o **Assinafy Trigger**. As operações Webhook do nó de ação aceitam OAuth quando o aplicativo tem os escopos necessários: `account:read` para consultar endpoints ou a assinatura, `webhooks:write` para alterá-los e `documents:read` para listar tipos de eventos ou entregas. Ler um segredo existente de endpoint exige chave de API; rotacioná-lo aceita OAuth com `webhooks:write`. As operações executadas em nome do signatário continuam exigindo o código de acesso dele.
+Use **Assinafy API** para rotas administrativas, o Trigger, leitura de segredos de assinatura, evidências/decisões biométricas, sandbox ou fixtures locais. Configure a chave, o Account ID padrão e Production, Sandbox ou uma URL `/v1` personalizada validada. A chave é enviada apenas em `X-Api-Key`. Guarde chaves, tokens OAuth, códigos de signatários, URLs de captura e segredos de webhook somente em armazenamento protegido.
 
-**Cada implantação registra seu próprio callback.** Tanto o n8n em infraestrutura própria quanto o n8n Cloud usam a URL exibida pela respectiva instância. Um aplicativo pode atender a vários fluxos e conexões. Implantações separadas devem usar aplicativos separados ou registrar explicitamente cada callback exato em um aplicativo que controlem. O pacote não fornece um segredo de cliente compartilhado nem um callback local de aplicativo desktop. Ao usar um proxy reverso, configure `N8N_EDITOR_BASE_URL`, `WEBHOOK_URL` e `N8N_PROXY_HOPS` para que o n8n anuncie o endereço HTTPS externo. A URL de um túnel temporário muda quando ele é recriado, exigindo atualização do callback e nova conexão. Atualmente, o OAuth usa o ambiente de produção; o sandbox continua disponível para fluxos com chave de API.
+## Métodos de verificação e notificações
 
-### Chave de API para administração e webhooks
+| Método de verificação | Dados obrigatórios | Notificação | Observações |
+| --- | --- | --- | --- |
+| `Email` | Email | `Email` | Sem crédito de notificação |
+| `Whatsapp` | `whatsapp_phone_number`; plano pago | `Whatsapp` | 0,45 crédito por notificação |
+| `IdDocumentFaceMatchBasic` | CPF válido; recurso biométrico | Email ou WhatsApp | Consentimento explícito; estime o custo por signatário |
+| `DigitalCertificate` | CPF ou CNPJ alfanumérico; recurso de certificado | Email ou WhatsApp | ICP-Brasil A1/A3 no navegador; assignment virtual; signatário sozinho na etapa |
 
-Crie uma credencial **Assinafy API** para operações da conta que usam chave de API:
+Cada signatário aceita um método de notificação. Estime o custo e confirme os recursos antes de criar o assignment. Os códigos de acesso chegam nas notificações; URLs de documentos não os contêm, e o workflow nunca deve derivar ou inventar códigos.
 
-| Campo | Obrigatório | Observações |
-| --- | --- | --- |
-| Environment | Sim | `Production` (padrão), `Sandbox` ou `Custom`. Produção usa `https://api.assinafy.com.br/v1`; sandbox usa `https://sandbox.assinafy.com.br/v1`. |
-| Custom Base URL | Quando `Custom` | URL HTTPS absoluta terminada em `/v1`, sem dados de usuário, parâmetros de consulta ou fragmento. HTTP é permitido apenas em endereços de loopback para desenvolvimento. |
-| API Key | Sim, na credencial | Gerada no painel da Assinafy. Enviada no cabeçalho `X-Api-Key`. |
-| Account ID | Sim, na credencial | ID padrão do workspace (conta), usado pelos endpoints vinculados à conta. |
-| Webhook Secret | Não | Segredo do qual o Trigger deriva o token de autenticação da URL. Quando vazio, o token é derivado da chave de API. |
+## Fluxo completo de documentos
 
-O teste da credencial chama `GET /accounts/{accountId}` para confirmar a chave e a conta. URLs personalizadas são validadas e normalizadas antes que o teste ou qualquer requisição autenticada possa incluir a chave de API. A credencial do nó de ação **Assinafy** só é opcional em operações públicas, com código de acesso do signatário ou com autenticação Bearer explícita. Sem uma credencial selecionada, essas chamadas usam a URL de produção. Se uma credencial selecionada não puder ser carregada, a chamada falha, sem mudar silenciosamente para produção. Selecione uma credencial Sandbox mesmo em chamadas sem autenticação quando precisar usar esse ambiente. O **Assinafy Trigger** sempre exige uma credencial, pois o gerenciamento do endpoint de webhook depende da conta.
+1. Use **Document → Upload** para enviar um PDF não vazio de até 25 MB e salve o ID.
+2. Use **Document → Wait Until Ready** até os metadados ficarem prontos. Isso não garante que o arquivo certificado já exista.
+3. Use **Signer → Create** ou reutilize um signatário. Informe email/WhatsApp e o `government_id` exigido pelo método.
+4. Execute **Assignment → Estimate Cost**; pare se faltarem recursos ou funcionalidades do plano.
+5. Execute **Assignment → Create** uma única vez e salve os IDs do assignment e dos signatários. Use etapas contíguas ou omita todas.
+6. O signatário recebe um código, confirma dados/termos, conclui OTP ou captura biométrica quando necessário e assina. Certificado digital permanece no fluxo do navegador da Assinafy.
+7. Execute o **Assinafy Trigger** em outro workflow. Elimine duplicidades por `webhook-id`, rote por evento e trate falha de processamento, recusa e expiração como falhas finais.
+8. Depois de todas as assinaturas, consulte **Document → Get** até o status `certificated` e a disponibilidade do arquivo solicitado. `document_metadata_ready` e todos os signatários concluídos não garantem o arquivo.
+9. Use **Document → Download Artifact** (`certificated`, `pades`, `certificate-page`, `original` ou `bundle`) e armazene o binário.
 
-## Fluxo de documentos
-
-O envio e o recebimento de eventos ficam em fluxos separados no n8n, pois um gatilho inicia um fluxo e não possui conexão de entrada:
-
-```text
-Envio:       PDF → Upload → Wait Until Ready → criar signatários → Estimate Cost → Create Assignment
-Recebimento: Assinafy Trigger → eliminar eventos duplicados → encaminhar por evento → baixar PDF certificado / tratar falha
-```
-
-### Fluxo A: enviar o documento e solicitar assinaturas
-
-1. Comece com um Manual Trigger, Webhook, formulário, nó de armazenamento ou outra origem que forneça um PDF não vazio como dado binário, com até 25 MB e 2.000 páginas. A propriedade binária padrão é `data`. Confirme os destinatários antes de enviar.
-2. Adicione **Assinafy → Document → Upload**, selecione a propriedade binária e dê ao nó o nome `Upload document`. A saída é o objeto do documento; a expressão para reutilizar o ID é `={{ $('Upload document').first().json.id }}`. Salve esse ID para consultar o documento existente antes de repetir uma operação.
-3. Adicione **Assinafy → Document → Wait Until Ready**. Em **Document ID**, use a expressão do upload. O fluxo só continua quando o status é `metadata_ready`, `pending_signature`, `pending_identity_review`, `certificating` ou `certificated`; falha (`failed`), rejeição, expiração e esgotamento do tempo de espera geram um erro.
-4. Adicione **Assinafy → Signer → Create** para cada destinatário. Apenas Full Name é obrigatório, mas uma solicitação remota por e-mail ou WhatsApp exige o contato correspondente. **Reuse If Exists** consulta todas as páginas de resultados antes de criar outro contato com o mesmo e-mail. Nomeie os nós, por exemplo, como `Create signer 1` e `Create signer 2`.
-5. Adicione **Assignment → Estimate Cost** antes do envio. Use o ID do documento enviado e as mesmas opções de verificação e notificação que serão usadas em Create. Confira `has_sufficient_resources`, `total_credits` e `blocking_reason` antes de permitir a solicitação. Interrompa o fluxo se os recursos forem insuficientes ou o custo previsto não for aceitável.
-6. Adicione **Assignment → Create**:
-   - **Document ID:** `={{ $('Upload document').first().json.id }}`
-   - **Method:** `virtual` para assinatura remota ou `collect` para campos posicionados no documento
-   - **Signer 1 ID:** `={{ $('Create signer 1').first().json.id }}`
-   - **Signer 2 ID:** `={{ $('Create signer 2').first().json.id }}`
-   - Defina o método de verificação, o método de notificação e o `step` de cada signatário. Signatários na mesma etapa assinam em paralelo; etapas crescentes impõem uma sequência.
-   - Métodos de verificação: `Email` (código por e-mail; 0 crédito), `Whatsapp` (código pelo WhatsApp; exige `whatsapp_phone_number` e plano pago; 0,45 crédito pela notificação por WhatsApp associada) e `DigitalCertificate` (certificado ICP-Brasil A1 ou A3 do próprio signatário no navegador; exige `method: virtual`, o recurso Certificado Digital do plano, CPF ou CNPJ em `government_id` e o signatário sozinho na etapa; tarifa por signatário informada por Estimate Cost, mais a notificação). A verificação `Email` combina com a notificação `Email` e `Whatsapp` com `Whatsapp`; `DigitalCertificate` e `IdDocumentFaceMatchBasic` aceitam qualquer uma. A verificação biométrica (`IdDocumentFaceMatchBasic`) exige o recurso Documento de Identidade + Comparação Facial, CPF válido, consentimento explícito para o tratamento biométrico e uma tarifa por signatário informada por Estimate Cost. Envie um único método de notificação por signatário.
-   - Inclua `expires_at`, `message` ou `copy_receivers` apenas quando necessário. Associe tags com **Document → Append Tags** ou **Replace Tags**.
-7. Salve o ID da solicitação de assinatura retornada junto com o ID do documento na sua aplicação ou banco de dados. Só configure tentativas automáticas em torno de Create Assignment se o fluxo primeiro verificar se a solicitação já existe. O nó repete apenas falhas HTTP 429 explícitas; as demais falhas são devolvidas ao fluxo.
-
-Para uma lista dinâmica de destinatários, use Split Out/Loop Over Items do n8n para criar os signatários, reúna os IDs retornados com Aggregate e monte a coleção de signatários de Assignment a partir desse resultado. Preserve o ID do documento de `Upload document` por meio de uma expressão que referencia esse nó pelo nome, sem depender do item atual após o loop de signatários.
-
-A requisição de assinatura montada pelo nó tem este formato:
-
-```json
-{
-  "method": "virtual",
-  "signers": [{
-    "id": "<signer-id>",
-    "verification_method": "Email",
-    "notification_methods": ["Email"],
-    "step": 1
-  }],
-  "message": "Documento de demonstração para assinatura"
-}
-```
-
-O destinatário abre o convite de assinatura, recebe o código de acesso pelo canal selecionado, confirma seus dados e assina. A assinatura com certificado digital usa o certificado do próprio signatário e o fluxo no navegador dele. O status `metadata_ready` significa apenas que o PDF está pronto para receber uma solicitação de assinatura; não indica que alguém já assinou.
-
-Para gerar um documento a partir de um modelo, use **Template → List/Get** para obter os IDs dos papéis, **Document → Estimate Cost From Template** com a configuração desejada dos signatários e **Document → Create From Template** com uma entrada por papel Signer, entradas opcionais de CopyReceiver e valores de Editor em `editor_fields`. A resposta inicial tem `status: uploaded` e `assignment: null`: salve o ID do documento imediatamente. Consulte **Document → Get** com esperas limitadas ou receba `assignment_created`; salve o ID da solicitação quando existir e o status chegar a `pending_signature`. Falhas em segundo plano produzem `failed` e `document_processing_failed`, sem cobrança pela geração que falhou. Use o mesmo fluxo de conclusão descrito a seguir.
-
-### Fluxo B: receber a conclusão e baixar o arquivo
-
-1. Crie um fluxo separado começando com **Assinafy Trigger**. Selecione `document_ready`, `signer_rejected_document` e `document_processing_failed`; inclua `signer_signed_document` se precisar acompanhar o progresso individual dos signatários.
-2. Armazene `$json.headers['webhook-id']` como chave de idempotência antes de executar ações que alterem dados ou enviem notificações. A Assinafy pode entregar o mesmo evento novamente, e esse cabeçalho também diferencia entregas do mesmo evento para endpoints distintos.
-3. Adicione um nó Switch usando `={{ $json.event }}`.
-4. Para `document_ready`, use `={{ $json.body.object.id }}` como **Document ID** em **Document → Get**. Prossiga para **Document → Download Artifact** com `certificated` somente quando o status retornado for `certificated` e `artifacts.certificated` existir. Caso contrário, use um nó IF e um nó Wait com espera curta para voltar a Get, com um limite de tentativas ou de duração do fluxo. Interrompa imediatamente se o status indicar falha, rejeição ou expiração. O PDF é retornado na propriedade binária configurada (`data` por padrão), acompanhado de metadados JSON com `documentId`, nome do arquivo, tipo MIME e tamanho.
-5. Em caso de rejeição ou falha de processamento, encaminhe `$json.body.object.id`, `$json.body.message` e `$json.body.payload` para o seu fluxo de notificações ou tratamento de incidentes.
-
-Cada Trigger ativo registra o próprio endpoint de webhook, e um workspace comporta 1 endpoint, ou até 3 em planos pagos. Distribua os eventos dentro de um único fluxo quando mais processos precisarem deles do que o plano permite. Se usar OAuth sem uma conexão de webhook por chave de API, inicie o fluxo de conclusão pelo seu agendador ou aplicação e consulte **Document → Get** com ciclos Wait/Get limitados.
-
-Salve o PDF certificado no sistema de armazenamento escolhido. O artefato `certificate-page` contém o certificado, `bundle` é um ZIP e `pades` fica disponível quando houve assinatura com certificado digital. **Get Signing Progress** fornece contagens quando disponíveis, mas o download deve aguardar o status final e a disponibilidade do artefato.
-
-Se o resultado de Upload ou Create Assignment for incerto, consulte os registros existentes usando os IDs salvos antes de repetir a operação. Reexecutar o fluxo de conclusão deve apenas consultar o status e baixar artefatos já existentes.
-
-### Gestão de contratos (CLM)
-
-1. Envie ou selecione um documento e use **Contract → Set Terms** com seu ID. O acompanhamento é separado do envio para assinatura. Alterações exigem um plano com gestão de contratos; OAuth usa `documents:read` / `documents:write`.
-2. Em **Terms (JSON)**, envie apenas os campos a alterar, por exemplo `{"status":"active","counterparty_name":"Empresa Exemplo","value":1200,"currency":"BRL","start_date":"2026-11-01","end_date":"2027-10-31","auto_renew":false,"notice_period_days":30}`. Null limpa um campo; `external_references` substitui a lista inteira. **Get** retorna os termos e os aditivos vinculados; **List** filtra por status, contraparte, datas e referência externa.
-3. Para registrar um aditivo assinado, envie um documento próprio e configure seus termos com `parent_document_id`, `relation_type` (`amendment`, `renewal` ou `termination`) e os termos alterados. O contrato principal só muda quando o instrumento estiver `certificated`. **Get Related** consulta o contrato raiz e sua família; null em um aditivo pendente remove o termo da alteração proposta.
-4. Para mudanças diretas, **Renew** exige o `term` atual retornado por Get ou uma nova `end_date`; **Terminate** aceita um motivo opcional. Envie o `updated_at` consultado para recusar alterações concorrentes com HTTP 409. Um contrato encerrado por Terminate não pode ser renovado. Encerrar o contrato não cancela o documento de assinatura.
-5. Selecione os eventos `document_contract_*` desejados no Trigger e elimine duplicatas pelo `webhook-id`. O processamento de hora em hora usa o calendário de Brasília para avisos, vencimento e renovação automática. **Workspace → Update Notification Preferences** controla os quatro e-mails de contratos. Recupere eventos perdidos com **Contract → List**, ordenado por `-updated_at`, e **Document → Get Activities**.
-
-Consulte os [payloads completos de contratos, regras de aditivos e erros](docs/OPERATIONS.md#contract), em inglês.
-
-### Convenções de dados e erros
-
-- O envelope de resposta da Assinafy, `{ status, message, data }`, é removido antes de gerar a saída.
-- Operações de listagem geram um item do n8n por recurso. Operações que alteram dados e retornam arrays geram um único item no formato `{ "data": [...] }`.
-- Downloads binários geram um item com metadados JSON e o arquivo na propriedade binária selecionada.
-- **Get Signing Progress** define `available: false` e retorna contagens nulas quando a resposta do documento não inclui os detalhes da solicitação de assinatura; nunca apresenta um `0/0` inventado como progresso conhecido.
-- A troca de código, a renovação e a revogação de tokens OAuth nunca são repetidas automaticamente. As requisições HTTP têm um tempo limite de 30 segundos.
-- Respostas HTTP 429 são repetidas com um limite de tentativas para todos os métodos, respeitando `Retry-After`. A limitação de taxa recusa a requisição antes do processamento; repetir essa requisição não duplica documentos, signatários, solicitações de assinatura, notificações ou ações de webhook. Esgotadas as tentativas, o erro informa os valores de `X-Rate-Limit-*` e `Retry-After`. Qualquer outra falha é devolvida após uma única tentativa, pois uma resposta ambígua pode indicar que a alteração já foi aplicada.
+Em modelos, **Create From Template** pode retornar inicialmente `uploaded` com `assignment: null`; salve o ID e aguarde `pending_signature` com um assignment. Em gestão de contratos, faça o upload e depois use **Contract → Set Terms**; preserve o ID se os termos falharem. Renove ou encerre usando o `updated_at` lido por Get.
 
 ## Assinafy Trigger
 
-Ao ativar o fluxo, o gatilho cria um endpoint de webhook chamado `n8n Assinafy Trigger` para a URL de entrega do fluxo, ou atualiza o endpoint já registrado para essa URL; ao desativar, exclui esse endpoint. A ativação retoma um endpoint correspondente pausado com `is_active: true`. Os demais endpoints do workspace não são alterados. Um workspace comporta 1 endpoint, ou até 3 em planos pagos; a ativação em um workspace sem vagas falha com `403`. Em produção, a URL de entrega deve usar HTTPS e resolver para um host público. URLs HTTP de loopback servem apenas para simulações locais da API. O nó adiciona o parâmetro de consulta `assinafy-token`, derivado por HMAC-SHA256 do Webhook Secret da credencial ou, quando não há segredo configurado, da chave de API. Toda entrega deve apresentar esse token e é rejeitada se ele estiver ausente ou incorreto. Reative o fluxo após trocar qualquer um desses valores para que a Assinafy receba a nova URL.
+A ativação cria ou atualiza somente o endpoint deste workflow; a desativação remove somente esse endpoint. Uma conta comporta um endpoint, ou até três em planos pagos. Em ambientes antigos, o Trigger usa a assinatura única.
 
-Cada entrega aceita gera um item do n8n com `{ event, headers, body }`; cabeçalhos de autenticação, cookies, chaves de API, tokens, segredos e assinaturas são ocultados. `headers['webhook-id']` identifica a entrega para eliminar duplicidades.
-
-**Verificação da assinatura.** Ative **Verify Signature** para criar o endpoint com assinatura habilitada. Toda entrega passa a exigir uma assinatura [Standard Webhooks](https://www.standardwebhooks.com) válida (`webhook-id`, `webhook-timestamp`, `webhook-signature`), calculada sobre os bytes originais do corpo com o segredo do endpoint, e um horário com diferença máxima de cinco minutos. O nó lê o segredo pela API na primeira entrega assinada, mantém o valor em cache no processo do n8n por até 60 segundos e o lê novamente quando uma assinatura não confere. A rotação vale sem reativar o fluxo; a chave antiga pode ser aceita pelo restante dessa janela de cache. Entregas sem esses cabeçalhos ou sem os bytes originais são rejeitadas.
-
-Quando a API não oferece endpoints de webhook, o gatilho usa a assinatura única do workspace: a ativação a substitui, a desativação só a inativa enquanto ela ainda corresponde a este gatilho, e **Verify Signature** fica indisponível.
-
-A lista completa de eventos é definida em `nodes/Assinafy/resources/webhookEvents.ts` e aparece no campo **Events** do nó:
-`assignment_created`, `document_contract_amended`, `document_contract_amendment_updated`, `document_contract_expired`, `document_contract_expiring`, `document_contract_renewal_notice`, `document_contract_renewed`, `document_contract_terminated`, `document_contract_updated`, `document_metadata_ready`, `document_prepared`, `document_processing_failed`, `document_ready`, `document_uploaded`, `signature_requested`, `signer_created`, `signer_data_confirmed`, `signer_email_verified`, `signer_identity_review_approved`, `signer_identity_review_rejected`, `signer_identity_review_required`, `signer_identity_verification_failed`, `signer_identity_verified`, `signer_rejected_document`, `signer_signed_document`, `signer_viewed_document`, `signer_whatsapp_verified`, `template_created`, `template_processed`, `template_processing_failed`, `user_rejected_document`. Quando nenhum evento é selecionado, o gatilho usa o conjunto padrão: `document_ready`, `document_prepared`, `signer_signed_document`, `signer_rejected_document` e `document_processing_failed`.
+A URL sempre contém um token derivado da credencial. **Verify Signature** também habilita a validação HMAC-SHA256 do Standard Webhooks sobre o corpo bruto exato, com janela de cinco minutos e cache do segredo de no máximo 60 segundos. Cabeçalhos com credenciais são ocultados. Proteja o segredo do endpoint e elimine duplicidades por `webhook-id`.
 
 ## Operações disponíveis
 
-> **Referência completa dos conteúdos de requisição e resposta:** consulte
-> [`docs/OPERATIONS.md`](docs/OPERATIONS.md), em inglês, para ver os parâmetros de cada
-> operação no nó, exemplos de corpo e parâmetros de consulta da requisição e exemplos
-> de resposta, incluindo o envelope `{status,message,data}` removido pelo nó.
-> As tabelas abaixo servem como índice dos endpoints.
-
-### Códigos de acesso do signatário
-
-As operações marcadas com **(Signer Side)** usam um `signer-access-code` individual em vez da chave de API do workspace. **Em produção, nenhum endpoint retorna esse código**: ele chega ao signatário apenas na notificação enviada pela API quando uma solicitação de assinatura é criada ou reenviada, por e-mail ou WhatsApp. No sandbox, **List WhatsApp Notifications** expõe URLs simuladas dos botões com códigos; em produção, essas URLs são removidas. Os `signing_urls` de uma nova solicitação não substituem o código. Cada URL leva à página de assinatura do documento (`https://app.assinafy.com.br/sign/{documentId}?email=…`) e não contém o código; usar um trecho desse caminho como `signer-access-code` resulta em erro de autenticação HTTP 401.
-
-Execute essas operações somente quando o código chegar ao fluxo por uma etapa sob seu controle, como um nó de leitura de caixa de entrada, uma integração com WhatsApp ou o preenchimento manual pelo usuário. Para apenas encaminhar um signatário ao documento, envie a URL de assinatura ou use **Document → Send Public Token**. A administração pelo proprietário usa a credencial de chave de API; operações delegadas de documentos podem usar OAuth. Consulte a [origem do código de acesso do signatário](docs/OPERATIONS.md#where-a-signer-access-code-comes-from), em inglês.
-
-### Recurso: Document (documentos)
-
-| Operação | Endpoint |
+| Recurso | Operações |
 | --- | --- |
-| Upload | `POST /accounts/{accountId}/documents` (multipart) |
-| List | `GET /accounts/{accountId}/documents` |
-| Search | `GET /accounts/{accountId}/documents/search` — busca simplificada por nome/status |
-| Get | `GET /documents/{id}` |
-| Rename | `PATCH /documents/{id}` |
-| Delete | `DELETE /documents/{id}` |
-| Download Artifact | `GET /documents/{id}/download/{artifact}` — `original`, `certificated`, `certificate-page`, `pades`, `bundle` |
-| Download Thumbnail | `GET /documents/{id}/thumbnail` |
-| Download Page | `GET /documents/{id}/pages/{pageId}/download` |
-| Get Activities | `GET /documents/{id}/activities` |
-| Get Signing Progress | Calculado a partir de `GET /documents/{id}` |
-| Wait Until Ready | Consulta `GET /documents/{id}` até o status ser `metadata_ready`, `pending_signature`, `pending_identity_review`, `certificating` ou `certificated` |
-| Create From Template | `POST /accounts/{accountId}/templates/{templateId}/documents` |
-| Estimate Cost From Template | `POST /accounts/{accountId}/templates/{templateId}/documents/estimate-cost` |
-| Verify | `GET /documents/{hash}/verify` — público; verifica um documento certificado pelo hash da assinatura |
-| Get Public Info | `GET /public/documents/{id}` — público |
-| Send Public Token | `PUT /public/documents/{id}/send-token` — envia por e-mail um token de acesso de uso único a um signatário pendente (somente canal e-mail) |
-| List Statuses | `GET /documents/statuses` — lista os códigos de status e a possibilidade de exclusão |
-| List Tags | `GET /accounts/{accountId}/documents/{documentId}/tags` |
-| Replace Tags | `PUT /accounts/{accountId}/documents/{documentId}/tags` |
-| Append Tags | `POST /accounts/{accountId}/documents/{documentId}/tags` |
-| Detach Tag | `DELETE /accounts/{accountId}/documents/{documentId}/tags/{tagId}` |
+| Document | Append Tags, Create From Template, Delete, Detach Tag, Download Artifact, Download Page, Download Thumbnail, Estimate Cost From Template, Get, Get Activities, Get Public Info, Get Signing Progress, List, List Statuses, List Tags, Rename, Replace Tags, Search, Send Public Token, Upload, Verify, Wait Until Ready |
+| Contract | List, Get, Get Related, Set Terms, Renew, Terminate |
+| Signer | Accept Terms (Signer Side), Confirm Data (Signer Side), Create, Delete, Download Signature (Signer Side), Find by Email, Get, Get Identity Verification (Signer Side), Get Self (Signer Side), List, Start Identity Verification (Signer Side), Update, Upload Signature (Signer Side), Verify Code (Signer Side) |
+| Assignment | Create, Decide Identity Review, Decline (Signer Side), Download Identity Review Image, Estimate Cost, Estimate Resend Cost, Get Identity Review, Get Sign Page, List, List WhatsApp Notifications, Resend Notification, Reset Expiration, Sign (Signer Side) |
+| Template | List, Get |
+| Tag | Create, List, Update, Delete |
+| Field Definition | Create, List, Get, Update, Delete, Validate, Validate Multiple, List Types |
+| Signer Document | Get Current, List, Search, Sign Multiple, Decline Multiple, Download |
+| OAuth | Exchange Code, Refresh Token, Revoke Token, Get User Info, Get Metadata |
+| Authentication | Change Password, Complete Two-Factor Login, Confirm Authenticator Enrollment, Create API Key, Delete API Key, Get API Key (Masked), Link Social Login, List Two-Factor Methods, Login, Regenerate Recovery Codes, Remove Two-Factor Method, Request Password Reset, Reset Password, Social Login, Start Authenticator Enrollment |
+| Workspace | Create, Delete, Delete Logo, Download Logo, Get, Get Account Statistics, Get Current User, Get Notification Preferences, Get Theme, Get User Statistics, List, Update, Update Notification Preferences, Upload Logo |
+| Webhook | Create Endpoint, Delete Endpoint, Delete Endpoint by URL, Get Endpoint, Get Endpoint Signing Secret, Get Subscription, Inactivate Subscription, List Dispatches, List Endpoints, List Event Types, Register Subscription, Retry Dispatch, Rotate Endpoint Signing Secret, Update Endpoint |
 
-O upload recebe uma propriedade binária do nó anterior, contendo um PDF não vazio de até 25 MB e no máximo 2.000 páginas. Os artefatos baixados são anexados ao item de saída como dados binários. O PDF `pades` contém as assinaturas ICP-Brasil dos signatários e o quadro de certificação da plataforma; só existe em documentos com signatários que usam certificado digital. O `bundle` é um ZIP com os três artefatos PDF padrão e o `pades`, quando disponível. A operação List permite filtrar por `status`, `method` (`virtual` / `collect`), IDs de tags e um termo de busca `search`. Create From Template aceita papéis com ID existente ou e-mail/nome/WhatsApp, ordem sequencial por `step`, valores de campos do editor e nomes de tags do documento. A API resolve os papéis Signer, CopyReceiver e Editor antes de validar as regras de assinatura. Get Activities consulta todas as páginas; Search e Assignment List aceitam ordenação.
-
-### Recurso: Contract (gestão de contratos)
-
-| Operação | Endpoint |
-| --- | --- |
-| List | `GET /accounts/{accountId}/contracts` |
-| Get | `GET /accounts/{accountId}/documents/{documentId}/contract` |
-| Set Terms | `PUT /accounts/{accountId}/documents/{documentId}/contract` |
-| Get Related | `GET /accounts/{accountId}/documents/{documentId}/contract/related` |
-| Renew | `POST /accounts/{accountId}/documents/{documentId}/contract/renew` |
-| Terminate | `POST /accounts/{accountId}/documents/{documentId}/contract/terminate` |
-
-### Recurso: Signer (signatários)
-
-| Operação | Endpoint |
-| --- | --- |
-| Create | `POST /accounts/{accountId}/signers` |
-| List | `GET /accounts/{accountId}/signers` |
-| Get | `GET /accounts/{accountId}/signers/{signerId}` |
-| Update | `PUT /accounts/{accountId}/signers/{signerId}` |
-| Delete | `DELETE /accounts/{accountId}/signers/{signerId}` |
-| Find by Email | `GET /accounts/{accountId}/signers?search={email}` |
-| Get Self (Signer Side) | `GET /signers/self?signer-access-code=…` |
-| Accept Terms (Signer Side) | `PUT /signers/accept-terms?signer-access-code=…` |
-| Verify Code (Signer Side) | `POST /verify?signer-access-code=…` |
-| Confirm Data (Signer Side) | `PUT /documents/{documentId}/signers/confirm-data?signer-access-code=…` |
-| Upload Signature (Signer Side) | `POST /signature?signer-access-code=…&type=signature\|initial` |
-| Download Signature (Signer Side) | `GET /signature/{type}?signer-access-code=…` |
-| Get Identity Verification (Signer Side) | `GET /signers/identity-verification?signer-access-code=…` |
-| Start Identity Verification (Signer Side) | `POST /signers/identity-verification?signer-access-code=…` — `{ "consent": true }` |
-
-O cadastro de signatário segue o corpo de requisição publicado: apenas **Full Name** é obrigatório. E-mail e WhatsApp são opcionais e podem ser adicionados antes de uma solicitação de assinatura remota. A operação Update disponibiliza `government_id` para CPF ou CNPJ e remove a formatação, preservando as letras de CNPJ alfanumérico em maiúsculas. Update aceita string vazia ou null para limpar e-mail, WhatsApp ou documento de identificação, respeitando as regras da API para assinaturas pendentes. Alterar um canal de e-mail/WhatsApp ainda não verificado com solicitações em andamento renova seus links e códigos de uso único (OTPs). Um canal já verificado com solicitações em andamento não pode ser alterado até que seus documentos sejam certificados. Create não envia as chaves `cpf` ou `metadata`, que não são aceitas pela API.
-
-Na verificação biométrica, o signatário deve consentir explicitamente antes de **Start Identity Verification (Signer Side)** abrir uma sessão de captura. Abra a URL retornada sem alterações, incluindo o fragmento. Consulte **Get Identity Verification (Signer Side)** com esperas limitadas. Só uma sessão `Expired` pode ser reiniciada; `Declined` ou `Abandoned` exige um novo documento e uma nova solicitação. Um signatário em `InReview` pode assinar enquanto a conta analisa as evidências. Use **Assignment → Get Identity Review**, **Download Identity Review Image** e **Decide Identity Review**; a aprovação libera a certificação quando todos assinam, enquanto a rejeição cancela o documento e notifica signatários e destinatários de cópia. Baixe o artefato certificado somente após o status `certificated` e a disponibilidade do arquivo.
-
-### Recurso: Assignment (solicitações de assinatura)
-
-| Operação | Endpoint |
-| --- | --- |
-| Create | `POST /documents/{documentId}/assignments` |
-| Estimate Cost | `POST /documents/{documentId}/assignments/estimate-cost` |
-| Reset Expiration | `PUT /documents/{documentId}/assignments/{assignmentId}/reset-expiration` — nova data, ou Remove Expiration envia `null` |
-| Resend Notification | `PUT /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/resend` |
-| Estimate Resend Cost | `POST /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/estimate-resend-cost` |
-| List WhatsApp Notifications | `GET /documents/{documentId}/assignments/{assignmentId}/whatsapp-notifications` |
-| Get Sign Page (Signer Side) | `GET /sign?signer-access-code=…` |
-| Sign (Signer Side) | `POST /documents/{documentId}/assignments/{assignmentId}?signer-access-code=…` |
-| Decline (Signer Side) | `PUT /documents/{documentId}/assignments/{assignmentId}/reject?signer-access-code=…` |
-| List | `GET /assignments?accountId={accountId}` |
-| Get Identity Review | `GET /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/identity-verification` |
-| Download Identity Review Image | `GET /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/identity-verification/images/{name}` |
-| Decide Identity Review | `POST /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/identity-verification/review` |
-
-O campo `method` pode ser `virtual` (assinatura remota por e-mail ou WhatsApp) ou `collect` (assinaturas em campos posicionados no documento). Cada signatário aceita os campos opcionais `verification_method` (`Email`, `Whatsapp`, `DigitalCertificate` ou `IdDocumentFaceMatchBasic`), exatamente um valor compatível em `notification_methods` quando informado e `step` para definir a sequência. Use um canal de notificação compatível com os dados de contato do signatário; quando omitido, a API infere o canal a partir do método de verificação e usa `Email` para ambos quando nenhum é informado. `DigitalCertificate` exige `method: virtual`, que a conta tenha o recurso habilitado, que o CPF/CNPJ do signatário esteja em `government_id` e que ele seja o único signatário da sua etapa. A tarifa por signatário desse método é informada por Estimate Cost, além do custo da notificação, e gera o artefato opcional `pades`. Modelos com campos posicionados de signatários usam `collect` e não podem usar `DigitalCertificate`; campos de Editor são incorporados ao PDF e não tornam a solicitação collect. `IdDocumentFaceMatchBasic` exige o recurso Documento de Identidade + Comparação Facial e CPF válido; consulte Estimate Cost para a tarifa atual. Para `collect`, informe `entries` como JSON. O campo `copy_receivers` recebe IDs de signatários, não endereços de e-mail.
-
-**Get Identity Review** aceita OAuth com `documents:read`. **Download Identity Review Image** e **Decide Identity Review** exigem chave de API e uma revisão aberta; OAuth é recusado antes da requisição.
-
-### Recurso: Template (modelos)
-
-| Operação | Endpoint |
-| --- | --- |
-| List | `GET /accounts/{accountId}/templates` — filtros: `search`, `status`, IDs de tags, `sort` |
-| Get | `GET /accounts/{accountId}/templates/{templateId}` |
-
-Os modelos são criados pela aplicação web da Assinafy e estão disponíveis apenas para leitura neste recurso. Use **List** e **Get** para consultar os papéis e as posições dos campos necessários para gerar documentos com Create From Template.
-
-### Recurso: Tag (etiquetas)
-
-| Operação | Endpoint |
-| --- | --- |
-| Create | `POST /accounts/{accountId}/tags` |
-| List | `GET /accounts/{accountId}/tags` — filtro: `search` |
-| Update | `PUT /accounts/{accountId}/tags/{tagId}` |
-| Delete | `DELETE /accounts/{accountId}/tags/{tagId}` — parâmetro opcional `force=true` |
-
-As tags são etiquetas do workspace. Você pode gerenciá-las pelo recurso Tag e associá-las aos documentos pelas operações de tags do recurso Document. As cores são validadas como sequências hexadecimais de 6 caracteres antes do envio. Arrays de tags preservam cada entrada como uma única tag, inclusive quando ela contém vírgulas, como em `Empresa Exemplo, Ltda.`. Apenas um valor escalar separado por vírgulas é dividido em várias tags.
-
-### Recurso: Field Definition (definições de campos)
-
-| Operação | Endpoint |
-| --- | --- |
-| Create | `POST /accounts/{accountId}/fields` |
-| List | `GET /accounts/{accountId}/fields` — filtros: `include_inactive`, `include_standard` |
-| Get | `GET /accounts/{accountId}/fields/{fieldId}` |
-| Update | `PUT /accounts/{accountId}/fields/{fieldId}` |
-| Delete | `DELETE /accounts/{accountId}/fields/{fieldId}` |
-| Validate | `POST /accounts/{accountId}/fields/{fieldId}/validate` — credenciais do workspace, ou somente o código de acesso do signatário via Authenticate With |
-| Validate Multiple | `POST /accounts/{accountId}/fields/validate-multiple` — credenciais do workspace, ou somente o código de acesso do signatário via Authenticate With |
-| List Types | `GET /field-types` |
-
-### Recurso: Signer Document (documentos do signatário — Signer Side)
-
-Get Current, Sign Multiple e Decline Multiple exigem o código de acesso do signatário. List e Search oferecem **Authenticate With**: Signer Access Code (padrão) ou Workspace Credentials. Download é público e não envia código de acesso nem credenciais do workspace.
-
-| Operação | Endpoint |
-| --- | --- |
-| Get Current | `GET /signers/{signerId}/document?signer-access-code=…` |
-| List | `GET /signers/{signerId}/documents` — código de acesso do signatário, ou credenciais do workspace via Authenticate With |
-| Search | `GET /signers/{signerId}/documents/search?search=…` — código de acesso do signatário, ou credenciais do workspace via Authenticate With |
-| Sign Multiple | `PUT /signers/documents/sign-multiple?signer-access-code=…` |
-| Decline Multiple | `PUT /signers/documents/decline-multiple?signer-access-code=…` |
-| Download | `GET /signers/{signerId}/documents/{documentId}/download/{artifact}` — público; sem credenciais nem código de acesso |
-
-O Download do signatário aceita os mesmos artefatos `original`, `certificated`, `certificate-page`, `pades` e `bundle` do download autenticado de documentos. List oferece paginação e filtros por `status`, `method`, `search` e `sort`.
-
-### Recurso: OAuth
-
-| Operação | Endpoint |
-| --- | --- |
-| Exchange Code | `POST /oauth/token`, `grant_type=authorization_code` |
-| Refresh Token | `POST /oauth/token`, `grant_type=refresh_token` |
-| Revoke Token | `POST /oauth/revoke` |
-| Get User Info | `GET /oauth/userinfo` |
-| Get Metadata | `GET /.well-known/oauth-protected-resource` na origem da API, fora de `/v1` |
-
-Use a credencial nativa nos fluxos comuns. As operações diretas de token retornam dados sensíveis na execução e nunca repetem automaticamente a troca de código, a renovação ou a revogação. Consulte os [conteúdos completos das requisições e respostas e o ciclo de vida do OAuth](docs/OPERATIONS.md#oauth), em inglês.
-
-### Recurso: Authentication (autenticação)
-
-Operações da conta de usuário. As operações de login retornam um token de acesso usado em `Authorization: Bearer …`; para um usuário com autenticação em dois fatores, o Login retorna um `mfa_token` para **Complete Two-Factor Login**. As operações que oferecem **Access Token** usam esse valor quando preenchido; caso contrário, usam a chave de API configurada. As operações públicas de recuperação de senha não exigem nenhum dos dois.
-
-| Operação | Endpoint |
-| --- | --- |
-| Login | `POST /login` |
-| Complete Two-Factor Login | `POST /authentication/mfa/verify` |
-| List Two-Factor Methods | `GET /users/self/mfa` |
-| Start Authenticator Enrollment | `POST /users/self/mfa/totp` |
-| Confirm Authenticator Enrollment | `PUT /users/self/mfa/totp/confirm` |
-| Regenerate Recovery Codes | `POST /users/self/mfa/recovery-codes` |
-| Remove Two-Factor Method | `DELETE /users/self/mfa/{methodId}` |
-| Social Login | `POST /authentication/social-login` |
-| Link Social Login | `POST /auth/link-social-login` |
-| Create API Key | `POST /users/api-keys` |
-| Get API Key (Masked) | `GET /users/api-keys` |
-| Delete API Key | `DELETE /users/api-keys` |
-| Change Password | `PUT /authentication/change-password` |
-| Request Password Reset | `PUT /authentication/request-password-reset` |
-| Reset Password | `PUT /authentication/reset-password` |
-
-### Recurso: Workspace (contas)
-
-| Operação | Endpoint |
-| --- | --- |
-| Create | `POST /accounts` |
-| List | `GET /accounts` |
-| Get | `GET /accounts/{workspaceId}` |
-| Update | `PUT /accounts/{workspaceId}` |
-| Delete | `DELETE /accounts/{workspaceId}` |
-| Get Current User | `GET /users/self` |
-| Get Account Statistics | `GET /accounts/{workspaceId}/stats` |
-| Get User Statistics | `GET /users/self/stats` |
-| Get Theme | `GET /accounts/{workspaceId}/theme` |
-| Get Notification Preferences | `GET /users/self/notification-preferences` |
-| Update Notification Preferences | `PUT /users/self/notification-preferences` |
-| Upload Logo | `POST /accounts/{workspaceId}/logo` (multipart) |
-| Download Logo | `GET /accounts/{workspaceId}/logo` |
-| Delete Logo | `DELETE /accounts/{workspaceId}/logo` |
-
-`GET /users/self` retorna os dados do usuário autenticado na Assinafy após a remoção do envelope padrão da resposta.
-
-### Recurso: Webhook
-
-| Operação | Endpoint |
-| --- | --- |
-| List Endpoints | `GET /accounts/{accountId}/webhooks/endpoints` — filtro por URL |
-| Create Endpoint | `POST /accounts/{accountId}/webhooks/endpoints` |
-| Get Endpoint | `GET /accounts/{accountId}/webhooks/endpoints/{endpointId}` |
-| Update Endpoint | `PUT /accounts/{accountId}/webhooks/endpoints/{endpointId}` |
-| Delete Endpoint | `DELETE /accounts/{accountId}/webhooks/endpoints/{endpointId}` |
-| Delete Endpoint by URL | `DELETE /accounts/{accountId}/webhooks/endpoints?url={registeredUrl}` |
-| Get Endpoint Signing Secret | `GET /accounts/{accountId}/webhooks/endpoints/{endpointId}/secret` |
-| Rotate Endpoint Signing Secret | `POST /accounts/{accountId}/webhooks/endpoints/{endpointId}/secret/rotate` |
-| Register Subscription | `PUT /accounts/{accountId}/webhooks/subscriptions` |
-| Get Subscription | `GET /accounts/{accountId}/webhooks/subscriptions` |
-| Inactivate Subscription | `PUT /accounts/{accountId}/webhooks/inactivate` |
-| List Event Types | `GET /webhooks/event-types` |
-| List Dispatches | `GET /accounts/{accountId}/webhooks` |
-| Retry Dispatch | `POST /accounts/{accountId}/webhooks/{dispatchId}/retry` |
-
-Um workspace comporta 1 endpoint, ou até 3 em planos pagos. As operações de assinatura atuam sobre o endpoint mais antigo. Ler um segredo de assinatura existente exige chave de API. OAuth com `webhooks:write` permite criar um endpoint assinado, ativar a assinatura ou rotacionar o segredo; guarde o novo segredo retornado com segurança.
-
-Consulte a [referência do conteúdo das entregas de webhook](docs/OPERATIONS.md#webhook-delivery-payloads), em inglês, para ver o envelope completo do POST, as variantes dos 31 eventos, o comportamento de sucesso, novas tentativas e interrupção temporária após falhas, além do formato de saída do gatilho no n8n.
+O contrato completo de parâmetros, autenticação, endpoints, mídia, requisições, respostas, erros e payloads de webhook está em [docs/OPERATIONS.md](docs/OPERATIONS.md), em inglês. Listas geram um item n8n por registro; mutações que retornam arrays usam `{ "data": [...] }`; envelopes de sucesso são removidos; binários incluem metadados; cada saída permanece ligada à entrada original. HTTP 429 recebe no máximo três tentativas; outras falhas e mutações OAuth são executadas uma vez.
 
 ## Desenvolvimento
 
 ```bash
-npm ci --strict-peer-deps # instalação reproduzível com validação das dependências peer
-npm run verify:dependencies # verifica toda a árvore de dependências instalada
-npm run dev       # executa n8n-node dev: n8n local com o pacote carregado e recarga automática
-npm run lint      # executa n8n-node lint
-npm run build     # compila o TypeScript para dist/
-npm test          # testes unitários e de formato das requisições
-npm run test:ci   # testes com limites mínimos de cobertura
-npm run audit:dev # verifica vulnerabilidades nas ferramentas de desenvolvimento
-npm run audit:prod # verifica vulnerabilidades nas dependências de produção
-npm run verify:package # verifica o pacote, carrega os módulos e analisa fonte e distribuição
+npm ci --strict-peer-deps
+npm run verify:dependencies
+npm run build
+npm run lint
+npm run test:ci
+npm run audit:dev
+npm run audit:prod
+npm run verify:package
 ```
 
-Para iniciar uma instância isolada em `http://localhost:5679`, execute `npm run build` e depois `docker compose up -d`, conclua a configuração da conta proprietária e siga as instruções de [n8n local e OAuth com HTTPS](CONTRIBUTING.md#local-n8n-and-https-oauth), em inglês. Recompile e reinicie o serviço após alterar o código.
-
-O projeto contém duas credenciais, um nó de ação com doze recursos e um gatilho. O transporte compartilhado trata requisições autenticadas, públicas e com código de acesso do signatário, remove envelopes de resposta, percorre páginas e limita as novas tentativas por excesso de requisições. Os métodos de busca em listas alimentam os seletores de documentos, signatários, tags e modelos.
-
-A suíte de sandbox exige credenciais explícitas, rejeita endereços de produção e remove os registros descartáveis que cria. Alterações de registros, consumo de créditos da conta e mudanças em workspaces, logos e assinaturas de webhook exigem habilitações separadas. Consulte [CONTRIBUTING.md](CONTRIBUTING.md), em inglês, para ver os comandos e as variáveis de ambiente.
-
-Relate vulnerabilidades conforme [SECURITY.md](SECURITY.md). Nunca inclua chaves de API, códigos de signatários, dados pessoais ou conteúdo de documentos em uma issue pública.
+Execute `npm run build && docker compose up -d` para iniciar o n8n isolado em `http://localhost:5679`. Consulte [CONTRIBUTING.md](CONTRIBUTING.md), em inglês, para OAuth com HTTPS, fixtures, gates de sandbox e verificação da versão. Relate vulnerabilidades conforme [SECURITY.md](SECURITY.md); nunca coloque credenciais, identidades reais ou documentos em issues públicas, testes ou exemplos.
 
 ## Licença
 

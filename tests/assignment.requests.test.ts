@@ -253,12 +253,25 @@ describe('assignment request construction', () => {
 	});
 
 	it('estimates resend cost', async () => {
-		const { ctx, requests } = makeCtx({
-			documentId: 'doc_1',
-			assignmentId: 'asg_1',
-			signerId: 'sig_1',
+		const estimate = {
+			total: 0.45,
+			breakdown: [
+				{ code: 'NotificationWhatsappResend', name: 'Whatsapp Notification Resend', cost: 0.45 },
+			],
+			credit_balance: 10,
+			has_sufficient_credits: true,
+		};
+		const { ctx, requests } = makeCtx(
+			{
+				documentId: 'doc_1',
+				assignmentId: 'asg_1',
+				signerId: 'sig_1',
+			},
+			{ response: estimate },
+		);
+		await expect(executeAssignment.call(ctx as any, 0, 'estimateResendCost')).resolves.toEqual({
+			json: estimate,
 		});
-		await executeAssignment.call(ctx as any, 0, 'estimateResendCost');
 		expect(lastAuth(requests).url).toBe(
 			`${BASE}/documents/doc_1/assignments/asg_1/signers/sig_1/estimate-resend-cost`,
 		);

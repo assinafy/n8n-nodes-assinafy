@@ -1,5 +1,5 @@
 {
-	"expires": "2026-11-05",
+	"expires": "2026-12-05",
 	"reason": "Development-only n8n tooling pins Axios and Zod below patched releases. Remove each advisory exception when upstream dependencies can be updated. Production auditing has no exceptions.",
 	"advisories": {
 		"axios": [

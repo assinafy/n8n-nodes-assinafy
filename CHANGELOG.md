@@ -5,6 +5,12 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.10.1] - 2026-11-02
+
+- Document the current resend-cost response (`total`, per-line `cost`, nullable `credit_balance`, and `has_sufficient_credits`).
+- Keep the installation, OAuth, signing, webhook, document-flow, and operation guidance concise in both English and Brazilian Portuguese.
+- Update the compatible development tools and pinned GitHub Actions used by verification and release workflows.
+
 ## [1.10.0] - 2026-10-28
 
 - Add contract tracking: list and manage terms, link amendments, read contract families, renew and terminate with concurrency preconditions.
