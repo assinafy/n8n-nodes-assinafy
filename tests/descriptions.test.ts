@@ -180,12 +180,17 @@ describe('Resource Descriptions', () => {
 				'get',
 				'getAccountStats',
 				'getCurrentUser',
+				'getNotificationPolicy',
 				'getNotificationPreferences',
+				'getPushPreferences',
 				'getTheme',
+				'getUsage',
 				'getUserStats',
 				'list',
 				'update',
+				'updateNotificationPolicy',
 				'updateNotificationPreferences',
+				'updatePushPreferences',
 				'uploadLogo',
 			]);
 		});
@@ -219,6 +224,7 @@ describe('Resource Descriptions', () => {
 				'register',
 				'retryDispatch',
 				'rotateEndpointSecret',
+				'testEndpoint',
 				'updateEndpoint',
 			]);
 		});
@@ -277,9 +283,14 @@ describe('Resource Descriptions', () => {
 			expect(operations).toEqual([
 				'declineMultiple',
 				'download',
+				'downloadCertifiedCopy',
+				'downloadSigningLogo',
 				'getCurrent',
+				'getSigningTheme',
 				'list',
+				'resendCertifiedCopy',
 				'search',
+				'sendCertifiedCopy',
 				'signMultiple',
 			]);
 		});

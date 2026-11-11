@@ -15,7 +15,7 @@ import {
 import {
 	cleanQs,
 	extractRequiredId,
-	parseJsonParam,
+	parseJsonObject,
 	parseStringList,
 	showOnly as showOnlyFor,
 	wrap,
@@ -47,6 +47,14 @@ export const contractDescription: INodeProperties[] = [
 	{
 		...documentResourceLocator,
 		displayOptions: { show: showOnly(['get', 'getRelated', 'renew', 'setTerms', 'terminate']) },
+	},
+	{
+		displayName: 'Expand Document',
+		name: 'expandDocument',
+		type: 'boolean',
+		default: false,
+		description: 'Whether to include the root contract document in the related family',
+		displayOptions: { show: showOnly(['getRelated']) },
 	},
 	{ ...returnAllField, displayOptions: { show: showOnly(['list']) } },
 	{ ...limitField, displayOptions: { show: { ...showOnly(['list']), returnAll: [false] } } },
@@ -211,18 +219,12 @@ export async function executeContract(
 				: operation === 'renew'
 					? 'contractRenewal'
 					: 'contractTermination';
-		const parsed = parseJsonParam(
+		body = parseJsonObject(
 			this,
 			this.getNodeParameter(parameter, itemIndex, '{}'),
 			'Contract body',
 			itemIndex,
 		);
-		if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-			throw new NodeOperationError(this.getNode(), 'Contract body must be a JSON object', {
-				itemIndex,
-			});
-		}
-		body = parsed as IDataObject;
 		if (operation === 'setTerms' && Object.keys(body).length === 0) {
 			throw new NodeOperationError(this.getNode(), 'At least one contract term is required', {
 				itemIndex,
@@ -265,6 +267,10 @@ export async function executeContract(
 		await assinafyApiRequest(this, {
 			method: operation === 'setTerms' ? 'PUT' : body ? 'POST' : 'GET',
 			path: `/accounts/${accountId}/documents/${documentId}/contract${suffix}`,
+			qs:
+				operation === 'getRelated' && this.getNodeParameter('expandDocument', itemIndex, false)
+					? { expand: 'document' }
+					: undefined,
 			body,
 		}),
 	);

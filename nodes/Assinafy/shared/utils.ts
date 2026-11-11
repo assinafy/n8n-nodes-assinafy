@@ -61,6 +61,19 @@ export function parseBinaryResponse(
 
 export type BinaryFormat = 'pdf' | 'png' | 'jpeg';
 
+export function parseJsonObject(
+	ctx: IExecuteFunctions,
+	value: unknown,
+	label: string,
+	itemIndex: number,
+): IDataObject {
+	const parsed = parseJsonParam(ctx, value, label, itemIndex);
+	if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+		throw new NodeOperationError(ctx.getNode(), `${label} must be a JSON object`, { itemIndex });
+	}
+	return parsed as IDataObject;
+}
+
 /** Validate both the declared MIME type and the file signature before upload. */
 export function assertBinaryFormat(
 	ctx: IExecuteFunctions,

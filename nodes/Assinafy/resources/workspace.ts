@@ -6,7 +6,12 @@ import type {
 	INodeProperties,
 } from 'n8n-workflow';
 import { NodeOperationError } from 'n8n-workflow';
-import { assinafyApiRequest, executeListOperation } from '../shared/transport';
+import {
+	assinafyApiRequest,
+	DELEGATED_CREDENTIAL_TYPE,
+	getCredentialsType,
+	executeListOperation,
+} from '../shared/transport';
 import { limitField, returnAllField, workspaceIdField } from '../shared/descriptions';
 import {
 	asArray,
@@ -15,6 +20,7 @@ import {
 	extractRequiredId,
 	normalizeHexColor,
 	parseBinaryResponse,
+	parseJsonObject,
 	showOnly as showOnlyFor,
 	wrap,
 } from '../shared/utils';
@@ -61,11 +67,22 @@ export const workspaceDescription: INodeProperties[] = [
 				action: 'Get the authenticated user',
 			},
 			{
+				name: 'Get Notification Policy',
+				value: 'getNotificationPolicy',
+				action: 'Get workspace notification policy',
+			},
+			{
 				name: 'Get Notification Preferences',
 				value: 'getNotificationPreferences',
 				action: 'Get my email notification preferences',
 			},
+			{
+				name: 'Get Push Preferences',
+				value: 'getPushPreferences',
+				action: 'Get my push notification preferences',
+			},
 			{ name: 'Get Theme', value: 'getTheme', action: 'Get the workspace theme' },
+			{ name: 'Get Usage', value: 'getUsage', action: 'Get workspace plan and balances' },
 			{
 				name: 'Get User Statistics',
 				value: 'getUserStats',
@@ -74,14 +91,32 @@ export const workspaceDescription: INodeProperties[] = [
 			{ name: 'List', value: 'list', action: 'List accessible workspaces' },
 			{ name: 'Update', value: 'update', action: 'Update a workspace' },
 			{
+				name: 'Update Notification Policy',
+				value: 'updateNotificationPolicy',
+				action: 'Update workspace notification policy',
+			},
+			{
 				name: 'Update Notification Preferences',
 				value: 'updateNotificationPreferences',
 				action: 'Update my email notification preferences',
+			},
+			{
+				name: 'Update Push Preferences',
+				value: 'updatePushPreferences',
+				action: 'Update my push notification preferences',
 			},
 			{ name: 'Upload Logo', value: 'uploadLogo', action: 'Upload or replace the workspace logo' },
 		],
 	},
 
+	{
+		displayName: 'Expand Signing Features',
+		name: 'expandSigningFeatures',
+		type: 'boolean',
+		default: false,
+		description: 'Whether to include the signing features the workspace can use',
+		displayOptions: { show: showOnly(['get']) },
+	},
 	// --- create ---
 	{
 		displayName: 'Name',
@@ -123,6 +158,9 @@ export const workspaceDescription: INodeProperties[] = [
 			show: showOnly([
 				'get',
 				'getAccountStats',
+				'getUsage',
+				'getNotificationPolicy',
+				'updateNotificationPolicy',
 				'update',
 				'delete',
 				'getTheme',
@@ -227,7 +265,8 @@ export const workspaceDescription: INodeProperties[] = [
 				name: 'ContractRenewed',
 				type: 'boolean',
 				default: true,
-				description: 'Whether to email when a tracked contract automatically renews into its next term',
+				description:
+					'Whether to email when a tracked contract automatically renews into its next term',
 			},
 			{
 				displayName: 'Document About to Expire',
@@ -295,6 +334,16 @@ export const workspaceDescription: INodeProperties[] = [
 		],
 	},
 
+	{
+		displayName: 'Notification Settings (JSON)',
+		name: 'notificationSettings',
+		type: 'json',
+		default: '{}',
+		required: true,
+		description:
+			'Policy: events map and/or owners_receive_all. Push preferences: event-to-boolean map. Send only changes; false disables a notification. Requires an API key; policy updates require workspace ownership.',
+		displayOptions: { show: showOnly(['updateNotificationPolicy', 'updatePushPreferences']) },
+	},
 	// --- uploadLogo / downloadLogo ---
 	{
 		displayName: 'Binary Property',
@@ -327,6 +376,37 @@ export async function executeWorkspace(
 	itemIndex: number,
 	operation: string,
 ): Promise<INodeExecutionData | INodeExecutionData[]> {
+	if (
+		[
+			'getUsage',
+			'getNotificationPolicy',
+			'updateNotificationPolicy',
+			'getPushPreferences',
+			'updatePushPreferences',
+		].includes(operation)
+	) {
+		if (getCredentialsType(this) === DELEGATED_CREDENTIAL_TYPE) {
+			throw new NodeOperationError(
+				this.getNode(),
+				'Usage, notification policies and push preferences are not available to OAuth applications; use API Key authentication',
+				{ itemIndex },
+			);
+		}
+		const push = operation === 'getPushPreferences' || operation === 'updatePushPreferences';
+		const path = push
+			? '/users/self/push-preferences'
+			: `/accounts/${extractWorkspaceId.call(this, itemIndex)}/${operation === 'getUsage' ? 'usage' : 'notification-policy'}`;
+		const update = operation.startsWith('update');
+		const body = update
+			? parseJsonObject(
+					this,
+					this.getNodeParameter('notificationSettings', itemIndex, '{}'),
+					'Notification Settings',
+					itemIndex,
+				)
+			: undefined;
+		return wrap(await assinafyApiRequest(this, { method: update ? 'PUT' : 'GET', path, body }));
+	}
 	switch (operation) {
 		case 'create':
 			return wrap(await createWorkspace.call(this, itemIndex));
@@ -436,7 +516,13 @@ async function listWorkspaces(
 
 async function getWorkspace(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const id = extractWorkspaceId.call(this, itemIndex);
-	return assinafyApiRequest<IDataObject>(this, { method: 'GET', path: `/accounts/${id}` });
+	return assinafyApiRequest<IDataObject>(this, {
+		method: 'GET',
+		path: `/accounts/${id}`,
+		qs: this.getNodeParameter('expandSigningFeatures', itemIndex, false)
+			? { expand: 'signing_features' }
+			: undefined,
+	});
 }
 
 async function updateWorkspace(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {

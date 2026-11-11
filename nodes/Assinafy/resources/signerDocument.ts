@@ -42,9 +42,24 @@ export const signerDocumentDescription: INodeProperties[] = [
 				action: 'Signer downloads a document artifact',
 			},
 			{
+				name: 'Download Certified Copy',
+				value: 'downloadCertifiedCopy',
+				action: 'Download a certified copy using its link token',
+			},
+			{
+				name: 'Download Signing Logo',
+				value: 'downloadSigningLogo',
+				action: 'Download workspace logo using a signer code',
+			},
+			{
 				name: 'Get Current',
 				value: 'getCurrent',
 				action: 'Signer reads the document tied to the active access code',
+			},
+			{
+				name: 'Get Signing Theme',
+				value: 'getSigningTheme',
+				action: 'Get workspace branding using a signer code',
 			},
 			{
 				name: 'List',
@@ -52,9 +67,19 @@ export const signerDocumentDescription: INodeProperties[] = [
 				action: 'Signer lists their visible documents',
 			},
 			{
+				name: 'Resend Certified Copy',
+				value: 'resendCertifiedCopy',
+				action: 'Resend the certified copy using an expired link token',
+			},
+			{
 				name: 'Search',
 				value: 'search',
 				action: 'Search visible signer documents',
+			},
+			{
+				name: 'Send Certified Copy',
+				value: 'sendCertifiedCopy',
+				action: 'Send the certified copy using a signer code',
 			},
 			{
 				name: 'Sign Multiple',
@@ -84,7 +109,14 @@ export const signerDocumentDescription: INodeProperties[] = [
 		description:
 			'Per-signer access code (from the signer notification). Sent as the signer-access-code query parameter, without the API key or OAuth token.',
 		displayOptions: {
-			show: showOnly(['getCurrent', 'signMultiple', 'declineMultiple']),
+			show: showOnly([
+				'getCurrent',
+				'signMultiple',
+				'declineMultiple',
+				'getSigningTheme',
+				'downloadSigningLogo',
+				'sendCertifiedCopy',
+			]),
 		},
 	},
 	{
@@ -119,6 +151,22 @@ export const signerDocumentDescription: INodeProperties[] = [
 		displayOptions: { show: showOnly(['search']) },
 	},
 
+	{
+		displayName: 'Expand Envelope',
+		name: 'expandEnvelope',
+		type: 'boolean',
+		default: false,
+		description: 'Whether to include the envelope ID and name',
+		displayOptions: { show: showOnly(['getCurrent']) },
+	},
+	{
+		displayName: 'Envelope ID',
+		name: 'envelopeId',
+		type: 'string',
+		default: '',
+		description: 'Optional: restrict results to this envelope',
+		displayOptions: { show: showOnly(['list', 'search']) },
+	},
 	// list filters
 	{
 		displayName: 'Filters',
@@ -193,7 +241,35 @@ export const signerDocumentDescription: INodeProperties[] = [
 		name: 'binaryOutputProperty',
 		type: 'string',
 		default: 'data',
-		displayOptions: { show: showOnly(['download']) },
+		displayOptions: {
+			show: showOnly(['download', 'downloadCertifiedCopy', 'downloadSigningLogo']),
+		},
+	},
+	{
+		displayName: 'Download Token',
+		name: 'downloadToken',
+		type: 'string',
+		typeOptions: { password: true },
+		default: '',
+		required: true,
+		description: 'Token from the certified-copy notification link; not a signer access code',
+		displayOptions: { show: showOnly(['downloadCertifiedCopy', 'resendCertifiedCopy']) },
+	},
+	{
+		displayName: 'PAdES',
+		name: 'pades',
+		type: 'boolean',
+		default: false,
+		description: 'Whether to request the digital-certificate PDF version',
+		displayOptions: { show: showOnly(['downloadCertifiedCopy']) },
+	},
+	{
+		displayName: 'Document ID',
+		name: 'certifiedCopyDocumentId',
+		type: 'string',
+		default: '',
+		description: 'Optional: another document of the same envelope this signer is on',
+		displayOptions: { show: showOnly(['sendCertifiedCopy']) },
 	},
 ];
 
@@ -203,6 +279,12 @@ export async function executeSignerDocument(
 	operation: string,
 ): Promise<INodeExecutionData | INodeExecutionData[]> {
 	switch (operation) {
+		case 'downloadCertifiedCopy':
+		case 'resendCertifiedCopy':
+		case 'sendCertifiedCopy':
+		case 'getSigningTheme':
+		case 'downloadSigningLogo':
+			return signingAsset.call(this, itemIndex, operation);
 		case 'getCurrent':
 			return wrap(await getCurrent.call(this, itemIndex));
 		case 'list':
@@ -231,7 +313,13 @@ async function searchDocuments(this: IExecuteFunctions, itemIndex: number): Prom
 	const response = await assinafyApiRequest<IDataObject[]>(this, {
 		method: 'GET',
 		path: `/signers/${signerId}/documents/search`,
-		qs: { ...qs, ...(search ? { search } : {}) },
+		qs: {
+			...qs,
+			...cleanQs({
+				search,
+				envelope_id: this.getNodeParameter('envelopeId', itemIndex, '') as string,
+			}),
+		},
 		skipAuth,
 	});
 	return asArray<IDataObject>(response);
@@ -243,7 +331,10 @@ async function getCurrent(this: IExecuteFunctions, itemIndex: number): Promise<I
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'GET',
 		path: `/signers/${signerId}/document`,
-		qs: { 'signer-access-code': code },
+		qs: {
+			'signer-access-code': code,
+			...(this.getNodeParameter('expandEnvelope', itemIndex, false) ? { expand: 'envelope' } : {}),
+		},
 		skipAuth: true,
 	});
 }
@@ -257,7 +348,13 @@ async function listDocuments(
 	const filters = this.getNodeParameter('filters', itemIndex, {}) as IDataObject;
 	return executeListOperation(this, itemIndex, {
 		path: `/signers/${signerId}/documents`,
-		qs: { ...qs, ...cleanQs(filters) },
+		qs: {
+			...qs,
+			...cleanQs({
+				...filters,
+				envelope_id: this.getNodeParameter('envelopeId', itemIndex, '') as string,
+			}),
+		},
 		skipAuth,
 	});
 }
@@ -322,5 +419,64 @@ async function download(this: IExecuteFunctions, itemIndex: number): Promise<INo
 	return {
 		json: { documentId, signerId, artifact, fileName, mimeType: mime, size: buffer.byteLength },
 		binary: { [outputProperty]: binary },
+	};
+}
+
+async function signingAsset(
+	this: IExecuteFunctions,
+	itemIndex: number,
+	operation: string,
+): Promise<INodeExecutionData> {
+	const tokenRoute = operation === 'downloadCertifiedCopy' || operation === 'resendCertifiedCopy';
+	const token = tokenRoute
+		? extractRequiredId(this, 'downloadToken', 'Download Token', itemIndex)
+		: '';
+	const qs = tokenRoute ? undefined : { 'signer-access-code': requireAccessCode(this, itemIndex) };
+	const download = operation === 'downloadCertifiedCopy' || operation === 'downloadSigningLogo';
+	const logo = operation === 'downloadSigningLogo';
+	const pades =
+		operation === 'downloadCertifiedCopy' && this.getNodeParameter('pades', itemIndex, false);
+	const path = tokenRoute
+		? `/signers/downloads/${token}${operation === 'resendCertifiedCopy' ? '/resend' : pades ? '/pades' : ''}`
+		: operation === 'sendCertifiedCopy'
+			? '/sign/certified-copy'
+			: logo
+				? '/sign/logo'
+				: '/sign/theme';
+	const documentId =
+		operation === 'sendCertifiedCopy'
+			? (this.getNodeParameter('certifiedCopyDocumentId', itemIndex, '') as string)
+			: '';
+	const response = await assinafyApiRequest(this, {
+		method: download || operation === 'getSigningTheme' ? 'GET' : 'POST',
+		path,
+		qs,
+		body: documentId ? { document_id: documentId } : undefined,
+		skipAuth: true,
+		returnBinary: download,
+		disableFollowRedirect: download,
+	});
+	if (!download) return wrap(response);
+	const { buffer, mimeType } = parseBinaryResponse(
+		this,
+		response,
+		logo ? 'image/png' : 'application/pdf',
+		'Signing download',
+		itemIndex,
+	);
+	if ((!logo && mimeType !== 'application/pdf') || (logo && !mimeType.startsWith('image/'))) {
+		throw new NodeOperationError(
+			this.getNode(),
+			'Signing download did not return the requested file; the link may have expired',
+			{ itemIndex },
+		);
+	}
+	const fileName = logo
+		? `logo.${mimeType.includes('jpeg') ? 'jpg' : 'png'}`
+		: `${pades ? 'pades' : 'certificated'}.pdf`;
+	const output = this.getNodeParameter('binaryOutputProperty', itemIndex, 'data') as string;
+	return {
+		json: { fileName, mimeType, size: buffer.byteLength },
+		binary: { [output]: await this.helpers.prepareBinaryData(buffer, fileName, mimeType) },
 	};
 }

@@ -119,6 +119,11 @@ export const webhookDescription: INodeProperties[] = [
 				action: 'Rotate the signing secret of a webhook endpoint',
 			},
 			{
+				name: 'Test Endpoint',
+				value: 'testEndpoint',
+				action: 'Send a test delivery to this endpoint',
+			},
+			{
 				name: 'Update Endpoint',
 				value: 'updateEndpoint',
 				action: 'Update a webhook endpoint',
@@ -192,6 +197,15 @@ export const webhookDescription: INodeProperties[] = [
 		options: [endpointNameField, signingEnabledField],
 	},
 
+	{
+		displayName: 'Keep Previous Secret',
+		name: 'keepPreviousSecret',
+		type: 'boolean',
+		default: false,
+		description:
+			'Whether to keep the replaced secret signing deliveries alongside the new secret for 24 hours. Another rotation replaces this grace key.',
+		displayOptions: { show: showOnly(['rotateEndpointSecret']) },
+	},
 	// --- endpoint by ID ---
 	{
 		displayName: 'Endpoint ID',
@@ -206,6 +220,7 @@ export const webhookDescription: INodeProperties[] = [
 				'deleteEndpoint',
 				'getEndpointSecret',
 				'rotateEndpointSecret',
+				'testEndpoint',
 			]),
 		},
 	},
@@ -343,6 +358,8 @@ export async function executeWebhook(
 		}
 		case 'createEndpoint':
 			return wrap(await endpointRequest(this, 'POST', '', createEndpointBody(this, itemIndex)));
+		case 'testEndpoint':
+			return wrap(await endpointRequest(this, 'POST', `${endpointPath(this, itemIndex)}/test`));
 		case 'getEndpoint':
 			return wrap(await endpointRequest(this, 'GET', endpointPath(this, itemIndex)));
 		case 'updateEndpoint':
@@ -378,7 +395,14 @@ export async function executeWebhook(
 			}
 			if (operation === 'rotateEndpointSecret') {
 				return wrap(
-					await endpointRequest(this, 'POST', `${endpointPath(this, itemIndex)}/secret/rotate`),
+					await endpointRequest(this, 'POST', `${endpointPath(this, itemIndex)}/secret/rotate`, {
+						keep_previous: validateBoolean(
+							this,
+							this.getNodeParameter('keepPreviousSecret', itemIndex, false),
+							'Keep Previous Secret',
+							itemIndex,
+						),
+					}),
 				);
 			}
 			return wrap(await endpointRequest(this, 'GET', `${endpointPath(this, itemIndex)}/secret`));

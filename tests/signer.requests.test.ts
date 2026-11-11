@@ -259,46 +259,37 @@ describe('signer request construction', () => {
 		expect(req.body).toEqual({ 'verification-code': '654321' });
 	});
 
-	it('confirmData sends code in query and fields in body', async () => {
-		const { ctx, requests } = makeCtx({
-			signerAccessCode: 'code123',
-			confirmDocumentId: 'doc_1',
-			confirmFields: {
-				full_name: 'Jane Doe',
-				email: 'jane@example.com',
-				government_id: '12345678900',
-				has_accepted_terms: true,
-			},
-		});
-		await executeSigner.call(ctx as any, 0, 'confirmData');
-		const req = lastPublic(requests);
-		expect(req.method).toBe('PUT');
-		expect(req.url).toBe(`${BASE}/documents/doc_1/signers/confirm-data`);
-		expect(req.qs).toEqual({ 'signer-access-code': 'code123' });
-		expect(req.body).toEqual({
+	it('confirmData sends current fields and preserves saved identity fields without account credentials', async () => {
+		const confirmFields = {
 			full_name: 'Jane Doe',
 			email: 'jane@example.com',
 			government_id: '12345678900',
-		});
-		// A saved Accept Terms toggle is honored through the accept-terms route.
-		const publicCalls = requests.filter((r) => !r.auth).map((r) => r.options);
-		expect(publicCalls.map((o) => `${o.method} ${o.url}`)).toEqual([
-			`PUT ${BASE}/signers/accept-terms`,
-			`PUT ${BASE}/documents/doc_1/signers/confirm-data`,
-		]);
-		expect(requests.every((r) => !r.auth)).toBe(true);
-	});
-
-	it('confirmData rejects a saved WhatsApp number, which the route does not accept', async () => {
+			whatsapp_phone_number: '+5548999990000',
+			has_accepted_terms: true,
+		};
 		const { ctx, requests } = makeCtx({
 			signerAccessCode: 'code123',
 			confirmDocumentId: 'doc_1',
-			confirmFields: { whatsapp_phone_number: '+5548999990000' },
+			confirmFields,
 		});
-		await expect(executeSigner.call(ctx as any, 0, 'confirmData')).rejects.toThrow(
-			'Confirm Data accepts only Full Name, Email and Government ID',
-		);
-		expect(requests).toHaveLength(0);
+		await executeSigner.call(ctx, 0, 'confirmData');
+		expect(requests).toHaveLength(1);
+		expect(lastPublic(requests)).toMatchObject({
+			method: 'PUT',
+			url: `${BASE}/documents/doc_1/signers/confirm-data`,
+			qs: { 'signer-access-code': 'code123' },
+			body: confirmFields,
+		});
+	});
+
+	it('confirmData preserves explicit refusal of terms', async () => {
+		const { ctx, requests } = makeCtx({
+			signerAccessCode: 'code123',
+			confirmDocumentId: 'doc_1',
+			confirmFields: { has_accepted_terms: false },
+		});
+		await executeSigner.call(ctx, 0, 'confirmData');
+		expect(lastPublic(requests).body).toEqual({ has_accepted_terms: false });
 	});
 
 	it('uploadSignature posts the image buffer with code, type, and reuse query', async () => {

@@ -2,7 +2,7 @@
 
 Contributions are welcome through [GitHub issues](https://github.com/assinafy/n8n-nodes-assinafy/issues) and [pull requests](https://github.com/assinafy/n8n-nodes-assinafy/pulls). Fork the repository, create a branch from `main`, and open a pull request against `main`. Describe the problem, the resulting behavior, and how you verified the change.
 
-Use Node.js 26.13.0 LTS for development and GitHub Actions. With nvm, run `nvm install` and `nvm use` to select the version in `.nvmrc`. The official n8n container supplies its own supported Node.js runtime.
+Use Node.js 26.13.1 LTS for development and GitHub Actions. With nvm, run `nvm install` and `nvm use` to select the version in `.nvmrc`. The official n8n container supplies its own supported Node.js runtime.
 
 ```bash
 npm ci --strict-peer-deps
@@ -119,4 +119,4 @@ Use separate sending and completion workflows when a person must sign between st
 
 `docker compose down` stops the instance while retaining its volume. Stop the tunnel process separately. Removing the volume destroys saved workflows and credentials and should be done only when that test instance is no longer needed.
 
-Development security exceptions are listed by package and advisory in `scripts/audit-dev-exceptions.json` and expire on 2026-11-05. They apply only to dependencies marked development-only in the lockfile. New high-severity advisories, all critical advisories, and expired exceptions fail verification. Production auditing remains strict. Remove each exception when the n8n toolchain permits a patched dependency.
+Development security exceptions are listed by package and advisory in `scripts/audit-dev-exceptions.json` and expire on 2026-12-05. They apply only to dependencies marked development-only in the lockfile. New high-severity advisories, all critical advisories, and expired exceptions fail verification. Production auditing remains strict. Remove each exception when the n8n toolchain permits a patched dependency.

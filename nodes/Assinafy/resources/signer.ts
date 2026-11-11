@@ -294,8 +294,15 @@ export const signerDescription: INodeProperties[] = [
 		default: {},
 		displayOptions: { show: showOnly(['confirmData']) },
 		description:
-			'Request body: { full_name?, email?, government_id? }. Response: the updated signer (ID, full name, email, WhatsApp number, government ID, terms acceptance).',
+			'Request body: { email?, whatsapp_phone_number?, has_accepted_terms? }. Saved full_name and government_id values are forwarded for compatibility. Response: the updated signer (ID, full name, email, WhatsApp number, government ID, terms acceptance).',
 		options: [
+			{
+				displayName: 'Accept Terms',
+				name: 'has_accepted_terms',
+				type: 'boolean',
+				default: false,
+				description: 'Whether the signer explicitly accepted the terms of use',
+			},
 			{
 				displayName: 'Email',
 				name: 'email',
@@ -310,6 +317,13 @@ export const signerDescription: INodeProperties[] = [
 				type: 'string',
 				default: '',
 				description: 'Government-issued identifier to confirm for this signer',
+			},
+			{
+				displayName: 'WhatsApp Phone Number',
+				name: 'whatsapp_phone_number',
+				type: 'string',
+				default: '',
+				description: 'Must match the signing contact when already recorded',
 			},
 		],
 	},
@@ -621,20 +635,12 @@ async function confirmData(this: IExecuteFunctions, itemIndex: number): Promise<
 	const code = requireAccessCode(this, itemIndex);
 	const documentId = extractRequiredId(this, 'confirmDocumentId', 'Document ID', itemIndex);
 	const fields = this.getNodeParameter('confirmFields', itemIndex, {}) as IDataObject;
-	if (fields.whatsapp_phone_number) {
-		throw new NodeOperationError(
-			this.getNode(),
-			'Confirm Data accepts only Full Name, Email and Government ID; update the WhatsApp number with Signer → Update',
-			{ itemIndex },
-		);
-	}
 	const body: IDataObject = {};
 	if (fields.full_name) body.full_name = fields.full_name;
 	if (fields.email) body.email = fields.email;
 	if (fields.government_id) body.government_id = fields.government_id;
-	// Saved workflows may still carry the former Accept Terms toggle; the API
-	// accepts terms through its own route, so honor it there.
-	if (fields.has_accepted_terms === true) await acceptTerms.call(this, itemIndex);
+	if (fields.whatsapp_phone_number) body.whatsapp_phone_number = fields.whatsapp_phone_number;
+	if (fields.has_accepted_terms !== undefined) body.has_accepted_terms = fields.has_accepted_terms;
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'PUT',
 		path: `/documents/${documentId}/signers/confirm-data`,

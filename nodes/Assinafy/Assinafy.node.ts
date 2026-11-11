@@ -7,6 +7,8 @@ import type {
 import { NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
 
 import { documentDescription, executeDocument } from './resources/document';
+import { envelopeDescription, executeEnvelope } from './resources/envelope';
+import { embeddedSigningDescription, executeEmbeddedSigning } from './resources/embeddedSigning';
 import { contractDescription, executeContract } from './resources/contract';
 import { signerDescription, executeSigner } from './resources/signer';
 import { assignmentDescription, executeAssignment } from './resources/assignment';
@@ -74,6 +76,8 @@ export class Assinafy implements INodeType {
 					{ name: 'Authentication', value: 'auth' },
 					{ name: 'Contract', value: 'contract' },
 					{ name: 'Document', value: 'document' },
+					{ name: 'Embedded Signing', value: 'embeddedSigning' },
+					{ name: 'Envelope', value: 'envelope' },
 					{ name: 'Field Definition', value: 'field' },
 					{ name: 'OAuth', value: 'oauth' },
 					{ name: 'Signer', value: 'signer' },
@@ -86,6 +90,8 @@ export class Assinafy implements INodeType {
 			},
 			...documentDescription,
 			...contractDescription,
+			...envelopeDescription,
+			...embeddedSigningDescription,
 			...signerDescription,
 			...assignmentDescription,
 			...templateDescription,
@@ -119,6 +125,12 @@ export class Assinafy implements INodeType {
 				let result: INodeExecutionData | INodeExecutionData[];
 
 				switch (resource) {
+					case 'envelope':
+						result = await executeEnvelope.call(this, i, operation);
+						break;
+					case 'embeddedSigning':
+						result = await executeEmbeddedSigning.call(this, i, operation);
+						break;
 					case 'contract':
 						result = await executeContract.call(this, i, operation);
 						break;

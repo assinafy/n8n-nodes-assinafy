@@ -5,6 +5,15 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-11-11
+
+- Add envelope creation, cost estimation, document management, reminders, activity history and ZIP downloads.
+- Add embedded-signing origin management and single-use sessions, embedded signer options, template idempotency keys and creation credit ceilings.
+- Add workspace usage, notification policy and push preferences, signing-page branding and certified-copy delivery/download operations.
+- Add endpoint test deliveries, optional signing-secret rotation overlap, envelope filters and document/contract/workspace expansions.
+- Accept signer contact and terms confirmation fields; continue pagination when the server caps pages below the requested size; reject expired-link HTML downloads.
+- Expand request/response schemas and English/Portuguese lifecycle guides; update the Node.js LTS patch and supported development tooling.
+
 ## [1.10.1] - 2026-11-02
 
 - Document the current resend-cost response (`total`, per-line `cost`, nullable `credit_balance`, and `has_sufficient_credits`).

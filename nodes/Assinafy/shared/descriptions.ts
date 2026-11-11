@@ -224,3 +224,31 @@ export const authenticateWithField = (
 		{ name: 'Workspace Credentials', value: 'workspaceCredentials' },
 	],
 });
+
+export const embeddedSignerField: INodeProperties = {
+	displayName: 'Embedded',
+	name: 'embedded',
+	type: 'boolean',
+	default: false,
+	description:
+		'Whether this signer uses an iframe embed session. Requires the Embed plan feature and Email or WhatsApp verification. Normal invitations are still sent.',
+};
+
+export const maxTotalCreditsField: INodeProperties = {
+	displayName: 'Maximum Total Credits',
+	name: 'max_total_credits',
+	type: 'number',
+	default: 0,
+	typeOptions: { minValue: 0 },
+	description:
+		'Spending ceiling for this request. Use total_credits from Estimate Cost; zero refuses any credit charge. Omit this field for no ceiling.',
+};
+
+export const idempotencyKeyField: INodeProperties = {
+	displayName: 'Idempotency Key',
+	name: 'idempotencyKey',
+	type: 'string',
+	default: '',
+	description:
+		'Optional unique key for this intended creation. Reuse it to reconcile a lost response; a different body with the same key does not create another resource.',
+};

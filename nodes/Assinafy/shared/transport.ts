@@ -54,6 +54,8 @@ export interface AssinafyRequestOptions {
 	basePath?: 'origin';
 	/** Single-use authorization codes and rotating refresh tokens cannot be replayed. */
 	retry?: false;
+	/** Token download links must not follow expired-link redirects to an HTML page. */
+	disableFollowRedirect?: boolean;
 }
 
 /** Resolve the effective base URL from credentials (respects environment/custom override). */
@@ -115,6 +117,7 @@ function buildHttpOptions(
 		method: options.method,
 		url,
 		timeout: 30000,
+		...(options.disableFollowRedirect ? { disableFollowRedirect: true } : {}),
 		headers: {
 			Accept: 'application/json',
 			...(options.headers ?? {}),
@@ -181,7 +184,7 @@ async function sendRequest(
 				continue;
 			}
 			const apiError = new NodeApiError(ctx.getNode(), error as JsonObject, {
-				message: `Assinafy API ${options.method} ${options.path} failed`,
+				message: `Assinafy API ${options.method} ${options.path.replace(/(\/signers\/downloads\/)[^/]+/, '$1[redacted]')} failed`,
 			});
 			const rateLimit = getHttpCode(error) === 429 ? describeRateLimit(error) : undefined;
 			if (rateLimit) {
@@ -262,7 +265,10 @@ export async function assinafyApiRequestAllItems<T = IDataObject>(
 		// Some reverse proxies omit Assinafy's pagination headers. A full page is
 		// therefore enough evidence to probe the next page, stopping on a short or
 		// empty response.
-		lastPage = pageCount ?? (chunk.length === perPage ? page + 1 : page);
+		const responsePageSize = readPaginationHeader(response.headers, 'x-pagination-per-page');
+		const effectivePageSize =
+			responsePageSize && responsePageSize <= perPage ? responsePageSize : Math.min(perPage, 50);
+		lastPage = pageCount ?? (chunk.length >= effectivePageSize ? page + 1 : page);
 		page += 1;
 		if (chunk.length === 0) break;
 	} while (page <= lastPage && lastPage > 0);
@@ -341,9 +347,15 @@ export async function searchResource(
 	const result: INodeListSearchResult = { results: items.map(toItem) };
 	const pageCount = readPaginationHeader(response.headers, 'x-pagination-page-count');
 	if (pageCount !== undefined && pageCount > MAX_PAGINATION_PAGES) {
-		throw new NodeOperationError(ctx.getNode(), 'Assinafy pagination exceeded the page safety limit');
+		throw new NodeOperationError(
+			ctx.getNode(),
+			'Assinafy pagination exceeded the page safety limit',
+		);
 	}
-	if (pageCount !== undefined ? page < pageCount : items.length === perPage) {
+	const responsePageSize = readPaginationHeader(response.headers, 'x-pagination-per-page');
+	const effectivePageSize =
+		responsePageSize && responsePageSize <= perPage ? responsePageSize : Math.min(perPage, 50);
+	if (pageCount !== undefined ? page < pageCount : items.length >= effectivePageSize) {
 		result.paginationToken = String(page + 1);
 	}
 	return result;
@@ -430,7 +442,6 @@ function retryDelayMs(error: unknown, attempt: number): number {
 	return Math.min(500 * 2 ** attempt, 30000);
 }
 
-
 const RATE_LIMIT_HEADERS = [
 	'X-Rate-Limit-Limit',
 	'X-Rate-Limit-Remaining',
@@ -441,9 +452,9 @@ const RATE_LIMIT_HEADERS = [
 /** Summarize the documented rate-limit headers of a 429 response, if it carries any. */
 function describeRateLimit(error: unknown): string | undefined {
 	const headers = httpResponse(error)?.headers;
-	const values = RATE_LIMIT_HEADERS.map((name) => [name, readHeader(headers, name)] as const).filter(
-		([, value]) => value !== undefined && value !== '',
-	);
+	const values = RATE_LIMIT_HEADERS.map(
+		(name) => [name, readHeader(headers, name)] as const,
+	).filter(([, value]) => value !== undefined && value !== '');
 	if (values.length === 0) return undefined;
 	return `Rate limited (${values.map(([name, value]) => `${name}: ${value}`).join(', ')}).`;
 }

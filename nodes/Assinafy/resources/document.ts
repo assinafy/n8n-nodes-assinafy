@@ -14,6 +14,9 @@ import {
 } from '../shared/transport';
 import {
 	documentResourceLocator,
+	embeddedSignerField,
+	maxTotalCreditsField,
+	idempotencyKeyField,
 	limitField,
 	returnAllField,
 	verificationMethodField,
@@ -381,6 +384,7 @@ export const documentDescription: INodeProperties[] = [
 							'Optional signing order. Set every signer to a contiguous sequence starting at 1, or leave every signer at 0 to notify all at once.',
 					},
 					{ ...verificationMethodField },
+					embeddedSignerField,
 					{
 						displayName: 'WhatsApp Phone Number',
 						name: 'whatsapp_phone_number',
@@ -400,6 +404,7 @@ export const documentDescription: INodeProperties[] = [
 		default: {},
 		displayOptions: { show: showOnly(['createFromTemplate']) },
 		options: [
+			maxTotalCreditsField,
 			{
 				displayName: 'Document Name',
 				name: 'name',
@@ -457,6 +462,18 @@ export const documentDescription: INodeProperties[] = [
 		displayOptions: { show: showOnly(['detachTag']) },
 	},
 
+	{ ...idempotencyKeyField, displayOptions: { show: showOnly(['createFromTemplate']) } },
+	{
+		displayName: 'Expand',
+		name: 'expand',
+		type: 'multiOptions',
+		default: [],
+		options: [
+			{ name: 'Envelope', value: 'envelope' },
+			{ name: 'Envelope ID', value: 'envelope_id' },
+		],
+		displayOptions: { show: showOnly(['get']) },
+	},
 	// --- verify ---
 	{
 		displayName: 'Signature Hash',
@@ -700,9 +717,11 @@ async function searchDocuments(
 
 async function getDocument(this: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
 	const documentId = extractDocumentId.call(this, itemIndex);
+	const expand = parseStringList(this.getNodeParameter('expand', itemIndex, []));
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'GET',
 		path: `/documents/${documentId}`,
+		qs: cleanQs({ expand: expand.join(',') }),
 	});
 }
 
@@ -920,6 +939,7 @@ function buildTemplateSigners(
 			entry.notification_methods = s.notification_methods;
 		}
 		if (!options.forEstimate) {
+			if (s.embedded !== undefined) entry.embedded = s.embedded;
 			const step = Number(s.step ?? 0);
 			if (step !== 0) entry.step = step;
 		}
@@ -980,6 +1000,8 @@ async function createFromTemplate(
 
 	const body: IDataObject = { signers: buildTemplateSigners(signersRaw) };
 
+	if (additional.max_total_credits !== undefined)
+		body.max_total_credits = additional.max_total_credits;
 	if (additional.name) body.name = additional.name;
 	if (additional.message) body.message = additional.message;
 	if (additional.expires_at) body.expires_at = additional.expires_at;
@@ -992,11 +1014,13 @@ async function createFromTemplate(
 		}
 		if (editorFields.length > 0) body.editor_fields = editorFields;
 	}
+	const idempotencyKey = this.getNodeParameter('idempotencyKey', itemIndex, '') as string;
 	const tags = parseStringList(additional.tags);
 	if (tags.length > 0) body.tags = tags;
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'POST',
 		path: `/accounts/${accountId}/templates/${templateId}/documents`,
+		headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
 		body,
 	});
 }

@@ -4,6 +4,8 @@ import * as assignment from '../nodes/Assinafy/resources/assignment';
 import * as auth from '../nodes/Assinafy/resources/auth';
 import * as oauth from '../nodes/Assinafy/resources/oauth';
 import * as document from '../nodes/Assinafy/resources/document';
+import * as envelope from '../nodes/Assinafy/resources/envelope';
+import * as embeddedSigning from '../nodes/Assinafy/resources/embeddedSigning';
 import * as contract from '../nodes/Assinafy/resources/contract';
 import * as field from '../nodes/Assinafy/resources/field';
 import * as signer from '../nodes/Assinafy/resources/signer';
@@ -44,6 +46,8 @@ describe('Assinafy top-level dispatch', () => {
 		['oauth', oauth, 'executeOAuth'],
 		['document', document, 'executeDocument'],
 		['contract', contract, 'executeContract'],
+		['envelope', envelope, 'executeEnvelope'],
+		['embeddedSigning', embeddedSigning, 'executeEmbeddedSigning'],
 		['field', field, 'executeField'],
 		['signer', signer, 'executeSigner'],
 		['signerDocument', signerDocument, 'executeSignerDocument'],

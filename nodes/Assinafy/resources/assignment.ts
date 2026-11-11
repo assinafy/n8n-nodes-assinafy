@@ -14,6 +14,8 @@ import {
 } from '../shared/transport';
 import {
 	assignmentIdField,
+	embeddedSignerField,
+	maxTotalCreditsField,
 	documentResourceLocator,
 	limitField,
 	returnAllField,
@@ -180,6 +182,7 @@ export const assignmentDescription: INodeProperties[] = [
 							'Existing signer ID. Leave empty on "Estimate Cost" to estimate without a specific signer.',
 					},
 					{ ...verificationMethodField },
+					embeddedSignerField,
 					{
 						displayName: 'Notification Methods',
 						name: 'notification_methods',
@@ -213,6 +216,7 @@ export const assignmentDescription: INodeProperties[] = [
 		default: {},
 		displayOptions: { show: showOnly(['create']) },
 		options: [
+			maxTotalCreditsField,
 			{
 				displayName: 'Message',
 				name: 'message',
@@ -353,6 +357,30 @@ export const assignmentDescription: INodeProperties[] = [
 	// --- listWhatsapp ---
 	{ ...assignmentIdField, displayOptions: { show: showOnly(['listWhatsapp']) } },
 
+	{
+		displayName: 'Sign Page Options',
+		name: 'signPageOptions',
+		type: 'collection',
+		default: {},
+		placeholder: 'Add Option',
+		displayOptions: { show: showOnly(['getSignPage']) },
+		options: [
+			{
+				displayName: 'Document ID',
+				name: 'document_id',
+				type: 'string',
+				default: '',
+				description: 'Another document of the same envelope that this signer is on',
+			},
+			{
+				displayName: 'Expand Envelope',
+				name: 'expandEnvelope',
+				type: 'boolean',
+				default: false,
+				description: 'Whether to include the envelope ID and name',
+			},
+		],
+	},
 	// --- sign / decline / getSignPage ---
 	{
 		displayName: 'Signer Access Code',
@@ -530,6 +558,7 @@ interface SignerEntry {
 	verification_method?: string;
 	notification_methods?: string[];
 	step?: number;
+	embedded?: boolean;
 }
 
 function buildAssignmentBody(
@@ -575,6 +604,7 @@ function buildAssignmentBody(
 			ref.notification_methods = entry.notification_methods;
 		}
 		if (!options.forEstimate && entry.id) ref.id = entry.id;
+		if (!options.forEstimate && entry.embedded !== undefined) ref.embedded = entry.embedded;
 		if (!options.forEstimate && entry.step && entry.step > 0) ref.step = entry.step;
 		if (!options.forEstimate && !ref.id) {
 			throw new NodeOperationError(
@@ -591,6 +621,8 @@ function buildAssignmentBody(
 
 	if (!options.forEstimate) {
 		const additional = this.getNodeParameter('additionalFields', itemIndex, {}) as IDataObject;
+		if (additional.max_total_credits !== undefined)
+			body.max_total_credits = additional.max_total_credits;
 		if (additional.message) body.message = additional.message;
 		if (additional.expires_at) body.expires_at = additional.expires_at;
 		if (
@@ -706,6 +738,9 @@ async function getSignPage(this: IExecuteFunctions, itemIndex: number): Promise<
 	const hasAcceptedTerms = this.getNodeParameter('hasAcceptedTerms', itemIndex, false) as boolean;
 	const qs: IDataObject = { 'signer-access-code': code };
 	if (hasAcceptedTerms) qs.has_accepted_terms = true;
+	const options = this.getNodeParameter('signPageOptions', itemIndex, {}) as IDataObject;
+	if (options.document_id) qs.document_id = options.document_id;
+	if (options.expandEnvelope) qs.expand = 'envelope';
 	return assinafyApiRequest<IDataObject>(this, {
 		method: 'GET',
 		path: '/sign',

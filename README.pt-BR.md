@@ -8,7 +8,7 @@ Nós comunitários do n8n para a [Assinafy](https://assinafy.com.br): documentos
 
 No n8n em infraestrutura própria, abra **Settings → Community Nodes → Install**, informe `@assinafy/n8n-nodes-assinafy` e reinicie o n8n se solicitado. O npmjs é o registro principal; o GitHub Packages é apenas um espelho. A disponibilidade no n8n Cloud depende da aprovação no catálogo do n8n.
 
-Use Node.js 26.13.0 LTS no desenvolvimento. A versão mínima de execução do pacote é Node.js 24.21.0; o ambiente local usa n8n 2.42.4. A Assinafy exige HTTPS com TLS 1.2 ou mais recente.
+Use Node.js 26.13.1 LTS no desenvolvimento. A versão mínima de execução do pacote é Node.js 24.21.0; o ambiente local usa n8n 2.42.4. A Assinafy exige HTTPS com TLS 1.2 ou mais recente.
 
 ## Credenciais
 
@@ -54,6 +54,8 @@ Cada signatário aceita um método de notificação. Estime o custo e confirme o
 
 Em modelos, **Create From Template** pode retornar inicialmente `uploaded` com `assignment: null`; salve o ID e aguarde `pending_signature` com um assignment. Em gestão de contratos, faça o upload e depois use **Contract → Set Terms**; preserve o ID se os termos falharem. Renove ou encerre usando o `updated_at` lido por Get.
 
+Para vários documentos, envie e aguarde cada PDF; depois use **Envelope → Estimate Cost → Create** com **Idempotency Key** estável e teto opcional `max_total_credits` (zero é válido). Salve o ID do envelope, aguarde cada signatário concluir seus documentos e baixe os artefatos disponíveis em ZIP. Para assinatura incorporada por Email/WhatsApp, cadastre uma origem permitida, crie a solicitação com `embedded: true` e use **Embedded Signing → Create Session**; carregue a URL de uso único no iframe em até cinco minutos. Biometria e certificado usam o fluxo hospedado. **Signer Document → Send Certified Copy** reenvia a cópia ao contato original após a certificação.
+
 ## Assinafy Trigger
 
 A ativação cria ou atualiza somente o endpoint deste workflow; a desativação remove somente esse endpoint. Uma conta comporta um endpoint, ou até três em planos pagos. Em ambientes antigos, o Trigger usa a assinatura única.
@@ -65,17 +67,19 @@ A URL sempre contém um token derivado da credencial. **Verify Signature** tamb�
 | Recurso | Operações |
 | --- | --- |
 | Document | Append Tags, Create From Template, Delete, Detach Tag, Download Artifact, Download Page, Download Thumbnail, Estimate Cost From Template, Get, Get Activities, Get Public Info, Get Signing Progress, List, List Statuses, List Tags, Rename, Replace Tags, Search, Send Public Token, Upload, Verify, Wait Until Ready |
+| Envelope | Create, Estimate Cost, List, Get, Update, Delete, Cancel, Add Document, Remove Document, Get Activities, Resend Notification, Download |
+| Embedded Signing | List Origins, Add Origin, Update Origin, Remove Origin, Create Session |
 | Contract | List, Get, Get Related, Set Terms, Renew, Terminate |
 | Signer | Accept Terms (Signer Side), Confirm Data (Signer Side), Create, Delete, Download Signature (Signer Side), Find by Email, Get, Get Identity Verification (Signer Side), Get Self (Signer Side), List, Start Identity Verification (Signer Side), Update, Upload Signature (Signer Side), Verify Code (Signer Side) |
 | Assignment | Create, Decide Identity Review, Decline (Signer Side), Download Identity Review Image, Estimate Cost, Estimate Resend Cost, Get Identity Review, Get Sign Page, List, List WhatsApp Notifications, Resend Notification, Reset Expiration, Sign (Signer Side) |
 | Template | List, Get |
 | Tag | Create, List, Update, Delete |
 | Field Definition | Create, List, Get, Update, Delete, Validate, Validate Multiple, List Types |
-| Signer Document | Get Current, List, Search, Sign Multiple, Decline Multiple, Download |
+| Signer Document | Get Current, List, Search, Sign Multiple, Decline Multiple, Download, Get Signing Theme, Download Signing Logo, Send Certified Copy, Download Certified Copy, Resend Certified Copy |
 | OAuth | Exchange Code, Refresh Token, Revoke Token, Get User Info, Get Metadata |
 | Authentication | Change Password, Complete Two-Factor Login, Confirm Authenticator Enrollment, Create API Key, Delete API Key, Get API Key (Masked), Link Social Login, List Two-Factor Methods, Login, Regenerate Recovery Codes, Remove Two-Factor Method, Request Password Reset, Reset Password, Social Login, Start Authenticator Enrollment |
-| Workspace | Create, Delete, Delete Logo, Download Logo, Get, Get Account Statistics, Get Current User, Get Notification Preferences, Get Theme, Get User Statistics, List, Update, Update Notification Preferences, Upload Logo |
-| Webhook | Create Endpoint, Delete Endpoint, Delete Endpoint by URL, Get Endpoint, Get Endpoint Signing Secret, Get Subscription, Inactivate Subscription, List Dispatches, List Endpoints, List Event Types, Register Subscription, Retry Dispatch, Rotate Endpoint Signing Secret, Update Endpoint |
+| Workspace | Create, Delete, Delete Logo, Download Logo, Get, Get Account Statistics, Get Current User, Get Notification Preferences, Get Notification Policy, Get Push Preferences, Get Usage, Get Theme, Get User Statistics, List, Update, Update Notification Preferences, Update Notification Policy, Update Push Preferences, Upload Logo |
+| Webhook | Create Endpoint, Delete Endpoint, Delete Endpoint by URL, Get Endpoint, Get Endpoint Signing Secret, Get Subscription, Inactivate Subscription, List Dispatches, List Endpoints, List Event Types, Register Subscription, Retry Dispatch, Rotate Endpoint Signing Secret, Test Endpoint, Update Endpoint |
 
 O contrato completo de parâmetros, autenticação, endpoints, mídia, requisições, respostas, erros e payloads de webhook está em [docs/OPERATIONS.md](docs/OPERATIONS.md), em inglês. Listas geram um item n8n por registro; mutações que retornam arrays usam `{ "data": [...] }`; envelopes de sucesso são removidos; binários incluem metadados; cada saída permanece ligada à entrada original. HTTP 429 recebe no máximo três tentativas; outras falhas e mutações OAuth são executadas uma vez.
 
