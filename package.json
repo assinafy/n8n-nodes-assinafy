@@ -75,7 +75,7 @@
 		"eslint": "10.14.0",
 		"ignore": "7.0.14",
 		"jest": "^30.4.2",
-		"n8n-workflow": "2.42.2",
+		"n8n-workflow": "3.1.0",
 		"prettier": "3.9.10",
 		"ts-jest": "^29.4.12",
 		"typescript": "5.9.3"
