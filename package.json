@@ -70,7 +70,7 @@
 		]
 	},
 	"devDependencies": {
-		"@n8n/node-cli": "^0.54.6",
+		"@n8n/node-cli": "^1.2.0",
 		"@types/jest": "^30.0.0",
 		"eslint": "10.14.0",
 		"ignore": "7.0.14",
