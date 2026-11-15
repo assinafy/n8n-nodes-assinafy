@@ -76,7 +76,7 @@
 		"ignore": "7.0.14",
 		"jest": "^30.4.2",
 		"n8n-workflow": "2.42.2",
-		"prettier": "3.9.10",
+		"prettier": "3.10.1",
 		"ts-jest": "^29.4.12",
 		"typescript": "5.9.3"
 	},
