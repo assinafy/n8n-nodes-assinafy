@@ -1,6 +1,6 @@
 {
 	"name": "@assinafy/n8n-nodes-assinafy",
-	"version": "1.11.0",
+	"version": "1.12.0",
 	"description": "n8n community nodes for the Assinafy electronic-signature API (documents, contracts, signers, assignments, templates, tags, webhooks).",
 	"license": "MIT",
 	"homepage": "https://www.assinafy.com.br",
@@ -70,13 +70,13 @@
 		]
 	},
 	"devDependencies": {
-		"@n8n/node-cli": "^0.54.6",
+		"@n8n/node-cli": "^0.58.5",
 		"@types/jest": "^30.0.0",
-		"eslint": "10.14.0",
-		"ignore": "7.0.14",
+		"eslint": "10.15.0",
+		"ignore": "7.0.16",
 		"jest": "^30.4.2",
 		"n8n-workflow": "2.42.2",
-		"prettier": "3.9.10",
+		"prettier": "3.10.1",
 		"ts-jest": "^29.4.12",
 		"typescript": "5.9.3"
 	},

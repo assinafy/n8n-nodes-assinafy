@@ -2,7 +2,7 @@
 
 Full request/response reference for every operation exposed by the **Assinafy** action node, including signer-side and authentication flows. Account-scoped paths use the **Account ID** from the credential (shown as `{accountId}`). List operations paginate via the `X-Pagination-*` response headers when **Return All** is enabled.
 
-Reference: [Assinafy v1 API documentation](https://api.assinafy.com.br/v1/docs) and [OpenAPI JSON](https://api.assinafy.com.br/v1/docs/openapi.json).
+Reference: [Assinafy v1 API documentation](https://api.assinafy.com.br/v1/docs) and [OpenAPI JSON](https://api.assinafy.com.br/v1/docs/openapi.json), plus the [staging API](https://api.angry-pisco.stage.assinafy.com.br/v1/docs). Scheduled sends, watchers, signer capacities, notification history, envelope resend estimates and JPEG signature uploads require an environment that exposes those capabilities; they are documented in staging and may not yet be available in production. Select Custom in the API credential to use staging.
 
 ## How to read payloads
 
@@ -257,7 +257,7 @@ The following OpenAPI schemas define complete payloads, nested fields, required 
       "format": "email"
     },
     "whatsapp_phone_number": {
-      "description": "E.164 format; normalized on save.",
+      "description": "E.164 format; normalized on save. A number written with `+` is read with the country code it names first, and as Brazilian if it isn't valid there; one without `+` is read as a Brazilian area code and number first.",
       "type": [
         "string",
         "null"
@@ -487,6 +487,7 @@ The following OpenAPI schemas define complete payloads, nested fields, required 
       ]
     },
     "tags": {
+      "description": "The workspace's labels on the document. Always empty when the signer reads it with their code.",
       "type": "array",
       "items": {
         "properties": {
@@ -787,6 +788,7 @@ The following OpenAPI schemas define complete payloads, nested fields, required 
       "type": "boolean"
     },
     "is_active": {
+      "description": "Whether the field is offered for new placements: the field list leaves an inactive one out unless `include_inactive` is set. Documents and templates already using an inactive field keep working: its values are still validated and signed.",
       "type": "boolean"
     },
     "is_required": {
@@ -1714,6 +1716,7 @@ The following OpenAPI schemas define complete payloads, nested fields, required 
             "type": "string"
           },
           "fields": {
+            "description": "The fields placed on this page. A page with none adds nothing, as on an assignment.",
             "type": "array",
             "items": {
               "required": [
@@ -1735,8 +1738,7 @@ The following OpenAPI schemas define complete payloads, nested fields, required 
                 }
               },
               "type": "object"
-            },
-            "minItems": 1
+            }
           }
         },
         "type": "object"
@@ -3619,6 +3621,98 @@ The following OpenAPI schemas define complete payloads, nested fields, required 
 }
 ```
 
+#### Schema: ScheduledSend
+
+```json
+{
+  "description": "A **Create assignment** or **Create envelope** request kept until `send_at`, then made as that route makes it, by the member who scheduled it.",
+  "required": [
+    "id",
+    "type",
+    "document_ids",
+    "status",
+    "send_at",
+    "assignment_id",
+    "envelope_id",
+    "failure_reason",
+    "created_at",
+    "processed_at"
+  ],
+  "properties": {
+    "resource": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string"
+    },
+    "type": {
+      "description": "What it creates.",
+      "type": "string",
+      "enum": [
+        "assignment",
+        "envelope"
+      ]
+    },
+    "document_ids": {
+      "description": "The documents it sends: one for an assignment, the envelope's for an envelope. A deleted document is left out.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "status": {
+      "description": "`pending` until `send_at` (or **Send a scheduled send now**); `processing` while its request is being made; then `sent` (the request was made; its invitations go out right after), `failed` or, if cancelled while pending, `cancelled`. A send whose run was interrupted while `processing` made nothing, and fails within about an hour.",
+      "type": "string",
+      "enum": [
+        "pending",
+        "processing",
+        "sent",
+        "cancelled",
+        "failed"
+      ]
+    },
+    "send_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "assignment_id": {
+      "description": "The assignment it created, once an `assignment` is `sent`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "envelope_id": {
+      "description": "The envelope it created, once an `envelope` is `sent`; `null` again once the envelope is deleted.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "failure_reason": {
+      "description": "Why it was not sent, once `failed`: the refusal the create route answered then (no documents or credits left, a signer removed, the document already sent, the plan without Envelopes), that the workspace is being deleted, or that the member who scheduled it left the workspace. Written in Portuguese.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "processed_at": {
+      "description": "When it was sent, failed or cancelled.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    }
+  },
+  "type": "object"
+}
+```
+
 `DisplaySettings` uses pixels in the document’s 150-DPI page image, measured from the upper-left corner. `left` and `top` must be non-negative; `width`, `height` and `fontSize` must be positive. These five numeric fields are required for a placement. Keep each rectangle within the selected page’s width and height; the API does not clamp out-of-bounds coordinates. `fontFamily` and `backgroundColor` are optional presentation metadata.
 
 `Document.verification_code` identifies the public verification page, and `verification_url` links to it; either can be null on older documents. `has_contract` is returned only by the workspace-authenticated single-document read when contract tracking is enabled: true means the document has terms or belongs to a family with terms. An omitted value is unknown, including when the lookup failed; lists, webhooks and signer-code reads omit it. Document List, Get, signer-side List and Create From Template include `assignment` and `pages`; Search omits both, Upload includes pages but no assignment, and Rename can include assignment through its expansion option.
@@ -3646,7 +3740,7 @@ In particular, the `signing_urls` array on an Assignment is **not** a source of 
 }
 ```
 
-The path segment is the document ID, not a code — passing it as `signer-access-code` returns `401 Credenciais inválidas.` Give that URL to the signer and let the signing page do the rest, or send them there with **Document → Send Public Token** (`PUT /public/documents/{documentId}/send-token`), which mails a fresh one-time token.
+The path segment is the document ID, not a code — passing it as `signer-access-code` returns `401 Credenciais inválidas.` Give that URL to the signer and let the signing page do the rest, or send them there with **Document → Send Public Token** (`PUT /public/documents/{documentId}/send-token`), which resends the existing invitation without renewing its access code.
 
 An n8n workflow therefore drives the signer-side operations only when a code arrives through a step you control — an inbox-reading node, a WhatsApp integration, or a human pasting it in. Use the API-key credential for owner administration, and the OAuth credential for operations permitted by its scopes. See [OAuth](#oauth) for token-specific requirements.
 
@@ -3661,7 +3755,7 @@ Assignment and template signer rows use `verification_method` (`Email`, `Whatsap
 | `DigitalCertificate`       | `method: virtual`, Digital Certificate feature (Standard/Pro), signer CPF/CNPJ in `government_id`, and no other signer in the same signing step. | Per-signer fee returned by Estimate Cost |
 | `IdDocumentFaceMatchBasic` | ID Document + Face Match feature, valid signer CPF in `government_id`, and explicit consent to biometric processing.                             | Per-signer fee returned by Estimate Cost |
 
-Email notifications cost 0 credits. WhatsApp notifications require a paid subscription and cost 0.45 credits per notification.
+Email notifications cost 0 credits. WhatsApp notifications require the plan feature; their price depends on the plan. Use Estimate Cost for current prices and available resources.
 
 `Email` verification pairs only with Email notification, and `Whatsapp` only with Whatsapp. `DigitalCertificate` and `IdDocumentFaceMatchBasic` accept either channel. Always check the returned cost estimate and `has_sufficient_resources` before creation; fees and plan entitlements are enforced by the API.
 
@@ -3989,6 +4083,7 @@ Downloads the document's thumbnail image into a binary property.
 **Node parameters:**
 
 - Document ID — resourceLocator — required — the document.
+- Render Artifact — options — optional — Original (default, no query) or Certificated (sends `artifact=certificated`).
 - Put Output In Field — string — optional — output binary property name (default `data`).
 
 **Example response:** Output is a binary item. The binary is the raw `image/jpeg` thumbnail with suggested filename `{documentId}-thumbnail.jpg`. Accompanying JSON: `{ "documentId", "fileName", "mimeType", "size" }`.
@@ -4003,9 +4098,12 @@ Downloads a single rendered page of the document as a JPEG into a binary propert
 
 - Document ID — resourceLocator — required — the document.
 - Page ID — string — required — the page to download (from Get > `pages` array).
+- Render Artifact — options — optional — Original (default, no query) or Certificated (sends `artifact=certificated`).
 - Put Output In Field — string — optional — output binary property name (default `data`).
 
 **Example response:** Output is a binary item. The binary is the raw `image/jpeg` page image with suggested filename `{documentId}-page-{pageId}.jpg`. Accompanying JSON: `{ "documentId", "fileName", "mimeType", "size" }`.
+
+Signed renders require workspace credentials and a certificated document; otherwise the API returns 404. The first request renders up to ten surrounding pages. HTTP 503 with `Retry-After` means rendering is busy or pending; use a bounded Wait/retry workflow. The node does not automatically retry 503. Certificate pages have no page IDs; the digital-certificate seal is available in the `pades` file. No request body is sent; successful output is image bytes. Other errors include 401/403 for authorization and 500 for a server failure.
 
 #### List the activity log for a document
 
@@ -4258,9 +4356,9 @@ The node returns the unwrapped document information without reshaping it. The pa
 }
 ```
 
-#### Email a one time access token to a pending signer
+#### Resend the existing signing invitation to a pending signer
 
-Emails a one-time access token to a signer of a public document so they can view it. Public endpoint — no API key or OAuth token is sent. The document must be pending signature, and the recipient must be the email address of a signer who has not signed yet. The API supports only the `email` channel; a workflow saved with the former WhatsApp channel fails before any request with an error asking to switch Channel to Email.
+Resends the existing invitation to a signer of a public document so they can view it. It does not renew the access code; a two-minute resend interval applies per signer, shared with envelope notifications. Public endpoint — no API key or OAuth token is sent. The document must be pending signature, and the recipient must be the email address of a signer who has not signed yet. The API supports only the `email` channel; a workflow saved with the former WhatsApp channel fails before any request with an error asking to switch Channel to Email.
 
 **Endpoint:** `PUT /public/documents/{publicDocumentId}/send-token`
 
@@ -5096,7 +5194,7 @@ Signer-side flow: confirms contact data and terms for a document. Current fields
 
 #### Upload a signer signature or initial image
 
-Signer-side flow: uploads the signer's signature or initials image as the raw request body. The API accepts `image/png`; the node requires a non-empty PNG and rejects other or contradictory MIME types. A missing or generic `application/octet-stream` MIME type is accepted only when the PNG signature bytes are present. The access code, signature `type`, and optional `reuse` preference are query parameters.
+Signer-side flow: uploads the signer's signature or initials image as the raw request body. The staging API accepts `image/png` or `image/jpeg` (production currently documents PNG); the node requires a non-empty PNG or JPEG and rejects other or contradictory MIME types. A missing or generic `application/octet-stream` MIME type is accepted only when the PNG or JPEG signature bytes are present. The access code, signature `type`, and optional `reuse` preference are query parameters.
 
 **Endpoint:** `POST /signature`
 
@@ -5104,7 +5202,7 @@ Signer-side flow: uploads the signer's signature or initials image as the raw re
 
 - Signer Access Code — string (password) — required — per-signer access code.
 - Signature Type — options (`signature` | `initial`, default `signature`) — which image is being uploaded.
-- Binary Property — string (default `data`) — required — name of the binary property on the incoming item holding the PNG image.
+- Binary Property — string (default `data`) — required — name of the binary property on the incoming item holding the PNG or JPEG image.
 - Signature Options > Reuse in Future Processes — boolean — optional — sends `reuse=true` or `reuse=false` when present; omit the option to preserve the existing preference.
 
 **Example request (query + raw image body):**
@@ -5113,7 +5211,7 @@ Signer-side flow: uploads the signer's signature or initials image as the raw re
 {
 	"query": { "signer-access-code": "<signer-access-code>", "type": "signature", "reuse": true },
 	"headers": { "Content-Type": "image/png" },
-	"body": "<raw PNG bytes>"
+	"body": "<raw PNG or JPEG bytes>"
 }
 ```
 
@@ -5122,6 +5220,8 @@ Signer-side flow: uploads the signer's signature or initials image as the raw re
 ```json
 { "data": [] }
 ```
+
+PNG and JPEG uploads send raw bytes with the matching `Content-Type`. The node verifies the file signature and declared MIME type. JPEG requires API support (currently documented in staging). The image belongs to the signer, not the document: uploading replaces that type for every document not yet certificated. Collect signing requires both `signature` and `initial` images, even without an initials field. Images larger than 1000 pixels on a side are scaled by the API. Blank or unreadable images are refused.
 
 #### Download a signer signature or initial image
 
@@ -5396,7 +5496,7 @@ Estimates the credit/document cost of an assignment without creating it, returni
 
 > Note: The Additional Fields (message / expires_at / copy_receivers) are not sent on this operation — they only show for Create.
 
-Pricing is 1 credit for an extra document when the plan allowance is exhausted, 0 credits per Email notification, 0.45 credits per WhatsApp notification, and the current per-signer `DigitalCertificate` fee returned by this endpoint in addition to the notification. Use the returned `breakdown`, `total_credits` and `has_sufficient_resources` as the pricing authority for each request. Digital-certificate charges appear under breakdown code `SignatureDigitalCertificate`. The node rejects a `collect` estimate containing a certificate signer with code `ASSINAFY_DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL` before sending the request.
+Pricing depends on the workspace allowance, notification channel and verification method; request a fresh estimate before creating the assignment. Use the returned `breakdown`, `total_credits` and `has_sufficient_resources` as the pricing authority for each request. Digital-certificate charges appear under breakdown code `SignatureDigitalCertificate`. The node rejects a `collect` estimate containing a certificate signer with code `ASSINAFY_DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL` before sending the request.
 
 `blocking_reason` is `PendingPayment`, `InsufficientDocuments`, `InsufficientCredits`, or `null`.
 
@@ -5672,7 +5772,7 @@ With Remove Expiration enabled the body is `{ "expires_at": null }` and the resp
 
 #### Signer submits values for collect method input fields
 
-Signer-side sign: submits values for the signer's collect-method input items, authenticated by the per-signer access code passed as a query param (no account auth; SDK uses `skipAuth`). The request body is the raw JSON array of items. For a virtual assignment, submit an empty array after confirming signer data; collect assignments require item values.
+Signer-side sign: submits values for the signer's collect-method input items, authenticated by the per-signer access code passed as a query param (no account auth; SDK uses `skipAuth`). The request body is the raw JSON array of items. For a virtual assignment, submit an empty array after confirming signer data; collect assignments require both stored signature/initial images and values for required editable items. Omitted optional/read-only items are filled by the API. A repeat after completion returns the existing assignment without changing the signature.
 
 **Endpoint:** `POST /documents/{documentId}/assignments/{assignmentId}`
 
@@ -11817,7 +11917,7 @@ Mint a single-use embed URL for a signer created with `embedded: true`. Load the
 
 ### Workspace notification controls and usage
 
-**Workspace → Get Usage**, **Get Notification Policy**, **Update Notification Policy**, **Get Push Preferences** and **Update Push Preferences** require API-key authentication and reject OAuth before any request. Usage/policy use **Workspace ID** or the credential's Account ID; push preferences apply to the authenticated user. Updates take **Notification Settings (JSON)** (`notificationSettings`), send only the supplied fields and preserve false/null/nested values. Owner-only policy changes remain enforced by the API. Each operation emits one item with the unwrapped payload.
+**Workspace → Get Usage**, **Get Notification Policy**, **Update Notification Policy**, **Get Push Preferences** and **Update Push Preferences** require API-key authentication and reject OAuth before any request. Usage/policy require **Workspace ID**; push preferences apply to the authenticated user. Updates take **Notification Settings (JSON)** (`notificationSettings`), send only the supplied fields and preserve false/null/nested values. Owner-only policy changes remain enforced by the API. Each operation emits one item with the unwrapped payload.
 
 #### Get account usage
 
@@ -13384,3 +13484,2021 @@ Replace the endpoint's signing secret and return the new one. The old secret sto
   }
 }
 ```
+
+## Scheduled sends and signer delivery
+
+These operations use the configured environment; their routes are currently documented in staging. Use API-key credentials with Custom Base URL `https://api.angry-pisco.stage.assinafy.com.br/v1` for that environment. OAuth credentials remain fixed to Production. A missing route is surfaced as an API error, without fallback or a second send.
+
+### Node parameters and output
+
+| Resource / operation | Parameters | Authentication and output |
+| --- | --- | --- |
+| Scheduled Send / Schedule Assignment | Document; Send (JSON) (`scheduledSendBody`): complete Assignment Create body plus `send_at` | API key or OAuth `documents:write`; one `ScheduledSend` |
+| Scheduled Send / Schedule Envelope | Send (JSON): complete `EnvelopeCreateRequest` plus `send_at`; Account ID from credential | API key or OAuth `documents:write`, Envelopes feature; one `ScheduledSend` |
+| Scheduled Send / List | Return All or Limit; optional Filters → Document ID (`document_id`); Account ID from credential | API key or OAuth `documents:write` (including reads); one item per `ScheduledSend`, all pages with Return All |
+| Scheduled Send / Cancel, Send Now | Scheduled Send ID; Account ID from credential | API key or OAuth `documents:write`; one `ScheduledSend` |
+| Document / List Watchers | Document | API key only; one item per `Signer` |
+| Document / Set Watchers | Document; Watcher IDs (JSON): array of workspace contact IDs with email, up to 10 distinct contacts; `[]` clears | API key only, OAuth rejected before HTTP; one `{data: Signer[]}` item |
+| Document / Get Notification History | Document | API key or OAuth `documents:read`; one item per signer with full `notification_history`, including nullable `delivered_at` and `opened_at` |
+| Assignment / Get Signer Capacities | Document | API key or OAuth `documents:read`; one `{signer_id,sign_as}` item per signer |
+| Envelope / Estimate Resend Cost | Envelope ID; Signer; Account ID from credential | API key or OAuth `documents:write`; one `ResendCostEstimate`, no notification sent |
+
+**Assignment → Create / Estimate Cost** signer rows also accept **Sign As** (`sign_as`). Empty UI text omits it; an expression supplying JSON null is preserved and means ordinary signing. The capacity is fixed on creation, appears on the certificate as the sender's statement, and is read with Get Signer Capacities. Values are `Sign`, `Approve`, `Acknowledge`, `Party`, `Witness`, `Intervening`, `Receipt`, `IssuerEndorserGuarantor`, `IssuerEndorserGuarantorSurety`, `Surety`, `PartySurety`, `JointDebtor`, `PartyJointDebtor`, `ContractingParty`, `ContractedParty`, `Landlord`, `Tenant`, `Buyer`, `Seller`, `AttorneyInFact`, `LegalRepresentative`, `Employer`, `Employee`, or null. The API validates the value; the node preserves it for creation and estimates.
+
+Upload and wait for each document, estimate the immediate creation request, then schedule with `send_at` one hour to 90 days ahead. Each expiration must be at least two hours after `send_at`. Scheduling reserves neither documents nor credits; persist the scheduled-send ID and poll List. The API checks every five minutes. `sent` means the assignment/envelope was created, not that invitations were delivered or signatures completed. Follow its returned assignment/envelope IDs through the ordinary signing and certified-download flow. A failed Send Now leaves the send pending, so cancel it if the future send is no longer intended. Only pending sends can be cancelled or sent now. Scheduling does not read Idempotency-Key; reconcile List after an uncertain result before creating another schedule. Preserve `max_total_credits`, including zero, to cap the eventual send.
+
+Watchers receive only the document name, sender and ending event, with no signing link or file. Replacing watchers changes the whole list; they must be workspace contacts with email. Clear or update them before the document ends. Notification opens are hints, not proof of human reading.
+
+Example scheduled assignment request (`application/json`):
+
+```json
+{
+  "send_at": "2027-02-01T12:00:00-03:00",
+  "method": "virtual",
+  "signers": [{"id": "<signer-id>", "verification_method": "Email", "notification_methods": ["Email"], "sign_as": "Witness"}],
+  "expires_at": null,
+  "max_total_credits": 0
+}
+```
+
+The full HTTP schemas below use the shared catalog; successful envelopes unwrap `data`. JSON mutations preserve explicit null/false/zero and all supplied nested fields. Requests without a listed body send none. Path IDs are encoded once. Errors retain the documented status and payload through n8n.
+
+### Get signer capacities
+
+**Endpoint:** `GET /documents/{documentId}/signer-capacities`
+
+The capacity each signer of the document's assignment signs in, as the sender gave it with `sign_as` on **Create assignment**: `Sign` for a signer given none. In the order **Get document** lists the assignment's signers; an empty list for a document not sent yet. Reachable with the `documents:read` OAuth scope.
+
+**HTTP parameters:**
+
+```json
+[
+  {
+    "name": "documentId",
+    "in": "path",
+    "description": "Document ID.",
+    "required": true,
+    "schema": {
+      "type": "string"
+    }
+  }
+]
+```
+
+**Request body:** none.
+
+**HTTP 200:** The signers' capacities
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/Envelope"
+        },
+        {
+          "properties": {
+            "data": {
+              "type": "array",
+              "items": {
+                "required": [
+                  "signer_id",
+                  "sign_as"
+                ],
+                "properties": {
+                  "signer_id": {
+                    "type": "string"
+                  },
+                  "sign_as": {
+                    "type": "string",
+                    "enum": [
+                      "Sign",
+                      "Approve",
+                      "Acknowledge",
+                      "Party",
+                      "Witness",
+                      "Intervening",
+                      "Receipt",
+                      "IssuerEndorserGuarantor",
+                      "IssuerEndorserGuarantorSurety",
+                      "Surety",
+                      "PartySurety",
+                      "JointDebtor",
+                      "PartyJointDebtor",
+                      "ContractingParty",
+                      "ContractedParty",
+                      "Landlord",
+                      "Tenant",
+                      "Buyer",
+                      "Seller",
+                      "AttorneyInFact",
+                      "LegalRepresentative",
+                      "Employer",
+                      "Employee"
+                    ]
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 403:** Authenticated but not allowed to perform this action.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        },
+        {
+          "properties": {
+            "status": {
+              "type": "integer"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 404:** The document is not in the workspace.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 401:** Missing or invalid credentials.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        },
+        {
+          "properties": {
+            "status": {
+              "type": "integer"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 500:** Unexpected server error.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        },
+        {
+          "properties": {
+            "status": {
+              "type": "integer"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+
+### List a document's watchers
+
+**Endpoint:** `GET /documents/{documentId}/watchers`
+
+The contacts set with **Set a document's watchers**, in the order they were set. A deleted contact is left out.
+
+**HTTP parameters:**
+
+```json
+[
+  {
+    "name": "documentId",
+    "in": "path",
+    "description": "Document ID.",
+    "required": true,
+    "schema": {
+      "type": "string"
+    }
+  }
+]
+```
+
+**Request body:** none.
+
+**HTTP 200:** The document's watchers
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/Envelope"
+        },
+        {
+          "properties": {
+            "data": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/Signer"
+              }
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 403:** An OAuth application token, a deactivated membership or a role refuses it.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        },
+        {
+          "properties": {
+            "status": {
+              "type": "integer"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 404:** The document is not in the workspace.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 401:** Missing or invalid credentials.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        },
+        {
+          "properties": {
+            "status": {
+              "type": "integer"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 500:** Unexpected server error.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        },
+        {
+          "properties": {
+            "status": {
+              "type": "integer"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+
+### Set a document's watchers
+
+**Endpoint:** `PUT /documents/{documentId}/watchers`
+
+Replaces the document's watchers: up to 10 contacts of the workspace, each with an e-mail address, who follow the document without signing it. Each is e-mailed once the document ends: declined (naming who declined), expired or signed by all. The e-mail names the document and its sender, and nothing else of it: no link, no file. It is queued, so it goes out shortly after. Naming a contact here is what lets them receive it; the workspace's notification settings don't apply to them. A signer named as a watcher gets this e-mail besides their own. They can be set before the document is sent and changed until it ends; an empty list removes them all.
+
+**HTTP parameters:**
+
+```json
+[
+  {
+    "name": "documentId",
+    "in": "path",
+    "description": "Document ID.",
+    "required": true,
+    "schema": {
+      "type": "string"
+    }
+  }
+]
+```
+
+**Full request body:**
+
+```json
+{
+  "required": true,
+  "content": {
+    "application/json": {
+      "schema": {
+        "required": [
+          "watcher_ids"
+        ],
+        "properties": {
+          "watcher_ids": {
+            "description": "Contact ids, as **Create signer** answers them; one given twice counts once.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "maxItems": 10
+          }
+        },
+        "type": "object"
+      }
+    }
+  }
+}
+```
+
+**HTTP 200:** The document's watchers
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/Envelope"
+        },
+        {
+          "properties": {
+            "data": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/Signer"
+              }
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 400:** `watcher_ids` missing or not a list of ids; more than 10; an id that is not a contact of the workspace or a contact without an e-mail address; or the document has ended (expired, signed by all, declined, cancelled or failed).
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 403:** An OAuth application token, a deactivated membership or a role refuses it.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        },
+        {
+          "properties": {
+            "status": {
+              "type": "integer"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 404:** The document is not in the workspace.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 401:** Missing or invalid credentials.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        },
+        {
+          "properties": {
+            "status": {
+              "type": "integer"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 500:** Unexpected server error.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        },
+        {
+          "properties": {
+            "status": {
+              "type": "integer"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+
+### Estimate envelope reminder cost
+
+**Endpoint:** `POST /accounts/{accountId}/envelopes/{envelopeId}/signers/{signerId}/estimate-resend-cost`
+
+What reminding a signer of the whole envelope would cost, sending and charging nothing. The reminder is one message per notification method for all of the envelope's documents, so it costs what one document's reminder costs, whatever the number of documents, at the workspace's reminder prices: nothing by e-mail and the WhatsApp resend price by WhatsApp, unless its plan prices them otherwise. Answers as a document's reminder estimate. It does not check whether a reminder would be accepted now: the reminder itself refuses a closed envelope (`409`), and a signer with nothing left to sign or one reminded too recently or too often (`400`).
+
+**HTTP parameters:**
+
+```json
+[
+  {
+    "name": "accountId",
+    "in": "path",
+    "description": "Workspace account ID.",
+    "required": true,
+    "schema": {
+      "type": "string"
+    }
+  },
+  {
+    "name": "envelopeId",
+    "in": "path",
+    "description": "The envelope ID.",
+    "required": true,
+    "schema": {
+      "type": "string"
+    }
+  },
+  {
+    "name": "signerId",
+    "in": "path",
+    "description": "The signer ID.",
+    "required": true,
+    "schema": {
+      "type": "string"
+    }
+  }
+]
+```
+
+**Request body:** none.
+
+**HTTP 200:** Cost estimate
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/Envelope"
+        },
+        {
+          "properties": {
+            "data": {
+              "$ref": "#/components/schemas/ResendCostEstimate"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 403:** An OAuth app's token lacks `documents:write` (`InsufficientScope`). Also a member deactivated in the workspace, a workspace scheduled for deletion, or an OAuth token of another workspace.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        },
+        {
+          "properties": {
+            "status": {
+              "type": "integer"
+            },
+            "code": {
+              "type": "string",
+              "enum": [
+                "InsufficientScope"
+              ]
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 404:** The envelope was not found, or the signer is not one of its signers.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 401:** Missing or invalid credentials.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        },
+        {
+          "properties": {
+            "status": {
+              "type": "integer"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 500:** Unexpected server error.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        },
+        {
+          "properties": {
+            "status": {
+              "type": "integer"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+
+### Get notification history with delivery times
+
+**Endpoint:** `GET /documents/{documentId}/notification-history`
+
+Each signer of the document's assignment, in the order **Get document** lists them, with its `notification_history` as **Get document** gives it, each entry adding `delivered_at` and `opened_at`, `null` until then: an e-mail's first delivery and its first open or click; a WhatsApp message's delivery and read as WhatsApp last reported them. `opened_at` is a hint, not proof: a mail app or a link scanner can open a message before anyone reads it, and blocked images or WhatsApp read receipts turned off hide an open. An empty list for a document not sent yet. Reachable with the `documents:read` OAuth scope.
+
+**HTTP parameters:**
+
+```json
+[
+  {
+    "name": "documentId",
+    "in": "path",
+    "description": "Document ID.",
+    "required": true,
+    "schema": {
+      "type": "string"
+    }
+  }
+]
+```
+
+**Request body:** none.
+
+**HTTP 200:** The signers' notification history
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/Envelope"
+        },
+        {
+          "properties": {
+            "data": {
+              "type": "array",
+              "items": {
+                "required": [
+                  "signer_id",
+                  "notification_history"
+                ],
+                "properties": {
+                  "signer_id": {
+                    "type": "string"
+                  },
+                  "notification_history": {
+                    "type": "array",
+                    "items": {
+                      "required": [
+                        "delivered_at",
+                        "opened_at"
+                      ],
+                      "type": "object",
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/NotificationHistoryEntry"
+                        },
+                        {
+                          "properties": {
+                            "delivered_at": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "format": "date-time"
+                            },
+                            "opened_at": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "format": "date-time"
+                            }
+                          },
+                          "type": "object"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 403:** Authenticated but not allowed to perform this action.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        },
+        {
+          "properties": {
+            "status": {
+              "type": "integer"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 404:** The document is not in the workspace.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 401:** Missing or invalid credentials.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        },
+        {
+          "properties": {
+            "status": {
+              "type": "integer"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 500:** Unexpected server error.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        },
+        {
+          "properties": {
+            "status": {
+              "type": "integer"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+
+### Schedule an assignment
+
+**Endpoint:** `POST /documents/{documentId}/scheduled-sends`
+
+Keeps a **Create assignment** request and makes it at `send_at`, as the member who scheduled it, through the same checks and charges as **Create assignment** then. Nothing is sent or charged now, and nothing changes for the document: it can still be sent at once, and the scheduled send then fails when it goes. A document takes one pending scheduled send at a time, counting one being sent. The request is checked now as **Estimate assignment cost** checks it (the method, each signer's methods, the plan's features), and each signer named must be a contact of the workspace; the balance is checked when it is sent. A job checks every five minutes and makes the sends that are due. A send that can't be made then becomes `failed` with the reason, nothing is charged, and the member who scheduled it is e-mailed; if that member has left the workspace, it is not made as anyone else: it fails and the workspace's active owners are e-mailed. **List scheduled sends**, **Cancel a scheduled send** and **Send a scheduled send now** follow it.
+
+**HTTP parameters:**
+
+```json
+[
+  {
+    "name": "documentId",
+    "in": "path",
+    "description": "Document ID.",
+    "required": true,
+    "schema": {
+      "type": "string"
+    }
+  }
+]
+```
+
+**Full request body:**
+
+```json
+{
+  "required": true,
+  "content": {
+    "application/json": {
+      "schema": {
+        "description": "A **Create assignment** body (`method`, `signers`, `entries`, `message`, `expires_at` and the rest, as that route takes them) plus `send_at`.",
+        "required": [
+          "send_at",
+          "signers"
+        ],
+        "properties": {
+          "send_at": {
+            "description": "When to send: ISO 8601 with its offset (none means UTC), or a Unix time. From one hour to 90 days ahead.",
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "integer"
+              }
+            ]
+          },
+          "method": {
+            "description": "As in **Create assignment**; `virtual` when left out.",
+            "type": "string",
+            "enum": [
+              "virtual",
+              "collect"
+            ]
+          },
+          "signers": {
+            "description": "As in **Create assignment**; each must be a contact of the workspace.",
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "expires_at": {
+            "description": "As in **Create assignment**, an absolute time (ISO 8601 or a Unix time), or null for none; at least two hours after `send_at`, since the request must still have an hour left when it is made.",
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "additionalProperties": true
+      }
+    }
+  }
+}
+```
+
+**HTTP 200:** The scheduled send
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/Envelope"
+        },
+        {
+          "properties": {
+            "data": {
+              "$ref": "#/components/schemas/ScheduledSend"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 400:** `send_at` missing, unreadable, less than an hour or more than 90 days ahead; an `expires_at` less than two hours after it; the document already has an assignment, or a scheduled send pending or being sent; or the request refused as **Estimate assignment cost** refuses it.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 403:** The workspace's plan lacks a verification or notification method sent (`PlanRestricted`), or an OAuth app's token lacks `documents:write` (`InsufficientScope`); also a deactivated membership or a role.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        },
+        {
+          "properties": {
+            "status": {
+              "type": "integer"
+            },
+            "message": {
+              "type": "string"
+            },
+            "code": {
+              "type": "string",
+              "enum": [
+                "PlanRestricted",
+                "InsufficientScope"
+              ]
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 404:** The document is not in the workspace, or a signer named is not a contact of it.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 401:** Missing or invalid credentials.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        },
+        {
+          "properties": {
+            "status": {
+              "type": "integer"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 500:** Unexpected server error.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        },
+        {
+          "properties": {
+            "status": {
+              "type": "integer"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+
+### List scheduled sends
+
+**Endpoint:** `GET /accounts/{accountId}/scheduled-sends`
+
+The workspace's scheduled sends, assignments and envelopes, newest first, whatever their status. Paged: 20 per page by default; the `X-Pagination-Total-Count`, `X-Pagination-Page-Count`, `X-Pagination-Current-Page` and `X-Pagination-Per-Page` headers describe the full list. An OAuth app needs `documents:write` here, not only `documents:read`: a failed send's `failure_reason` can say the workspace's balance ran out or a member left, which an app learns only from a request it can make.
+
+**HTTP parameters:**
+
+```json
+[
+  {
+    "name": "accountId",
+    "in": "path",
+    "description": "Workspace account ID.",
+    "required": true,
+    "schema": {
+      "type": "string"
+    }
+  },
+  {
+    "name": "page",
+    "in": "query",
+    "description": "Page number.",
+    "schema": {
+      "type": "integer",
+      "minimum": 1
+    }
+  },
+  {
+    "name": "per-page",
+    "in": "query",
+    "description": "Records per page: 20 by default, at most 50; a larger value answers 50 a page.",
+    "schema": {
+      "type": "integer",
+      "default": 20,
+      "maximum": 50,
+      "minimum": 1
+    }
+  },
+  {
+    "name": "document_id",
+    "in": "query",
+    "description": "Only the sends of this document.",
+    "required": false,
+    "schema": {
+      "type": "string"
+    }
+  }
+]
+```
+
+**Request body:** none.
+
+**HTTP 200:** The workspace's scheduled sends
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/Envelope"
+        },
+        {
+          "properties": {
+            "data": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/ScheduledSend"
+              }
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 400:** `document_id` not text.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 403:** An OAuth app's token lacks `documents:write` (`InsufficientScope`). Also a member deactivated in the workspace, a workspace scheduled for deletion, or an OAuth token of another workspace.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        },
+        {
+          "properties": {
+            "status": {
+              "type": "integer"
+            },
+            "code": {
+              "type": "string",
+              "enum": [
+                "InsufficientScope"
+              ]
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 404:** The workspace does not exist.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        },
+        {
+          "properties": {
+            "status": {
+              "type": "integer"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 401:** Missing or invalid credentials.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        },
+        {
+          "properties": {
+            "status": {
+              "type": "integer"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 500:** Unexpected server error.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        },
+        {
+          "properties": {
+            "status": {
+              "type": "integer"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+
+### Schedule an envelope
+
+**Endpoint:** `POST /accounts/{accountId}/scheduled-sends`
+
+Keeps a **Create envelope** request and makes it at `send_at`, as the member who scheduled it, through the same checks and charges as **Create envelope** then. Nothing is created, sent or charged now, and nothing changes for its documents: each can still be sent at once, and the scheduled send then fails when it goes. A document takes one pending scheduled send at a time, counting one being sent. The request is checked now as **Estimate envelope cost** checks it (`403` with code `PlanRestricted` without the Envelopes feature, `400` with `errors` on the same fields); the balance is checked when it is sent. A job checks every five minutes and makes the sends that are due; failures go as for **Schedule an assignment**: `failed` with the reason, nothing charged, the member who scheduled it e-mailed, or the workspace's active owners if that member has left. An `Idempotency-Key` is not read here: each call keeps one send. An assignment is scheduled on its document (**Schedule an assignment**).
+
+**HTTP parameters:**
+
+```json
+[
+  {
+    "name": "accountId",
+    "in": "path",
+    "description": "Workspace account ID.",
+    "required": true,
+    "schema": {
+      "type": "string"
+    }
+  }
+]
+```
+
+**Full request body:**
+
+```json
+{
+  "required": true,
+  "content": {
+    "application/json": {
+      "schema": {
+        "description": "A **Create envelope** body plus `send_at`; each document's `expires_at` at least two hours after `send_at`.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/EnvelopeCreateRequest"
+          },
+          {
+            "required": [
+              "send_at"
+            ],
+            "properties": {
+              "send_at": {
+                "description": "When to send: ISO 8601 with its offset (none means UTC), or a Unix time. From one hour to 90 days ahead.",
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  {
+                    "type": "integer"
+                  }
+                ]
+              }
+            },
+            "type": "object"
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+**HTTP 200:** The scheduled send
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/Envelope"
+        },
+        {
+          "properties": {
+            "data": {
+              "$ref": "#/components/schemas/ScheduledSend"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 400:** `send_at` missing, unreadable, less than an hour or more than 90 days ahead; a document's `expires_at` less than two hours after it; a document already assigned or in a scheduled send pending or being sent; or the request refused as **Estimate envelope cost** refuses it, in `errors`.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 403:** The workspace's plan lacks the Envelopes feature, or a signer's method or embedded signing the plan lacks (`PlanRestricted`); or an OAuth app's token lacks `documents:write` (`InsufficientScope`). Also a member deactivated in the workspace, a workspace scheduled for deletion, or an OAuth token of another workspace.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        },
+        {
+          "properties": {
+            "status": {
+              "type": "integer"
+            },
+            "code": {
+              "type": "string",
+              "enum": [
+                "PlanRestricted",
+                "InsufficientScope"
+              ]
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 404:** The requested resource does not exist.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        },
+        {
+          "properties": {
+            "status": {
+              "type": "integer"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 401:** Missing or invalid credentials.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        },
+        {
+          "properties": {
+            "status": {
+              "type": "integer"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 500:** Unexpected server error.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        },
+        {
+          "properties": {
+            "status": {
+              "type": "integer"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+
+### Cancel a scheduled send
+
+**Endpoint:** `PUT /accounts/{accountId}/scheduled-sends/{scheduledSendId}/cancel`
+
+Cancels a `pending` scheduled send; nothing is sent or charged. A send already being sent, sent, failed or cancelled answers `409`.
+
+**HTTP parameters:**
+
+```json
+[
+  {
+    "name": "accountId",
+    "in": "path",
+    "description": "Workspace account ID.",
+    "required": true,
+    "schema": {
+      "type": "string"
+    }
+  },
+  {
+    "name": "scheduledSendId",
+    "in": "path",
+    "description": "The scheduled send ID.",
+    "required": true,
+    "schema": {
+      "type": "string"
+    }
+  }
+]
+```
+
+**Request body:** none.
+
+**HTTP 200:** The cancelled scheduled send
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/Envelope"
+        },
+        {
+          "properties": {
+            "data": {
+              "$ref": "#/components/schemas/ScheduledSend"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 403:** An OAuth app's token lacks `documents:write` (`InsufficientScope`). Also a member deactivated in the workspace, a workspace scheduled for deletion, or an OAuth token of another workspace.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        },
+        {
+          "properties": {
+            "status": {
+              "type": "integer"
+            },
+            "code": {
+              "type": "string",
+              "enum": [
+                "InsufficientScope"
+              ]
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 404:** The workspace does not exist, or the scheduled send is not the workspace's.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 409:** Only a `pending` scheduled send can be cancelled.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 401:** Missing or invalid credentials.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        },
+        {
+          "properties": {
+            "status": {
+              "type": "integer"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 500:** Unexpected server error.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        },
+        {
+          "properties": {
+            "status": {
+              "type": "integer"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+
+### Send a scheduled send now
+
+**Endpoint:** `PUT /accounts/{accountId}/scheduled-sends/{scheduledSendId}/send`
+
+Makes a `pending` scheduled send's request now rather than at `send_at`: as **Create assignment** or **Create envelope** would make it then, as the member who scheduled it, with the same checks and charges. A refusal answers as that route would answer the member who scheduled it: no documents or credits left, a signer removed, the document already sent, the plan without Envelopes, a `max_total_credits` below the cost now (`409` `CreditCeilingExceeded`), that member gone from the workspace (`400`) or the workspace's deletion pending (`403`); the send then stays `pending`, to go at `send_at` unless cancelled, and no one is e-mailed. A send already being sent, sent, failed or cancelled answers `409`.
+
+**HTTP parameters:**
+
+```json
+[
+  {
+    "name": "accountId",
+    "in": "path",
+    "description": "Workspace account ID.",
+    "required": true,
+    "schema": {
+      "type": "string"
+    }
+  },
+  {
+    "name": "scheduledSendId",
+    "in": "path",
+    "description": "The scheduled send ID.",
+    "required": true,
+    "schema": {
+      "type": "string"
+    }
+  }
+]
+```
+
+**Request body:** none.
+
+**HTTP 200:** The scheduled send, `sent`, with the assignment or envelope it created
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/Envelope"
+        },
+        {
+          "properties": {
+            "data": {
+              "$ref": "#/components/schemas/ScheduledSend"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 400:** The request refused as **Create assignment** or **Create envelope** refuses it, or the member who scheduled it has left the workspace. The send stays `pending`.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 403:** The workspace's plan lacks a feature the request uses (`PlanRestricted`), or an OAuth app's token lacks `documents:write` (`InsufficientScope`); also a deactivated membership, a role, or the workspace's deletion pending. The send stays `pending`.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        },
+        {
+          "properties": {
+            "status": {
+              "type": "integer"
+            },
+            "message": {
+              "type": "string"
+            },
+            "code": {
+              "type": "string",
+              "enum": [
+                "PlanRestricted",
+                "InsufficientScope"
+              ]
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 404:** The workspace does not exist, or the scheduled send is not the workspace's; or the document an assignment sends no longer exists (`Document not found.`), and the send stays `pending`.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 409:** Only a `pending` scheduled send can be sent now; or the request's `max_total_credits` is below what it costs now (`CreditCeilingExceeded`, nothing charged), and the send stays `pending`.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        },
+        {
+          "properties": {
+            "code": {
+              "description": "Only for the ceiling.",
+              "type": "string",
+              "enum": [
+                "CreditCeilingExceeded"
+              ]
+            },
+            "total_credits": {
+              "description": "With `CreditCeilingExceeded`: what the request costs now.",
+              "type": "number"
+            },
+            "max_total_credits": {
+              "description": "With `CreditCeilingExceeded`: the ceiling it was scheduled with.",
+              "type": "number"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 401:** Missing or invalid credentials.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        },
+        {
+          "properties": {
+            "status": {
+              "type": "integer"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+**HTTP 500:** Unexpected server error.
+
+```json
+{
+  "application/json": {
+    "schema": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/components/schemas/ErrorEnvelope"
+        },
+        {
+          "properties": {
+            "status": {
+              "type": "integer"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}
+```
+
+
+### Signing refusals and invitation delivery
+
+In staging, signing refusals may carry `SignerDataUnconfirmed`, `DigitalCertificateRequired`, `EmailVerificationRequired`, `WhatsappVerificationRequired`, `IdentityVerificationRequired`, `TermsNotAccepted`, `SignatureImageInvalid` or `SignatureImageBlank`. Confirm data, complete the signer's own verification/consent, or use the hosted certificate flow as appropriate. Never substitute workspace credentials for a signer code.
+
+**Document → Send Public Token** resends the existing signing invitation; it does not renew its link or verification code. It accepts only email and a pending signer whose turn has come, before the deadline. An HTTP 200 confirms acceptance, not delivery. It is limited to once every two minutes per signer; envelope documents share that interval. A failed delivery may still count. Do not blindly replay an uncertain send.
+
+Document **List** and **Search** accept **Envelope ID** inside their filters, sent unchanged as the `envelope_id` query parameter.

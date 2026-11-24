@@ -6,6 +6,7 @@ import type {
 } from 'n8n-workflow';
 import { NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
 
+import { scheduledSendDescription, executeScheduledSend } from './resources/scheduledSend';
 import { documentDescription, executeDocument } from './resources/document';
 import { envelopeDescription, executeEnvelope } from './resources/envelope';
 import { embeddedSigningDescription, executeEmbeddedSigning } from './resources/embeddedSigning';
@@ -80,6 +81,7 @@ export class Assinafy implements INodeType {
 					{ name: 'Envelope', value: 'envelope' },
 					{ name: 'Field Definition', value: 'field' },
 					{ name: 'OAuth', value: 'oauth' },
+					{ name: 'Scheduled Send', value: 'scheduledSend' },
 					{ name: 'Signer', value: 'signer' },
 					{ name: 'Signer Document', value: 'signerDocument' },
 					{ name: 'Tag', value: 'tag' },
@@ -89,6 +91,7 @@ export class Assinafy implements INodeType {
 				],
 			},
 			...documentDescription,
+			...scheduledSendDescription,
 			...contractDescription,
 			...envelopeDescription,
 			...embeddedSigningDescription,
@@ -125,6 +128,9 @@ export class Assinafy implements INodeType {
 				let result: INodeExecutionData | INodeExecutionData[];
 
 				switch (resource) {
+					case 'scheduledSend':
+						result = await executeScheduledSend.call(this, i, operation);
+						break;
 					case 'envelope':
 						result = await executeEnvelope.call(this, i, operation);
 						break;

@@ -413,3 +413,128 @@ it.each([undefined, '50', '20'])(
 		expect(picker.paginationToken).toBe('2');
 	},
 );
+
+it.each([
+	['getNotificationHistory', 'notification-history'],
+	['listWatchers', 'watchers'],
+])('%s emits each entry without losing nested or null values', async (operation, suffix) => {
+	const data = [
+		{ signer_id: 'signer', notification_history: [{ delivered_at: null, opened_at: null }] },
+	];
+	const { ctx, requests } = makeCtx({ documentId: ids.documentId }, { response: data });
+	expect(await executeDocument.call(ctx, 0, operation)).toEqual(data.map((json) => ({ json })));
+	expect(lastAuth(requests)).toMatchObject({
+		method: 'GET',
+		url: `${base}/documents/doc%2Fa%3F/${suffix}`,
+	});
+});
+
+it.each([[], ['signer'], Array(11).fill('signer')].map((ids) => [ids]))(
+	'sets or clears watchers without losing an empty array',
+	async (watcherIds) => {
+		const { ctx, requests } = makeCtx({ documentId: 'doc', watcherIds }, { response: [] });
+		expect(await executeDocument.call(ctx, 0, 'setWatchers')).toEqual({ json: { data: [] } });
+		expect(lastAuth(requests)).toMatchObject({ method: 'PUT', body: { watcher_ids: watcherIds } });
+	},
+);
+
+it.each([
+	'bad',
+	'{}',
+	'[null]',
+	'[1]',
+	'[" "]',
+	JSON.stringify(Array.from({ length: 11 }, (_, i) => String(i))),
+])('rejects invalid watchers %s', async (watcherIds) => {
+	const { ctx, requests } = makeCtx({ documentId: 'doc', watcherIds });
+	await expect(executeDocument.call(ctx, 0, 'setWatchers')).rejects.toThrow('Watcher IDs');
+	expect(requests).toHaveLength(0);
+});
+
+it.each(['listWatchers', 'setWatchers'])(
+	'blocks OAuth watcher operation %s before HTTP',
+	async (operation) => {
+		const { ctx, requests } = makeCtx({ documentId: 'doc', authentication: 'oAuth2' });
+		await expect(executeDocument.call(ctx, 0, operation)).rejects.toThrow('API Key');
+		expect(requests).toHaveLength(0);
+	},
+);
+
+it('reads signer capacities with OAuth and preserves each capacity', async () => {
+	const data = [{ signer_id: 'signer', sign_as: 'Witness' }];
+	const { ctx, requests } = makeCtx(
+		{ documentId: ids.documentId, authentication: 'oAuth2' },
+		{ response: data },
+	);
+	expect(await executeAssignment.call(ctx, 0, 'getSignerCapacities')).toEqual(
+		data.map((json) => ({ json })),
+	);
+	expect(lastAuth(requests)).toMatchObject({
+		method: 'GET',
+		url: `${base}/documents/doc%2Fa%3F/signer-capacities`,
+	});
+});
+
+it.each(['create', 'estimateCost'])('preserves the signer capacity on %s', async (operation) => {
+	for (const sign_as of ['Witness', null, '']) {
+		const { ctx, requests } = makeCtx({
+			documentId: 'doc',
+			signers: { signer: [{ id: 'signer', sign_as }] },
+		});
+		await executeAssignment.call(ctx, 0, operation);
+		expect(lastAuth(requests).body.signers[0].sign_as).toBe(sign_as === '' ? undefined : sign_as);
+	}
+});
+
+it('estimates an envelope reminder without resending', async () => {
+	const { ctx, requests } = makeCtx(ids, { response: { total: 0, credit_balance: null } });
+	expect(await executeEnvelope.call(ctx, 0, 'estimateResendCost')).toEqual({
+		json: { total: 0, credit_balance: null },
+	});
+	expect(lastAuth(requests)).toMatchObject({
+		method: 'POST',
+		url: `${base}${root}/env%2Fa%3F/signers/signer%2Fa%3F/estimate-resend-cost`,
+	});
+	expect(requests).toHaveLength(1);
+});
+
+it.each(['list', 'search'])('filters workspace documents by envelope (%s)', async (operation) => {
+	const { ctx, requests } = makeCtx(
+		{
+			returnAll: false,
+			[operation === 'list' ? 'filters' : 'searchFilters']: { envelope_id: 'env/a?' },
+		},
+		{ response: [] },
+	);
+	await executeDocument.call(ctx, 0, operation);
+	expect(lastAuth(requests).qs).toMatchObject({ envelope_id: 'env/a?' });
+});
+
+it.each(['downloadPage', 'downloadThumbnail'])(
+	'selects signed page renders without changing the default (%s)',
+	async (operation) => {
+		for (const renderArtifact of ['', 'certificated']) {
+			const { ctx, requests } = makeCtx(
+				{ documentId: 'doc', pageId: 'page', renderArtifact },
+				{ headers: { 'content-type': 'image/jpeg' } },
+			);
+			await executeDocument.call(ctx, 0, operation);
+			expect(lastAuth(requests).qs).toEqual(
+				renderArtifact ? { artifact: 'certificated' } : undefined,
+			);
+			expect(ctx.helpers.prepareBinaryData).toHaveBeenCalled();
+		}
+		const { ctx, requests } = makeCtx(
+			{ documentId: 'doc', pageId: 'page', renderArtifact: 'certificated' },
+			{
+				rejectWith: {
+					httpCode: 503,
+					message: 'Render pending',
+					response: { statusCode: 503, headers: { 'retry-after': '5' } },
+				},
+			},
+		);
+		await expect(executeDocument.call(ctx, 0, operation)).rejects.toThrow();
+		expect(requests).toHaveLength(1);
+	},
+);

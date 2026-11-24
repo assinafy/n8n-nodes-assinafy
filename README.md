@@ -2,7 +2,7 @@
 
 [Português (Brasil)](README.pt-BR.md) · **English**
 
-Community n8n nodes for [Assinafy](https://assinafy.com.br): documents, contracts, signers, assignments, templates, tags, fields, workspaces, authentication, OAuth and webhooks. The package includes the **Assinafy** action node, **Assinafy Trigger**, **Assinafy API** credential and native **Assinafy OAuth2 API** credential.
+Community n8n nodes for [Assinafy](https://assinafy.com.br): documents, contracts, signers, assignments, templates, tags, fields, workspaces, scheduled sends, authentication, OAuth and webhooks. The package includes the **Assinafy** action node, **Assinafy Trigger**, **Assinafy API** credential and native **Assinafy OAuth2 API** credential.
 
 ## Installation
 
@@ -34,7 +34,7 @@ Use **Assinafy API** for owner/admin routes, the Trigger, signing-secret reads, 
 | Verification method | Required signer data | Notification | Notes |
 | --- | --- | --- | --- |
 | `Email` | Email | `Email` | No notification credit |
-| `Whatsapp` | `whatsapp_phone_number`; paid plan | `Whatsapp` | 0.45 credits per notification |
+| `Whatsapp` | `whatsapp_phone_number`; paid plan | `Whatsapp` | Plan price from Estimate Cost |
 | `IdDocumentFaceMatchBasic` | Valid CPF; biometric feature | Email or WhatsApp | Explicit signer consent; estimate the per-signer fee |
 | `DigitalCertificate` | CPF or alphanumeric CNPJ; certificate feature | Email or WhatsApp | ICP-Brasil A1/A3 in the signer browser; virtual assignment; signer alone in its step |
 
@@ -56,6 +56,8 @@ For templates, **Create From Template** may initially return `uploaded` with `as
 
 For multiple documents, upload and wait for each PDF, then use **Envelope → Estimate Cost → Create** with a stable **Idempotency Key** and optional `max_total_credits` ceiling (zero is valid). Store the envelope ID, let each signer complete their documents, and download available artifacts as a ZIP. For embedded Email/WhatsApp signing, register an allowed origin, create the signer request with `embedded: true`, then **Embedded Signing → Create Session** and load its single-use iframe URL within five minutes. Biometric and certificate signers use the hosted flow. **Signer Document → Send Certified Copy** resends to the original signing contact after certification.
 
+Scheduled sends accept the complete assignment/envelope body plus `send_at`; persist the returned ID, poll **Scheduled Send → List**, and follow the created assignment/envelope through certification. They reserve no credits; retain a `max_total_credits` ceiling for send time. Watchers, signer capacities, delivery history, envelope resend estimates, scheduled sends and JPEG signature uploads are documented in staging and require an environment that supports them. Select **Custom** with the staging API URL; OAuth remains fixed to Production.
+
 ## Assinafy Trigger
 
 Activation creates or updates only this workflow's endpoint; deactivation deletes only that endpoint. A workspace supports one endpoint, or up to three on paid plans. On older environments the Trigger falls back to the single subscription.
@@ -66,12 +68,13 @@ The URL always carries a credential-derived token. **Verify Signature** also ena
 
 | Resource | Operations |
 | --- | --- |
-| Document | Append Tags, Create From Template, Delete, Detach Tag, Download Artifact, Download Page, Download Thumbnail, Estimate Cost From Template, Get, Get Activities, Get Public Info, Get Signing Progress, List, List Statuses, List Tags, Rename, Replace Tags, Search, Send Public Token, Upload, Verify, Wait Until Ready |
-| Envelope | Create, Estimate Cost, List, Get, Update, Delete, Cancel, Add Document, Remove Document, Get Activities, Resend Notification, Download |
+| Document | Append Tags, Create From Template, Delete, Detach Tag, Download Artifact, Download Page, Download Thumbnail, Estimate Cost From Template, Get, Get Activities, Get Notification History, Get Public Info, Get Signing Progress, List, List Statuses, List Tags, List Watchers, Rename, Replace Tags, Search, Send Public Token, Set Watchers, Upload, Verify, Wait Until Ready |
+| Envelope | Create, Estimate Cost, List, Get, Update, Delete, Cancel, Add Document, Remove Document, Get Activities, Resend Notification, Estimate Resend Cost, Download |
 | Embedded Signing | List Origins, Add Origin, Update Origin, Remove Origin, Create Session |
 | Contract | List, Get, Get Related, Set Terms, Renew, Terminate |
+| Scheduled Send | Schedule Assignment, Schedule Envelope, List, Cancel, Send Now |
 | Signer | Accept Terms (Signer Side), Confirm Data (Signer Side), Create, Delete, Download Signature (Signer Side), Find by Email, Get, Get Identity Verification (Signer Side), Get Self (Signer Side), List, Start Identity Verification (Signer Side), Update, Upload Signature (Signer Side), Verify Code (Signer Side) |
-| Assignment | Create, Decide Identity Review, Decline (Signer Side), Download Identity Review Image, Estimate Cost, Estimate Resend Cost, Get Identity Review, Get Sign Page, List, List WhatsApp Notifications, Resend Notification, Reset Expiration, Sign (Signer Side) |
+| Assignment | Create, Decide Identity Review, Decline (Signer Side), Download Identity Review Image, Estimate Cost, Estimate Resend Cost, Get Identity Review, Get Sign Page, Get Signer Capacities, List, List WhatsApp Notifications, Resend Notification, Reset Expiration, Sign (Signer Side) |
 | Template | List, Get |
 | Tag | Create, List, Update, Delete |
 | Field Definition | Create, List, Get, Update, Delete, Validate, Validate Multiple, List Types |

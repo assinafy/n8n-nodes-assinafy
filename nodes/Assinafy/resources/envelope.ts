@@ -31,6 +31,7 @@ const existingOperations = [
 	'addDocument',
 	'removeDocument',
 	'resendNotification',
+	'estimateResendCost',
 	'getActivities',
 	'download',
 ];
@@ -53,6 +54,11 @@ export const envelopeDescription: INodeProperties[] = [
 				name: 'Estimate Cost',
 				value: 'estimateCost',
 				action: 'Estimate envelope cost without sending',
+			},
+			{
+				name: 'Estimate Resend Cost',
+				value: 'estimateResendCost',
+				action: 'Estimate an envelope reminder cost',
 			},
 			{ name: 'Get', value: 'get', action: 'Get an envelope' },
 			{
@@ -83,7 +89,10 @@ export const envelopeDescription: INodeProperties[] = [
 		displayOptions: { show: showOnly(existingOperations) },
 	},
 	{ ...documentResourceLocator, displayOptions: { show: showOnly(['removeDocument']) } },
-	{ ...signerResourceLocator, displayOptions: { show: showOnly(['resendNotification']) } },
+	{
+		...signerResourceLocator,
+		displayOptions: { show: showOnly(['resendNotification', 'estimateResendCost']) },
+	},
 	{ ...idempotencyKeyField, displayOptions: { show: showOnly(['create']) } },
 	{
 		displayName: 'Envelope (JSON)',
@@ -239,10 +248,13 @@ export async function executeEnvelope(
 			await assinafyApiRequest(this, { method: 'DELETE', path: `${path}/documents/${documentId}` }),
 		);
 	}
-	if (operation === 'resendNotification') {
+	if (operation === 'resendNotification' || operation === 'estimateResendCost') {
 		const signerId = extractRequiredId(this, 'signerId', 'Signer ID', itemIndex);
 		return wrap(
-			await assinafyApiRequest(this, { method: 'PUT', path: `${path}/signers/${signerId}/resend` }),
+			await assinafyApiRequest(this, {
+				method: operation === 'resendNotification' ? 'PUT' : 'POST',
+				path: `${path}/signers/${signerId}/${operation === 'resendNotification' ? 'resend' : 'estimate-resend-cost'}`,
+			}),
 		);
 	}
 	return wrap(

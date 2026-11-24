@@ -77,15 +77,18 @@ describe('Resource Descriptions', () => {
 				'estimateCostFromTemplate',
 				'get',
 				'getActivities',
+				'getNotificationHistory',
 				'getPublicInfo',
 				'getSigningProgress',
 				'list',
 				'listStatuses',
 				'listTags',
+				'listWatchers',
 				'rename',
 				'replaceTags',
 				'search',
 				'sendPublicToken',
+				'setWatchers',
 				'upload',
 				'verify',
 				'waitUntilReady',
@@ -149,6 +152,7 @@ describe('Resource Descriptions', () => {
 				'estimateResendCost',
 				'getIdentityReview',
 				'getSignPage',
+				'getSignerCapacities',
 				'list',
 				'listWhatsapp',
 				'resendNotification',
@@ -328,4 +332,11 @@ describe('Resource Descriptions', () => {
 			]);
 		});
 	});
+});
+
+it.each(['filters', 'searchFilters'])('exposes the document envelope filter in %s', (name) => {
+	const property = documentDescription.find((p) => p.name === name)!;
+	expect(property.options).toEqual(
+		expect.arrayContaining([expect.objectContaining({ name: 'envelope_id', type: 'string' })]),
+	);
 });

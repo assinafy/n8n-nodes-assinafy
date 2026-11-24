@@ -346,7 +346,7 @@ export const signerDescription: INodeProperties[] = [
 		type: 'string',
 		default: 'data',
 		required: true,
-		description: 'PNG image binary on the incoming item (uploadSignature)',
+		description: 'PNG or JPEG image binary on the incoming item (uploadSignature)',
 		displayOptions: { show: showOnly(['uploadSignature']) },
 	},
 	{
@@ -663,7 +663,7 @@ async function uploadSignature(this: IExecuteFunctions, itemIndex: number): Prom
 		this,
 		buffer,
 		binary.mimeType || 'application/octet-stream',
-		['png'],
+		['png', 'jpeg'],
 		'Signature image',
 		itemIndex,
 	);

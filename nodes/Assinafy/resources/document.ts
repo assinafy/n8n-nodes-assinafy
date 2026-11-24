@@ -10,6 +10,8 @@ import {
 	assinafyApiRequest,
 	assinafyApiRequestAllItems,
 	executeListOperation,
+	getCredentialsType,
+	DELEGATED_CREDENTIAL_TYPE,
 	getAccountId,
 } from '../shared/transport';
 import {
@@ -103,6 +105,11 @@ export const documentDescription: INodeProperties[] = [
 				action: 'List the activity log for a document',
 			},
 			{
+				name: 'Get Notification History',
+				value: 'getNotificationHistory',
+				action: 'Get signer notification delivery history',
+			},
+			{
 				name: 'Get Public Info',
 				value: 'getPublicInfo',
 				action: 'Get unauthenticated public document basics',
@@ -123,6 +130,7 @@ export const documentDescription: INodeProperties[] = [
 				value: 'listTags',
 				action: 'List tags attached to a document',
 			},
+			{ name: 'List Watchers', value: 'listWatchers', action: 'List document watchers' },
 			{
 				name: 'Rename',
 				value: 'rename',
@@ -141,8 +149,9 @@ export const documentDescription: INodeProperties[] = [
 			{
 				name: 'Send Public Token',
 				value: 'sendPublicToken',
-				action: 'Email a one time access token to a pending signer',
+				action: 'Resend the existing invitation to a pending signer',
 			},
+			{ name: 'Set Watchers', value: 'setWatchers', action: 'Replace document watchers' },
 			{ name: 'Upload', value: 'upload', action: 'Upload a new document' },
 			{ name: 'Verify', value: 'verify', action: 'Verify a document by its signature hash' },
 			{
@@ -189,6 +198,13 @@ export const documentDescription: INodeProperties[] = [
 		displayOptions: { show: showOnly(['list']) },
 		options: [
 			{ ...searchField },
+			{
+				displayName: 'Envelope ID',
+				name: 'envelope_id',
+				type: 'string',
+				default: '',
+				description: 'Only documents belonging to this envelope',
+			},
 			{
 				displayName: 'Status',
 				name: 'status',
@@ -250,12 +266,15 @@ export const documentDescription: INodeProperties[] = [
 				'downloadThumbnail',
 				'downloadPage',
 				'getActivities',
+				'getNotificationHistory',
 				'getSigningProgress',
 				'listTags',
+				'listWatchers',
 				'rename',
 				'replaceTags',
 				'appendTags',
 				'detachTag',
+				'setWatchers',
 				'waitUntilReady',
 			]),
 		},
@@ -288,6 +307,13 @@ export const documentDescription: INodeProperties[] = [
 		displayOptions: { show: showOnly(['search']) },
 		options: [
 			{ ...searchField },
+			{
+				displayName: 'Envelope ID',
+				name: 'envelope_id',
+				type: 'string',
+				default: '',
+				description: 'Only documents belonging to this envelope',
+			},
 			{
 				...sortField,
 				placeholder: '-updated_at',
@@ -516,7 +542,31 @@ export const documentDescription: INodeProperties[] = [
 		displayOptions: { show: showOnly(['sendPublicToken']) },
 	},
 
+	{
+		displayName: 'Watcher IDs (JSON)',
+		name: 'watcherIds',
+		type: 'json',
+		default: '[]',
+		required: true,
+		description:
+			'Up to 10 workspace contact IDs with email. Replaces the full list; [] removes every watcher. Watchers receive an email when the document ends.',
+		displayOptions: { show: showOnly(['setWatchers']) },
+	},
+
 	// --- download ---
+	{
+		displayName: 'Render Artifact',
+		name: 'renderArtifact',
+		type: 'options',
+		default: '',
+		description:
+			'Original page by default. Signed pages require a certificated document; HTTP 503 means rendering is pending and can be retried after Retry-After.',
+		displayOptions: { show: showOnly(['downloadThumbnail', 'downloadPage']) },
+		options: [
+			{ name: 'Original', value: '' },
+			{ name: 'Certificated (Signed Page)', value: 'certificated' },
+		],
+	},
 	{
 		displayName: 'Artifact',
 		name: 'artifact',
@@ -586,6 +636,49 @@ export async function executeDocument(
 	operation: string,
 ): Promise<INodeExecutionData | INodeExecutionData[]> {
 	switch (operation) {
+		case 'getNotificationHistory':
+		case 'listWatchers':
+		case 'setWatchers': {
+			if (
+				operation !== 'getNotificationHistory' &&
+				getCredentialsType(this) === DELEGATED_CREDENTIAL_TYPE
+			) {
+				throw new NodeOperationError(
+					this.getNode(),
+					'Document watchers require API Key authentication',
+					{ itemIndex },
+				);
+			}
+			const documentId = extractDocumentId.call(this, itemIndex);
+			let body: IDataObject | undefined;
+			if (operation === 'setWatchers') {
+				const ids = parseJsonParam(
+					this,
+					this.getNodeParameter('watcherIds', itemIndex, '[]'),
+					'Watcher IDs',
+					itemIndex,
+				);
+				if (
+					!Array.isArray(ids) ||
+					ids.some((id) => typeof id !== 'string' || !id.trim()) ||
+					new Set(ids).size > 10
+				) {
+					throw new NodeOperationError(
+						this.getNode(),
+						'Watcher IDs must be an array of up to 10 distinct non-empty contact IDs',
+						{ itemIndex },
+					);
+				}
+				body = { watcher_ids: ids };
+			}
+			const result = await assinafyApiRequest(this, {
+				method: body ? 'PUT' : 'GET',
+				path: `/documents/${documentId}/${operation === 'getNotificationHistory' ? 'notification-history' : 'watchers'}`,
+				body,
+			});
+			return body ? wrap(result) : asArray<IDataObject>(result).map((json) => ({ json }));
+		}
+
 		case 'upload':
 			return uploadDocument.call(this, itemIndex);
 		case 'list':
@@ -778,6 +871,10 @@ async function downloadArtifact(
 	const response = (await assinafyApiRequest<unknown>(this, {
 		method: 'GET',
 		path,
+		qs:
+			kind === 'artifact'
+				? undefined
+				: cleanQs({ artifact: this.getNodeParameter('renderArtifact', itemIndex, '') }),
 		returnBinary: true,
 	})) as { body?: Buffer | ArrayBuffer; headers?: IDataObject };
 

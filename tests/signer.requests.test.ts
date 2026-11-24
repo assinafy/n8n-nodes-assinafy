@@ -45,18 +45,17 @@ describe('signer request construction', () => {
 		});
 	});
 
-	it('uploadSignature accepts only PNG images', async () => {
+	it('uploadSignature accepts JPEG bytes with the JPEG content type', async () => {
 		const { ctx, requests } = makeCtx(
-			{ signerAccessCode: 'code123', signatureType: 'signature', binaryPropertyName: 'data' },
+			{ signerAccessCode: 'code' },
 			{
-				binaryBuffer: Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00]),
+				binaryBuffer: Buffer.from([0xff, 0xd8, 0xff, 0xe0]),
 				binaryMeta: { fileName: 'sig.jpg', mimeType: 'image/jpeg' },
 			},
 		);
-		await expect(executeSigner.call(ctx as any, 0, 'uploadSignature')).rejects.toThrow(
-			'Signature image must be PNG',
-		);
-		expect(requests).toHaveLength(0);
+		await executeSigner.call(ctx, 0, 'uploadSignature');
+		expect(lastPublic(requests).headers['Content-Type']).toBe('image/jpeg');
+		expect(requests.every((request) => !request.auth)).toBe(true);
 	});
 
 	it('creates a contactless signer when only the required full name is supplied', async () => {

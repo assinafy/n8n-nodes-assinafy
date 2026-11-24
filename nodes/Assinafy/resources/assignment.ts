@@ -84,6 +84,11 @@ export const assignmentDescription: INodeProperties[] = [
 				value: 'getSignPage',
 				action: 'Signer reads document data for the signing flow',
 			},
+			{
+				name: 'Get Signer Capacities',
+				value: 'getSignerCapacities',
+				action: 'Get the capacity each signer signs in',
+			},
 			{ name: 'List', value: 'list', action: 'List assignments for the current workspace' },
 			{
 				name: 'List WhatsApp Notifications',
@@ -132,6 +137,7 @@ export const assignmentDescription: INodeProperties[] = [
 				'sign',
 				'decline',
 				'getIdentityReview',
+				'getSignerCapacities',
 				'downloadIdentityReviewImage',
 				'decideIdentityReview',
 			]),
@@ -183,6 +189,14 @@ export const assignmentDescription: INodeProperties[] = [
 					},
 					{ ...verificationMethodField },
 					embeddedSignerField,
+					{
+						displayName: 'Sign As',
+						name: 'sign_as',
+						type: 'string',
+						default: '',
+						description:
+							'Optional signer capacity, for example Witness or LegalRepresentative. See the operation reference for all accepted values. Omit for ordinary signing; fixed after creation.',
+					},
 					{
 						displayName: 'Notification Methods',
 						name: 'notification_methods',
@@ -429,6 +443,14 @@ export async function executeAssignment(
 	operation: string,
 ): Promise<INodeExecutionData | INodeExecutionData[]> {
 	switch (operation) {
+		case 'getSignerCapacities': {
+			const documentId = extractDocumentId.call(this, itemIndex);
+			const result = await assinafyApiRequest(this, {
+				method: 'GET',
+				path: `/documents/${documentId}/signer-capacities`,
+			});
+			return asArray<IDataObject>(result).map((json) => ({ json }));
+		}
 		case 'create':
 			return wrap(await createAssignment.call(this, itemIndex));
 		case 'estimateCost':
@@ -559,6 +581,7 @@ interface SignerEntry {
 	notification_methods?: string[];
 	step?: number;
 	embedded?: boolean;
+	sign_as?: string | null;
 }
 
 function buildAssignmentBody(
@@ -599,6 +622,7 @@ function buildAssignmentBody(
 			);
 		}
 		const ref: IDataObject = {};
+		if (entry.sign_as !== undefined && entry.sign_as !== '') ref.sign_as = entry.sign_as;
 		if (entry.verification_method) ref.verification_method = entry.verification_method;
 		if (entry.notification_methods && entry.notification_methods.length > 0) {
 			ref.notification_methods = entry.notification_methods;

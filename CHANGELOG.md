@@ -5,6 +5,14 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-11-24
+
+- Add scheduled assignments and envelopes, with listing, cancellation and immediate sending.
+- Add document watchers, notification history, signer capacities and envelope resend-cost estimates.
+- Support signer capacities in assignment creation/estimation, JPEG signature uploads, document envelope filters and signed page/thumbnail rendering.
+- Document environment availability, complete payloads and scheduled-send lifecycles in English and Brazilian Portuguese.
+- Update compatible development tooling while preserving the supported n8n runtime.
+
 ## [1.11.0] - 2026-11-11
 
 - Add envelope creation, cost estimation, document management, reminders, activity history and ZIP downloads.
